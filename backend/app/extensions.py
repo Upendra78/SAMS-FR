@@ -1,0 +1,1 @@
+"""Flask extension used by SAMS_FR"""
