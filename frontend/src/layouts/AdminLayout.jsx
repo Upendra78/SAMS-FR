@@ -1,19 +1,29 @@
 import { NavLink } from "react-router-dom";
 
+const navigationItems = [
+  { label: "Dashboard", path: "/admin" },
+  { label: "Students", path: "/admin/students" },
+  { label: "Faculty", path: "/admin/faculty" },
+  { label: "Departments", path: "/admin/departments" },
+  { label: "Attendance Reports", path: "/admin/attendance-reports" },
+];
+
 function AdminLayout({ children }) {
   return (
     <div>
       <header>
         <h1>Admin Portal</h1>
 
-        <nav>
-          <NavLink to="/admin">Dashboard</NavLink>{" "}
-          <NavLink to="/admin/students">Students</NavLink>{" "}
-          <NavLink to="/admin/faculty">Faculty</NavLink>{" "}
-          <NavLink to="/admin/departments">Departments</NavLink>{" "}
-          <NavLink to="/admin/attendance-reports">
-            Attendance Reports
-          </NavLink>
+        <nav aria-label="Admin navigation">
+          {navigationItems.map((item) => (
+            <NavLink
+              key={item.path}
+              to={item.path}
+              end={item.path === "/admin"}
+            >
+              {item.label}
+            </NavLink>
+          ))}
         </nav>
       </header>
 

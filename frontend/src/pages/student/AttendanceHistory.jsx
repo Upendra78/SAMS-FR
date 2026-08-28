@@ -1,8 +1,18 @@
+import PageState from "../../components/PageState";
+
 function AttendanceHistory() {
   return (
     <section>
       <h1>Attendance History</h1>
-      <p>Attendance history will be connected to the backend later.</p>
+
+      <p>
+        View historical attendance records.
+      </p>
+
+      <PageState
+        title="No attendance history available"
+        message="Attendance history will appear here when historical attendance data is provided by the backend."
+      />
     </section>
   );
 }
