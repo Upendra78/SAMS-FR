@@ -141,3 +141,88 @@ class FaceService:
             "cosine_similarity": float(cosine_similarity),
             "l2_distance": float(l2_distance),
         }
+
+    def recognize_student(
+        self,
+        image,
+        registered_students,
+        similarity_threshold,
+    ):
+        """
+        Recognize a student from an image.
+        Args:
+            image: OpenCV BGR image/frame.
+            registered_students: List of registered student dictionaries containing student_id and encoding.
+            similarity_threshold: Minimum cosine similarity required for recognition.
+        Returns:
+            dict: Structured recognition result.
+        """
+        if image is None or image.size == 0:
+            raise ValueError("Invalid or empty image.")
+        if not registered_students:
+            return {
+                "student_id": None,
+                "matched": False,
+                "similarity_score": None,
+                "status": "no_registered_students",
+            }
+        height, width = image.shape[:2]
+        self.detector.setInputSize((width, height))
+
+        _, faces = self.detector.detect(image)
+
+        if faces is None or len(faces) == 0:
+            return {
+                "student_id": None,
+                "matched": False,
+                "similarity_score": None,
+                "status": "no_face",
+            }
+        if len(faces) > 1:
+            return {
+                "student_id": None,
+                "matched": False,
+                "similarity_score": None,
+                "status": "multiple_faces",
+            }
+        aligned_face = self.extract_face(image, faces[0])
+        probe_feature = self.generate_encoding(aligned_face)
+
+        best_student_id = None
+        best_similarity = -1.0
+
+        for student in registered_students:
+            student_id = student.get("student_id")
+            registered_feature = student.get("encoding")
+
+            if student_id is None or registered_feature is None:
+                continue
+            comparison = self.compare_encoding(
+                probe_feature,
+                registered_feature,
+            )
+            similarity = comparison["cosine_similarity"]
+
+            if similarity > best_similarity:
+                best_similarity = similarity
+                best_student_id = student_id
+        if best_student_id is None:
+            return {
+                "student_id": None,
+                "matched": False,
+                "similarity_score": None,
+                "status": "no_valid_registered_encoding",
+            }
+        if best_similarity >= similarity_threshold:
+            return {
+                "student_id": best_student_id,
+                "matched": True,
+                "similarity_score": best_similarity,
+                "status": "recognized",
+            }
+        return {
+            "student_id": None,
+            "matched": False,
+            "similarity_score": best_similarity,
+            "status": "not_recognized",
+        }
