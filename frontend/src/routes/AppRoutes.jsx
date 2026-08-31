@@ -29,7 +29,7 @@ import AttendanceHistory from "../pages/student/AttendanceHistory";
 function AppRoutes() {
   return (
     <Routes>
-      {/* ==================== DEFAULT ROUTE ==================== */}
+      {/* ==================== DEFAULT ==================== */}
 
       <Route path="/" element={<Navigate to="/auth" replace />} />
 
@@ -43,8 +43,13 @@ function AppRoutes() {
 
       <Route
         path="/admin"
+        element={<Navigate to="/admin/dashboard" replace />}
+      />
+
+      <Route
+        path="/admin/dashboard"
         element={
-          <ProtectedRoute allowedRole="admin">
+          <ProtectedRoute allowedRole="ADMIN">
             <AdminLayout>
               <AdminDashboard />
             </AdminLayout>
@@ -55,7 +60,7 @@ function AppRoutes() {
       <Route
         path="/admin/students"
         element={
-          <ProtectedRoute allowedRole="admin">
+          <ProtectedRoute allowedRole="ADMIN">
             <AdminLayout>
               <Students />
             </AdminLayout>
@@ -66,7 +71,7 @@ function AppRoutes() {
       <Route
         path="/admin/faculty"
         element={
-          <ProtectedRoute allowedRole="admin">
+          <ProtectedRoute allowedRole="ADMIN">
             <AdminLayout>
               <Faculty />
             </AdminLayout>
@@ -77,7 +82,7 @@ function AppRoutes() {
       <Route
         path="/admin/departments"
         element={
-          <ProtectedRoute allowedRole="admin">
+          <ProtectedRoute allowedRole="ADMIN">
             <AdminLayout>
               <Departments />
             </AdminLayout>
@@ -88,7 +93,7 @@ function AppRoutes() {
       <Route
         path="/admin/attendance-reports"
         element={
-          <ProtectedRoute allowedRole="admin">
+          <ProtectedRoute allowedRole="ADMIN">
             <AdminLayout>
               <AttendanceReports />
             </AdminLayout>
@@ -100,8 +105,13 @@ function AppRoutes() {
 
       <Route
         path="/faculty"
+        element={<Navigate to="/faculty/dashboard" replace />}
+      />
+
+      <Route
+        path="/faculty/dashboard"
         element={
-          <ProtectedRoute allowedRole="faculty">
+          <ProtectedRoute allowedRole="FACULTY">
             <FacultyLayout>
               <FacultyDashboard />
             </FacultyLayout>
@@ -112,7 +122,7 @@ function AppRoutes() {
       <Route
         path="/faculty/classes"
         element={
-          <ProtectedRoute allowedRole="faculty">
+          <ProtectedRoute allowedRole="FACULTY">
             <FacultyLayout>
               <Classes />
             </FacultyLayout>
@@ -123,7 +133,7 @@ function AppRoutes() {
       <Route
         path="/faculty/students"
         element={
-          <ProtectedRoute allowedRole="faculty">
+          <ProtectedRoute allowedRole="FACULTY">
             <FacultyLayout>
               <FacultyStudents />
             </FacultyLayout>
@@ -134,7 +144,7 @@ function AppRoutes() {
       <Route
         path="/faculty/attendance"
         element={
-          <ProtectedRoute allowedRole="faculty">
+          <ProtectedRoute allowedRole="FACULTY">
             <FacultyLayout>
               <Attendance />
             </FacultyLayout>
@@ -145,7 +155,7 @@ function AppRoutes() {
       <Route
         path="/faculty/reports"
         element={
-          <ProtectedRoute allowedRole="faculty">
+          <ProtectedRoute allowedRole="FACULTY">
             <FacultyLayout>
               <Reports />
             </FacultyLayout>
@@ -157,8 +167,13 @@ function AppRoutes() {
 
       <Route
         path="/student"
+        element={<Navigate to="/student/dashboard" replace />}
+      />
+
+      <Route
+        path="/student/dashboard"
         element={
-          <ProtectedRoute allowedRole="student">
+          <ProtectedRoute allowedRole="STUDENT">
             <StudentLayout>
               <StudentDashboard />
             </StudentLayout>
@@ -169,7 +184,7 @@ function AppRoutes() {
       <Route
         path="/student/profile"
         element={
-          <ProtectedRoute allowedRole="student">
+          <ProtectedRoute allowedRole="STUDENT">
             <StudentLayout>
               <Profile />
             </StudentLayout>
@@ -180,7 +195,7 @@ function AppRoutes() {
       <Route
         path="/student/attendance"
         element={
-          <ProtectedRoute allowedRole="student">
+          <ProtectedRoute allowedRole="STUDENT">
             <StudentLayout>
               <StudentAttendance />
             </StudentLayout>
@@ -191,13 +206,17 @@ function AppRoutes() {
       <Route
         path="/student/attendance-history"
         element={
-          <ProtectedRoute allowedRole="student">
+          <ProtectedRoute allowedRole="STUDENT">
             <StudentLayout>
               <AttendanceHistory />
             </StudentLayout>
           </ProtectedRoute>
         }
       />
+
+      {/* ==================== UNKNOWN ROUTES ==================== */}
+
+      <Route path="*" element={<Navigate to="/auth" replace />} />
     </Routes>
   );
 }
