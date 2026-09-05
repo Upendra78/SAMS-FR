@@ -9,3 +9,9 @@ backend/.venv/
 .env
 .env.*
 !.env.example
+
+# Computer Vision models
+.cv-models/
+
+# VS Code workspace settings
+.vscode/
