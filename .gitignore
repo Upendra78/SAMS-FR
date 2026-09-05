@@ -1,25 +1,11 @@
-# Python virtual environments
-.venv/
-.venv-*/
-venv/
-
-# Python cache
+# Python
 __pycache__/
 *.py[cod]
+
+# Virtual environment
+backend/.venv/
 
 # Environment variables
 .env
 .env.*
 !.env.example
-
-# CV model files
-*.onnx
-.cv-models/
-
-# IDE / editor files
-.vscode/
-.idea/
-
-# OS generated files
-.DS_Store
-Thumbs.db
