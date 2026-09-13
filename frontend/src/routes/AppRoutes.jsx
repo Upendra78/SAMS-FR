@@ -13,6 +13,7 @@ import AdminDashboard from "../pages/admin/AdminDashboard";
 import Students from "../pages/admin/Students";
 import Faculty from "../pages/admin/Faculty";
 import Departments from "../pages/admin/Departments";
+import AcademicManagement from "../pages/admin/AcademicManagement";
 import AttendanceReports from "../pages/admin/AttendanceReports";
 
 import FacultyDashboard from "../pages/faculty/FacultyDashboard";
@@ -43,69 +44,55 @@ function AppRoutes() {
 
       <Route
         path="/admin"
-        element={<Navigate to="/admin/dashboard" replace />}
-      />
-
-      <Route
-        path="/admin/dashboard"
         element={
           <ProtectedRoute allowedRole="ADMIN">
-            <AdminLayout>
-              <AdminDashboard />
-            </AdminLayout>
+            <AdminLayout />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route
+          index
+          element={<Navigate to="/admin/dashboard" replace />}
+        />
 
-      <Route
-        path="/admin/students"
-        element={
-          <ProtectedRoute allowedRole="ADMIN">
-            <AdminLayout>
-              <Students />
-            </AdminLayout>
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="dashboard"
+          element={<AdminDashboard />}
+        />
 
-      <Route
-        path="/admin/faculty"
-        element={
-          <ProtectedRoute allowedRole="ADMIN">
-            <AdminLayout>
-              <Faculty />
-            </AdminLayout>
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="students"
+          element={<Students />}
+        />
 
-      <Route
-        path="/admin/departments"
-        element={
-          <ProtectedRoute allowedRole="ADMIN">
-            <AdminLayout>
-              <Departments />
-            </AdminLayout>
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="faculty"
+          element={<Faculty />}
+        />
 
-      <Route
-        path="/admin/attendance-reports"
-        element={
-          <ProtectedRoute allowedRole="ADMIN">
-            <AdminLayout>
-              <AttendanceReports />
-            </AdminLayout>
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="departments"
+          element={<Departments />}
+        />
+
+        <Route
+          path="academic-management"
+          element={<AcademicManagement />}
+        />
+
+        <Route
+          path="attendance-reports"
+          element={<AttendanceReports />}
+        />
+      </Route>
 
       {/* ==================== FACULTY PORTAL ==================== */}
 
       <Route
         path="/faculty"
-        element={<Navigate to="/faculty/dashboard" replace />}
+        element={
+          <Navigate to="/faculty/dashboard" replace />
+        }
       />
 
       <Route
@@ -167,7 +154,9 @@ function AppRoutes() {
 
       <Route
         path="/student"
-        element={<Navigate to="/student/dashboard" replace />}
+        element={
+          <Navigate to="/student/dashboard" replace />
+        }
       />
 
       <Route
@@ -216,7 +205,10 @@ function AppRoutes() {
 
       {/* ==================== UNKNOWN ROUTES ==================== */}
 
-      <Route path="*" element={<Navigate to="/auth" replace />} />
+      <Route
+        path="*"
+        element={<Navigate to="/auth" replace />}
+      />
     </Routes>
   );
 }

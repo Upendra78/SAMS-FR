@@ -1,11 +1,11 @@
 import { Navigate } from "react-router-dom";
-import useAuth from "../context/useAuth";
+import useAuth from "../hooks/useAuth";
 
 function ProtectedRoute({ allowedRole, children }) {
   const { user, loading } = useAuth();
 
   if (loading) {
-    return <main>Checking authentication...</main>;
+    return <main>Loading...</main>;
   }
 
   if (!user) {

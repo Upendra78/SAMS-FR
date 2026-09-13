@@ -1,30 +1,49 @@
-function DataTable({ columns, data, emptyMessage = "No data available." }) {
+import "./DataTable.css";
+function DataTable({
+  columns,
+  data,
+  emptyMessage = "No data available.",
+}) {
   if (!data || data.length === 0) {
-    return <p>{emptyMessage}</p>;
+    return (
+      <div className="data-table-empty">
+        <div className="data-table-empty-icon">--</div>
+
+        <strong>No records available</strong>
+
+        <span>{emptyMessage}</span>
+      </div>
+    );
   }
 
   return (
-    <table>
-      <thead>
-        <tr>
-          {columns.map((column) => (
-            <th key={column.key} scope="col">
-              {column.label}
-            </th>
-          ))}
-        </tr>
-      </thead>
+    <div className="data-table-wrapper">
+      <div className="data-table-scroll">
+        <table className="data-table">
+          <thead>
+            <tr>
+              {columns.map((column) => (
+                <th key={column.key} scope="col">
+                  {column.label}
+                </th>
+              ))}
+            </tr>
+          </thead>
 
-      <tbody>
-        {data.map((row, index) => (
-          <tr key={row.id ?? index}>
-            {columns.map((column) => (
-              <td key={column.key}>{row[column.key]}</td>
+          <tbody>
+            {data.map((row, index) => (
+              <tr key={row.id ?? index}>
+                {columns.map((column) => (
+                  <td key={column.key}>
+                    {row[column.key] ?? "--"}
+                  </td>
+                ))}
+              </tr>
             ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+          </tbody>
+        </table>
+      </div>
+    </div>
   );
 }
 

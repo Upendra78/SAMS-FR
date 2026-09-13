@@ -1,6 +1,8 @@
+import DevPortalTester from "../../components/DevPortalTester";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import useAuth from "../../hooks/useAuth";
+import "./Login.css";
 
 function Login() {
   const navigate = useNavigate();
@@ -23,15 +25,19 @@ function Login() {
       ...current,
       [name]: value,
     }));
+
+    if (message) {
+      setMessage("");
+    }
   }
 
   function validateForm() {
     if (!credentials.role) {
-      return "Please select a role.";
+      return "Please select your role.";
     }
 
     if (!credentials.email.trim()) {
-      return "Email is required.";
+      return "Email address is required.";
     }
 
     const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -95,7 +101,9 @@ function Login() {
       const authenticatedRole = result?.user?.role;
 
       if (!authenticatedRole) {
-        setMessage("Login succeeded, but the user role was not provided.");
+        setMessage(
+          "Login succeeded, but the authenticated role was not provided.",
+        );
         return;
       }
 
@@ -112,73 +120,193 @@ function Login() {
   }
 
   return (
-    <main>
-      <section>
-        <h1>SAMS-FR Login</h1>
+    <main className="login-page">
+      <div className="login-background-shape login-background-shape-one" />
+      <div className="login-background-shape login-background-shape-two" />
 
-        <form onSubmit={handleSubmit}>
-          <div>
-            <label htmlFor="role">Role</label>
+      <section className="login-card">
+        {/* =====================================================
+            BRANDING PANEL
+           ===================================================== */}
 
-            <select
-              id="role"
-              name="role"
-              value={credentials.role}
-              onChange={handleChange}
-              disabled={loading}
-              required
-            >
-              <option value="ADMIN">Administrator</option>
-              <option value="FACULTY">Faculty</option>
-              <option value="STUDENT">Student</option>
-            </select>
+        <aside className="login-brand">
+          <div className="brand-glow brand-glow-one" />
+          <div className="brand-glow brand-glow-two" />
+
+          <div className="brand-content">
+            <div className="brand-mark">
+              <span>SF</span>
+            </div>
+
+            <div className="brand-title">
+              <span>SAMS</span>
+              <strong>-FR</strong>
+            </div>
+
+            <p className="brand-subtitle">
+              Smart Attendance
+              <br />
+              Management System
+            </p>
+
+            <div className="brand-divider" />
+
+            <div className="brand-features">
+              <div className="brand-feature">
+                <span className="feature-icon">✓</span>
+                <span>Secure portal access</span>
+              </div>
+
+              <div className="brand-feature">
+                <span className="feature-icon">✓</span>
+                <span>Real-time attendance</span>
+              </div>
+
+              <div className="brand-feature">
+                <span className="feature-icon">✓</span>
+                <span>Face recognition technology</span>
+              </div>
+            </div>
           </div>
 
-          <div>
-            <label htmlFor="email">Email</label>
+          <div className="brand-footer">
+            Smart • Secure • Automated
+          </div>
+        </aside>
 
-            <input
-              id="email"
-              name="email"
-              type="email"
-              value={credentials.email}
-              onChange={handleChange}
-              placeholder="student@example.com"
-              autoComplete="email"
-              disabled={loading}
-              required
-            />
+        {/* =====================================================
+            LOGIN PANEL
+           ===================================================== */}
+
+        <div className="login-panel">
+          <div className="login-header">
+            <span className="welcome-label">WELCOME BACK</span>
+
+            <h1>Sign in to SAMS-FR</h1>
+
+            <p>
+              Access your attendance management portal securely.
+            </p>
           </div>
 
-          <div>
-            <label htmlFor="password">Password</label>
+          <form className="login-form" onSubmit={handleSubmit}>
+            {/* Role */}
 
-            <input
-              id="password"
-              name="password"
-              type={showPassword ? "text" : "password"}
-              value={credentials.password}
-              onChange={handleChange}
-              autoComplete="current-password"
-              disabled={loading}
-              required
-            />
+            <div className="form-group">
+              <label htmlFor="role">Login as</label>
+
+              <div className="input-wrapper">
+                <span className="input-icon">◉</span>
+
+                <select
+                  id="role"
+                  name="role"
+                  value={credentials.role}
+                  onChange={handleChange}
+                  disabled={loading}
+                  required
+                >
+                  <option value="ADMIN">Administrator</option>
+                  <option value="FACULTY">Faculty</option>
+                  <option value="STUDENT">Student</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Email */}
+
+            <div className="form-group">
+              <label htmlFor="email">Email address</label>
+
+              <div className="input-wrapper">
+                <span className="input-icon">@</span>
+
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  value={credentials.email}
+                  onChange={handleChange}
+                  placeholder="Enter your email"
+                  autoComplete="email"
+                  disabled={loading}
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+
+            <div className="form-group">
+              <label htmlFor="password">Password</label>
+
+              <div className="input-wrapper password-wrapper">
+                <span className="input-icon">●</span>
+
+                <input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  value={credentials.password}
+                  onChange={handleChange}
+                  placeholder="Enter your password"
+                  autoComplete="current-password"
+                  disabled={loading}
+                  required
+                />
+
+                <button
+                  className="password-toggle"
+                  type="button"
+                  onClick={() => setShowPassword((current) => !current)}
+                  disabled={loading}
+                >
+                  {showPassword ? "Hide" : "Show"}
+                </button>
+              </div>
+            </div>
+
+            {/* Error / Status */}
+
+            {message && (
+              <div className="login-message" role="alert">
+                <span>!</span>
+                <p>{message}</p>
+              </div>
+            )}
+
+            {/* Submit */}
 
             <button
-              type="button"
-              onClick={() => setShowPassword((current) => !current)}
+              className="login-submit"
+              type="submit"
               disabled={loading}
             >
-              {showPassword ? "Hide" : "Show"}
+              <span>{loading ? "Signing in..." : "Sign In"}</span>
+
+              {!loading && <span className="submit-arrow">→</span>}
             </button>
+          </form>
+
+          <div className="security-note">
+            <span className="security-icon">✓</span>
+
+            <div>
+              <strong>Secure authentication</strong>
+              <p>Your account and attendance data are protected.</p>
+            </div>
           </div>
 
-          <button type="submit" disabled={loading}>
-            {loading ? "Logging in..." : "Login"}
-          </button>
-        </form>
+          {/* =====================================================
+              DEVELOPMENT-ONLY PORTAL TESTER
+             ===================================================== */}
 
-        {message && <p>{message}</p>}
+          <DevPortalTester />
+
+          <div className="login-footer">
+            © 2026 SAMS-FR · Smart Attendance Management System
+          </div>
+        </div>
       </section>
     </main>
   );
