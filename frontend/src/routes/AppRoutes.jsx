@@ -1,13 +1,19 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import ProtectedRoute from "./ProtectedRoute";
+import Unauthorized from "../pages/Unauthorized";
+
 import AdminLayout from "../layouts/AdminLayout";
 import FacultyLayout from "../layouts/FacultyLayout";
+import StudentLayout from "../layouts/StudentLayout";
+
 import Login from "../pages/auth/Login";
 
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import Students from "../pages/admin/Students";
 import Faculty from "../pages/admin/Faculty";
 import Departments from "../pages/admin/Departments";
+import AcademicManagement from "../pages/admin/AcademicManagement";
 import AttendanceReports from "../pages/admin/AttendanceReports";
 
 import FacultyDashboard from "../pages/faculty/FacultyDashboard";
@@ -16,7 +22,6 @@ import FacultyStudents from "../pages/faculty/Students";
 import Attendance from "../pages/faculty/Attendance";
 import Reports from "../pages/faculty/Reports";
 
-import StudentLayout from "../layouts/StudentLayout";
 import StudentDashboard from "../pages/student/StudentDashboard";
 import Profile from "../pages/student/Profile";
 import StudentAttendance from "../pages/student/Attendance";
@@ -25,103 +30,123 @@ import AttendanceHistory from "../pages/student/AttendanceHistory";
 function AppRoutes() {
   return (
     <Routes>
-      {/* Default route */}
+      {/* ==================== DEFAULT ==================== */}
+
       <Route path="/" element={<Navigate to="/auth" replace />} />
 
-      {/* Authentication */}
+      {/* ==================== AUTHENTICATION ==================== */}
+
       <Route path="/auth" element={<Login />} />
+
+      <Route path="/unauthorized" element={<Unauthorized />} />
 
       {/* ==================== ADMIN PORTAL ==================== */}
 
       <Route
         path="/admin"
         element={
-          <AdminLayout>
-            <AdminDashboard />
-          </AdminLayout>
+          <ProtectedRoute allowedRole="ADMIN">
+            <AdminLayout />
+          </ProtectedRoute>
         }
-      />
+      >
+        <Route
+          index
+          element={<Navigate to="/admin/dashboard" replace />}
+        />
 
-      <Route
-        path="/admin/students"
-        element={
-          <AdminLayout>
-            <Students />
-          </AdminLayout>
-        }
-      />
+        <Route
+          path="dashboard"
+          element={<AdminDashboard />}
+        />
 
-      <Route
-        path="/admin/faculty"
-        element={
-          <AdminLayout>
-            <Faculty />
-          </AdminLayout>
-        }
-      />
+        <Route
+          path="students"
+          element={<Students />}
+        />
 
-      <Route
-        path="/admin/departments"
-        element={
-          <AdminLayout>
-            <Departments />
-          </AdminLayout>
-        }
-      />
+        <Route
+          path="faculty"
+          element={<Faculty />}
+        />
 
-      <Route
-        path="/admin/attendance-reports"
-        element={
-          <AdminLayout>
-            <AttendanceReports />
-          </AdminLayout>
-        }
-      />
+        <Route
+          path="departments"
+          element={<Departments />}
+        />
+
+        <Route
+          path="academic-management"
+          element={<AcademicManagement />}
+        />
+
+        <Route
+          path="attendance-reports"
+          element={<AttendanceReports />}
+        />
+      </Route>
 
       {/* ==================== FACULTY PORTAL ==================== */}
 
       <Route
         path="/faculty"
         element={
-          <FacultyLayout>
-            <FacultyDashboard />
-          </FacultyLayout>
+          <Navigate to="/faculty/dashboard" replace />
+        }
+      />
+
+      <Route
+        path="/faculty/dashboard"
+        element={
+          <ProtectedRoute allowedRole="FACULTY">
+            <FacultyLayout>
+              <FacultyDashboard />
+            </FacultyLayout>
+          </ProtectedRoute>
         }
       />
 
       <Route
         path="/faculty/classes"
         element={
-          <FacultyLayout>
-            <Classes />
-          </FacultyLayout>
+          <ProtectedRoute allowedRole="FACULTY">
+            <FacultyLayout>
+              <Classes />
+            </FacultyLayout>
+          </ProtectedRoute>
         }
       />
 
       <Route
         path="/faculty/students"
         element={
-          <FacultyLayout>
-            <FacultyStudents />
-          </FacultyLayout>
+          <ProtectedRoute allowedRole="FACULTY">
+            <FacultyLayout>
+              <FacultyStudents />
+            </FacultyLayout>
+          </ProtectedRoute>
         }
       />
 
       <Route
         path="/faculty/attendance"
         element={
-          <FacultyLayout>
-            <Attendance />
-          </FacultyLayout>
+          <ProtectedRoute allowedRole="FACULTY">
+            <FacultyLayout>
+              <Attendance />
+            </FacultyLayout>
+          </ProtectedRoute>
         }
       />
 
       <Route
         path="/faculty/reports"
         element={
-          <FacultyLayout>
-            <Reports />
-          </FacultyLayout>
+          <ProtectedRoute allowedRole="FACULTY">
+            <FacultyLayout>
+              <Reports />
+            </FacultyLayout>
+          </ProtectedRoute>
         }
       />
 
@@ -130,39 +155,60 @@ function AppRoutes() {
       <Route
         path="/student"
         element={
-          <StudentLayout>
-            <StudentDashboard />
-          </StudentLayout>
+          <Navigate to="/student/dashboard" replace />
+        }
+      />
+
+      <Route
+        path="/student/dashboard"
+        element={
+          <ProtectedRoute allowedRole="STUDENT">
+            <StudentLayout>
+              <StudentDashboard />
+            </StudentLayout>
+          </ProtectedRoute>
         }
       />
 
       <Route
         path="/student/profile"
         element={
-          <StudentLayout>
-            <Profile />
-          </StudentLayout>
+          <ProtectedRoute allowedRole="STUDENT">
+            <StudentLayout>
+              <Profile />
+            </StudentLayout>
+          </ProtectedRoute>
         }
       />
 
       <Route
         path="/student/attendance"
         element={
-          <StudentLayout>
-            <StudentAttendance />
-          </StudentLayout>
+          <ProtectedRoute allowedRole="STUDENT">
+            <StudentLayout>
+              <StudentAttendance />
+            </StudentLayout>
+          </ProtectedRoute>
         }
       />
 
       <Route
         path="/student/attendance-history"
         element={
-          <StudentLayout>
-            <AttendanceHistory />
-          </StudentLayout>
+          <ProtectedRoute allowedRole="STUDENT">
+            <StudentLayout>
+              <AttendanceHistory />
+            </StudentLayout>
+          </ProtectedRoute>
         }
       />
 
+      {/* ==================== UNKNOWN ROUTES ==================== */}
+
+      <Route
+        path="*"
+        element={<Navigate to="/auth" replace />}
+      />
     </Routes>
   );
 }
