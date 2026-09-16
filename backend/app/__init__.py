@@ -1,9 +1,27 @@
 from flask import Flask
 from flask_cors import CORS
 
+from app.models import (
+    User,
+    Department,
+    Student,
+    Faculty,
+    Course,
+    CourseOffering,
+    Enrollment,
+    FaceProfile,
+    AttendanceSession,
+    AttendanceRecord,
+)
 from app.config import Config
 from app.extensions import bcrypt, db, jwt, migrate
 from app.routes import health_bp
+from app.routes import health_bp
+from app.routes.auth import auth_bp
+from app.routes.admin import admin_bp
+from app.routes.faculty import faculty_bp
+from app.routes.student import student_bp
+
 
 
 def create_app():
@@ -25,4 +43,8 @@ def create_app():
     )
     # Register routes 
     app.register_blueprint(health_bp)
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(admin_bp)
+    app.register_blueprint(faculty_bp)
+    app.register_blueprint(student_bp)
     return app
