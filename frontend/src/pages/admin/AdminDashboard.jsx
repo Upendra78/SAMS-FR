@@ -3,8 +3,12 @@ import { Link } from "react-router-dom";
 import "./AdminDashboard.css";
 
 function AdminDashboard() {
-  // Backend data will be connected here later.
-  // Keep the dashboard empty until real API data is available.
+  /*
+   * Backend integration point.
+   *
+   * Do not add mock business data here.
+   * These values will be populated from approved backend APIs.
+   */
   const dashboardData = {
     students: null,
     faculty: null,
@@ -20,63 +24,91 @@ function AdminDashboard() {
   const hasTrendData = false;
   const hasRecentActivity = false;
 
+  const formatMetric = (value) => {
+    return value === null || value === undefined ? "N/A" : value;
+  };
+
   return (
     <section className="admin-dashboard">
-      {/* Dashboard Header */}
+      {/* =========================
+          HEADER
+      ========================== */}
+
       <header className="admin-dashboard-header">
-        <div>
-          <span className="admin-dashboard-eyebrow">Administration</span>
+        <div className="admin-dashboard-heading">
+          <div className="admin-dashboard-heading-top">
+            <span className="admin-dashboard-eyebrow">
+              Administration
+            </span>
+
+          </div>
 
           <h1>Welcome back, Admin!</h1>
 
           <p>
-            Here&apos;s an overview of what&apos;s happening across the
-            SAMS-FR system.
+            Monitor students, faculty, departments, and attendance from one
+            centralized dashboard.
           </p>
-        </div>
-
-        <div className="admin-dashboard-header-status">
-          <span className="admin-dashboard-status-dot" />
-          <span>System overview</span>
         </div>
       </header>
 
-      {/* Main Statistics */}
+      {/* =========================
+          PRIMARY STATISTICS
+      ========================== */}
+
       <div className="admin-stat-grid">
-        <Link to="/admin/students" className="admin-stat-card admin-stat-blue">
+        <Link
+          to="/admin/students"
+          className="admin-stat-card admin-stat-blue"
+        >
           <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">ST</div>
+            <div className="admin-stat-icon">
+              <i className="fa-solid fa-user-graduate" />
+            </div>
 
-            <span className="admin-stat-arrow">›</span>
+            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
           </div>
 
-          <div className="admin-stat-label">Total Students</div>
+          <span className="admin-stat-label">Total Students</span>
 
-          <div className="admin-stat-value">
-            {dashboardData.students ?? "N/A"}
-          </div>
+          <strong
+            className={`admin-stat-value ${
+              dashboardData.students === null ? "is-empty" : ""
+            }`}
+          >
+            {formatMetric(dashboardData.students)}
+          </strong>
 
-          <div className="admin-stat-description">
+          <span className="admin-stat-description">
             Registered students
-          </div>
+          </span>
         </Link>
 
-        <Link to="/admin/faculty" className="admin-stat-card admin-stat-purple">
+        <Link
+          to="/admin/faculty"
+          className="admin-stat-card admin-stat-purple"
+        >
           <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">FC</div>
+            <div className="admin-stat-icon">
+              <i className="fa-solid fa-chalkboard-user" />
+            </div>
 
-            <span className="admin-stat-arrow">›</span>
+            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
           </div>
 
-          <div className="admin-stat-label">Total Faculty</div>
+          <span className="admin-stat-label">Total Faculty</span>
 
-          <div className="admin-stat-value">
-            {dashboardData.faculty ?? "N/A"}
-          </div>
+          <strong
+            className={`admin-stat-value ${
+              dashboardData.faculty === null ? "is-empty" : ""
+            }`}
+          >
+            {formatMetric(dashboardData.faculty)}
+          </strong>
 
-          <div className="admin-stat-description">
+          <span className="admin-stat-description">
             Registered faculty members
-          </div>
+          </span>
         </Link>
 
         <Link
@@ -84,20 +116,26 @@ function AdminDashboard() {
           className="admin-stat-card admin-stat-green"
         >
           <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">DP</div>
+            <div className="admin-stat-icon">
+              <i className="fa-solid fa-building-columns" />
+            </div>
 
-            <span className="admin-stat-arrow">›</span>
+            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
           </div>
 
-          <div className="admin-stat-label">Total Departments</div>
+          <span className="admin-stat-label">Total Departments</span>
 
-          <div className="admin-stat-value">
-            {dashboardData.departments ?? "N/A"}
-          </div>
+          <strong
+            className={`admin-stat-value ${
+              dashboardData.departments === null ? "is-empty" : ""
+            }`}
+          >
+            {formatMetric(dashboardData.departments)}
+          </strong>
 
-          <div className="admin-stat-description">
-            Active departments
-          </div>
+          <span className="admin-stat-description">
+            Active academic departments
+          </span>
         </Link>
 
         <Link
@@ -105,32 +143,41 @@ function AdminDashboard() {
           className="admin-stat-card admin-stat-orange"
         >
           <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">AT</div>
+            <div className="admin-stat-icon">
+              <i className="fa-solid fa-chart-line" />
+            </div>
 
-            <span className="admin-stat-arrow">›</span>
+            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
           </div>
 
-          <div className="admin-stat-label">Overall Attendance</div>
+          <span className="admin-stat-label">Overall Attendance</span>
 
-          <div className="admin-stat-value">
-            {dashboardData.attendance !== null
+          <strong
+            className={`admin-stat-value ${
+              dashboardData.attendance === null ? "is-empty" : ""
+            }`}
+          >
+            {hasAttendanceData
               ? `${dashboardData.attendance}%`
               : "N/A"}
-          </div>
+          </strong>
 
-          <div className="admin-stat-description">
+          <span className="admin-stat-description">
             Current attendance rate
-          </div>
+          </span>
         </Link>
       </div>
 
-      {/* Attendance + Quick Actions */}
+      {/* =========================
+          ATTENDANCE OVERVIEW
+      ========================== */}
+
       <div className="admin-dashboard-main-grid">
         <section className="admin-dashboard-panel admin-attendance-panel">
           <div className="admin-panel-header">
             <div className="admin-panel-title-group">
               <div className="admin-panel-icon admin-panel-icon-blue">
-                ↗
+                <i className="fa-solid fa-chart-area" />
               </div>
 
               <div>
@@ -141,7 +188,7 @@ function AdminDashboard() {
                 <h2>Attendance Trend</h2>
 
                 <p>
-                  Overall attendance information provided by the backend
+                  Attendance analytics from verified system records
                 </p>
               </div>
             </div>
@@ -151,58 +198,83 @@ function AdminDashboard() {
               className="admin-panel-link"
             >
               View Reports
+              <i className="fa-solid fa-arrow-right" />
             </Link>
           </div>
 
           <div className="admin-attendance-body">
             {!hasTrendData ? (
               <div className="admin-empty-state admin-trend-empty">
-                <div className="admin-empty-icon">↗</div>
+                <div className="admin-empty-icon">
+                  <i className="fa-solid fa-chart-line" />
+                </div>
 
                 <h3>No attendance trend data</h3>
 
                 <p>
-                  Attendance analytics will appear here when attendance
-                  records are available from the backend.
+                  Attendance analytics will appear here when verified
+                  attendance records are available from the backend.
                 </p>
 
                 <Link
                   to="/admin/attendance-reports"
                   className="admin-empty-link"
                 >
-                  Open attendance reports →
+                  Open attendance reports
+                  <i className="fa-solid fa-arrow-right" />
                 </Link>
               </div>
             ) : (
-              <div>{/* Backend attendance trend chart will render here. */}</div>
+              <div>
+                {/* Backend attendance trend chart */}
+              </div>
             )}
           </div>
         </section>
+
+        {/* =========================
+            CURRENT ATTENDANCE
+        ========================== */}
 
         <section className="admin-dashboard-panel admin-attendance-status-panel">
           <div className="admin-panel-header">
             <div className="admin-panel-title-group">
               <div className="admin-panel-icon admin-panel-icon-orange">
-                AT
+                <i className="fa-solid fa-calendar-check" />
               </div>
 
               <div>
-                <span className="admin-panel-eyebrow">Current Status</span>
+                <span className="admin-panel-eyebrow">
+                  Current Status
+                </span>
 
                 <h2>Attendance</h2>
               </div>
             </div>
 
-            <span className="admin-data-badge">Backend data</span>
+            <span className="admin-data-badge">
+              <i className="fa-solid fa-database" />
+              Backend
+            </span>
           </div>
 
           <div className="admin-attendance-status-content">
-            <div className="admin-attendance-ring">
-              <span>
-                {hasAttendanceData
-                  ? `${dashboardData.attendance}%`
-                  : "N/A"}
-              </span>
+            <div
+              className={`admin-attendance-ring ${
+                !hasAttendanceData ? "is-empty" : ""
+              }`}
+            >
+              <div className="admin-attendance-ring-inner">
+                <strong>
+                  {hasAttendanceData
+                    ? `${dashboardData.attendance}%`
+                    : "N/A"}
+                </strong>
+
+                {!hasAttendanceData && (
+                  <span>No data</span>
+                )}
+              </div>
             </div>
 
             <h3>
@@ -213,7 +285,7 @@ function AdminDashboard() {
 
             <p>
               Attendance statistics will be displayed when the backend
-              provides the required records.
+              provides verified attendance records.
             </p>
           </div>
 
@@ -221,18 +293,21 @@ function AdminDashboard() {
             to="/admin/attendance-reports"
             className="admin-status-footer-link"
           >
-            View attendance reports
-            <span>→</span>
+            <span>View attendance reports</span>
+            <i className="fa-solid fa-arrow-right" />
           </Link>
         </section>
       </div>
 
-      {/* Quick Actions */}
+      {/* =========================
+          QUICK ACTIONS
+      ========================== */}
+
       <section className="admin-dashboard-panel admin-quick-actions-panel">
         <div className="admin-panel-header">
           <div className="admin-panel-title-group">
             <div className="admin-panel-icon admin-panel-icon-blue">
-              ✦
+              <i className="fa-solid fa-bolt" />
             </div>
 
             <div>
@@ -240,28 +315,30 @@ function AdminDashboard() {
 
               <h2>Quick Actions</h2>
 
-              <p>Navigate to common administration sections</p>
+              <p>
+                Quickly access common administration sections
+              </p>
             </div>
           </div>
-
-          <span className="admin-panel-link">View All</span>
         </div>
 
         <div className="admin-quick-actions-grid">
           <Link to="/admin/students" className="admin-quick-action">
-            <div className="admin-quick-action-icon admin-icon-blue">ST</div>
+            <div className="admin-quick-action-icon admin-icon-blue">
+              <i className="fa-solid fa-user-graduate" />
+            </div>
 
             <div>
               <strong>Students</strong>
               <span>View and manage registered students</span>
             </div>
 
-            <b>›</b>
+            <i className="fa-solid fa-chevron-right" />
           </Link>
 
           <Link to="/admin/faculty" className="admin-quick-action">
             <div className="admin-quick-action-icon admin-icon-purple">
-              FC
+              <i className="fa-solid fa-chalkboard-user" />
             </div>
 
             <div>
@@ -269,12 +346,12 @@ function AdminDashboard() {
               <span>View registered faculty members</span>
             </div>
 
-            <b>›</b>
+            <i className="fa-solid fa-chevron-right" />
           </Link>
 
           <Link to="/admin/departments" className="admin-quick-action">
             <div className="admin-quick-action-icon admin-icon-green">
-              DP
+              <i className="fa-solid fa-building-columns" />
             </div>
 
             <div>
@@ -282,7 +359,7 @@ function AdminDashboard() {
               <span>View academic departments</span>
             </div>
 
-            <b>›</b>
+            <i className="fa-solid fa-chevron-right" />
           </Link>
 
           <Link
@@ -290,7 +367,7 @@ function AdminDashboard() {
             className="admin-quick-action"
           >
             <div className="admin-quick-action-icon admin-icon-orange">
-              AT
+              <i className="fa-solid fa-chart-column" />
             </div>
 
             <div>
@@ -298,7 +375,7 @@ function AdminDashboard() {
               <span>Review attendance records</span>
             </div>
 
-            <b>›</b>
+            <i className="fa-solid fa-chevron-right" />
           </Link>
 
           <Link
@@ -306,7 +383,7 @@ function AdminDashboard() {
             className="admin-quick-action"
           >
             <div className="admin-quick-action-icon admin-icon-cyan">
-              AC
+              <i className="fa-solid fa-book-open" />
             </div>
 
             <div>
@@ -314,18 +391,21 @@ function AdminDashboard() {
               <span>View courses and academic structure</span>
             </div>
 
-            <b>›</b>
+            <i className="fa-solid fa-chevron-right" />
           </Link>
         </div>
       </section>
 
-      {/* Recent Activity + Quick Stats */}
+      {/* =========================
+          ACTIVITY + QUICK STATS
+      ========================== */}
+
       <div className="admin-dashboard-bottom-grid">
         <section className="admin-dashboard-panel admin-recent-panel">
           <div className="admin-panel-header">
             <div className="admin-panel-title-group">
               <div className="admin-panel-icon admin-panel-icon-blue">
-                ◷
+                <i className="fa-solid fa-clock-rotate-left" />
               </div>
 
               <div>
@@ -340,24 +420,24 @@ function AdminDashboard() {
                 </p>
               </div>
             </div>
-
-            <span className="admin-panel-link">View All</span>
           </div>
 
           <div className="admin-recent-content">
             {hasRecentActivity ? (
               <div>
-                {/* Recent activity records will be rendered here. */}
+                {/* Backend activity records */}
               </div>
             ) : (
               <div className="admin-empty-state">
-                <div className="admin-empty-icon">◷</div>
+                <div className="admin-empty-icon">
+                  <i className="fa-solid fa-clock" />
+                </div>
 
                 <h3>No recent activity</h3>
 
                 <p>
                   Recent system activities will appear here when activity
-                  data is available from the backend.
+                  data becomes available from the backend.
                 </p>
               </div>
             )}
@@ -368,11 +448,13 @@ function AdminDashboard() {
           <div className="admin-panel-header">
             <div className="admin-panel-title-group">
               <div className="admin-panel-icon admin-panel-icon-blue">
-                ▥
+                <i className="fa-solid fa-chart-simple" />
               </div>
 
               <div>
-                <span className="admin-panel-eyebrow">Key Metrics</span>
+                <span className="admin-panel-eyebrow">
+                  Key Metrics
+                </span>
 
                 <h2>Quick Stats</h2>
 
@@ -384,46 +466,72 @@ function AdminDashboard() {
           <div className="admin-quick-stats-grid">
             <div className="admin-quick-stat admin-quick-stat-blue">
               <span>Active Courses</span>
-              <strong>{dashboardData.activeCourses ?? "N/A"}</strong>
+
+              <strong
+                className={
+                  dashboardData.activeCourses === null
+                    ? "is-empty"
+                    : ""
+                }
+              >
+                {formatMetric(dashboardData.activeCourses)}
+              </strong>
+
               <small>Academic data</small>
             </div>
 
             <div className="admin-quick-stat admin-quick-stat-purple">
               <span>Course Offerings</span>
-              <strong>{dashboardData.courseOfferings ?? "N/A"}</strong>
+
+              <strong
+                className={
+                  dashboardData.courseOfferings === null
+                    ? "is-empty"
+                    : ""
+                }
+              >
+                {formatMetric(dashboardData.courseOfferings)}
+              </strong>
+
               <small>Academic data</small>
             </div>
 
             <div className="admin-quick-stat admin-quick-stat-green">
               <span>Attendance Records</span>
-              <strong>{dashboardData.attendanceRecords ?? "N/A"}</strong>
+
+              <strong
+                className={
+                  dashboardData.attendanceRecords === null
+                    ? "is-empty"
+                    : ""
+                }
+              >
+                {formatMetric(dashboardData.attendanceRecords)}
+              </strong>
+
               <small>Attendance data</small>
             </div>
 
             <div className="admin-quick-stat admin-quick-stat-neutral">
               <span>Pending Approvals</span>
-              <strong>{dashboardData.pendingApprovals ?? "N/A"}</strong>
+
+              <strong
+                className={
+                  dashboardData.pendingApprovals === null
+                    ? "is-empty"
+                    : ""
+                }
+              >
+                {formatMetric(dashboardData.pendingApprovals)}
+              </strong>
+
               <small>Backend information</small>
             </div>
           </div>
         </section>
       </div>
 
-      {/* Backend Integration Note */}
-      <div className="admin-dashboard-integration-note">
-        <div>
-          <strong>Backend integration</strong>
-
-          <span>
-            Dashboard values, attendance analytics, recent activity, and
-            academic metrics will be populated from approved backend APIs.
-          </span>
-        </div>
-
-        <span className="admin-integration-status">
-          Frontend ready
-        </span>
-      </div>
+    
     </section>
   );
 }

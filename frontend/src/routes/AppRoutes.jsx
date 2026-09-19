@@ -21,11 +21,19 @@ import Classes from "../pages/faculty/Classes";
 import FacultyStudents from "../pages/faculty/Students";
 import Attendance from "../pages/faculty/Attendance";
 import Reports from "../pages/faculty/Reports";
+import FacultyProfile from "../pages/faculty/Profile";
+import FacultySettings from "../pages/faculty/Settings";
 
 import StudentDashboard from "../pages/student/StudentDashboard";
 import Profile from "../pages/student/Profile";
 import StudentAttendance from "../pages/student/Attendance";
 import AttendanceHistory from "../pages/student/AttendanceHistory";
+import AdminProfile from "../pages/admin/AdminProfile";
+import AdminSettings from "../pages/admin/AdminSettings";
+import Courses from "../pages/student/Courses";
+import Schedule from "../pages/student/Schedule";
+import StudentReports from "../pages/student/Reports";
+import StudentSettings from "../pages/student/Settings";
 
 function AppRoutes() {
   return (
@@ -83,6 +91,17 @@ function AppRoutes() {
         <Route
           path="attendance-reports"
           element={<AttendanceReports />}
+        />
+
+        {/* ADMIN ACCOUNT */}
+        <Route
+          path="profile"
+          element={<AdminProfile />}
+        />
+
+        <Route
+          path="settings"
+          element={<AdminSettings />}
         />
       </Route>
 
@@ -150,58 +169,77 @@ function AppRoutes() {
         }
       />
 
+      <Route
+        path="/faculty/profile"
+        element={
+          <ProtectedRoute allowedRole="FACULTY">
+            <FacultyLayout>
+              <FacultyProfile />
+            </FacultyLayout>
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/faculty/settings"
+        element={
+          <ProtectedRoute allowedRole="FACULTY">
+            <FacultyLayout>
+              <FacultySettings />
+            </FacultyLayout>
+          </ProtectedRoute>
+        }
+      />
+
       {/* ==================== STUDENT PORTAL ==================== */}
 
       <Route
         path="/student"
         element={
-          <Navigate to="/student/dashboard" replace />
-        }
-      />
-
-      <Route
-        path="/student/dashboard"
-        element={
           <ProtectedRoute allowedRole="STUDENT">
-            <StudentLayout>
-              <StudentDashboard />
-            </StudentLayout>
+            <StudentLayout />
           </ProtectedRoute>
         }
-      />
+      >
+        <Route
+          index
+          element={<Navigate to="/student/dashboard" replace />}
+        />
 
-      <Route
-        path="/student/profile"
-        element={
-          <ProtectedRoute allowedRole="STUDENT">
-            <StudentLayout>
-              <Profile />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="dashboard"
+          element={<StudentDashboard />}
+        />
 
-      <Route
-        path="/student/attendance"
-        element={
-          <ProtectedRoute allowedRole="STUDENT">
-            <StudentLayout>
-              <StudentAttendance />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="attendance"
+          element={<StudentAttendance />}
+        />
 
-      <Route
-        path="/student/attendance-history"
-        element={
-          <ProtectedRoute allowedRole="STUDENT">
-            <StudentLayout>
-              <AttendanceHistory />
-            </StudentLayout>
-          </ProtectedRoute>
-        }
-      />
+        <Route
+          path="attendance-history"
+          element={<AttendanceHistory />}
+        />
+
+        <Route
+          path="courses"
+          element={<Courses />}
+        />
+
+        <Route
+          path="profile"
+          element={<Profile />}
+        />
+
+        <Route
+          path="schedule"
+          element={<Schedule />}
+        />
+
+        <Route path="reports" element={<StudentReports />} />
+        <Route path="settings" element={<StudentSettings />} />
+
+      </Route>
 
       {/* ==================== UNKNOWN ROUTES ==================== */}
 

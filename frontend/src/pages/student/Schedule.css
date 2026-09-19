@@ -1,0 +1,321 @@
+.student-schedule {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding-bottom: 32px;
+}
+
+/* Header */
+
+.student-schedule-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.student-schedule-eyebrow {
+  display: block;
+  margin-bottom: 7px;
+  color: #617391;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.student-schedule-header h1 {
+  margin: 0;
+  color: #172033;
+  font-size: 28px;
+  line-height: 1.2;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
+
+.student-schedule-header p {
+  margin: 7px 0 0;
+  color: #7b8799;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.student-schedule-semester {
+  min-width: 190px;
+  padding: 14px 16px;
+  border: 1px solid #e5e9ef;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+}
+
+.student-schedule-semester span,
+.student-schedule-semester small {
+  display: block;
+  color: #8995a8;
+  font-size: 10px;
+}
+
+.student-schedule-semester strong {
+  display: block;
+  margin: 3px 0 2px;
+  color: #25324a;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+/* Week Controls */
+
+.student-schedule-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 10px;
+  border: 1px solid #e5e9ef;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.025);
+}
+
+.student-schedule-controls button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #e2e7ee;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #7b8799;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.student-schedule-controls button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
+.student-schedule-week {
+  flex: 1;
+  text-align: center;
+}
+
+.student-schedule-week span {
+  display: block;
+  color: #929dad;
+  font-size: 9px;
+}
+
+.student-schedule-week strong {
+  display: block;
+  margin-top: 2px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.student-schedule-controls .student-schedule-today {
+  background: #eff6ff;
+  border-color: #dbeafe;
+  color: #2563eb;
+}
+
+/* Panels */
+
+.student-schedule-panel {
+  margin-bottom: 18px;
+  overflow: hidden;
+  border: 1px solid #e5e9ef;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.03);
+}
+
+.student-schedule-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.student-schedule-panel-header span {
+  display: block;
+  margin-bottom: 4px;
+  color: #8a96a8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.student-schedule-panel-header h2 {
+  margin: 0;
+  color: #25324a;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.student-schedule-panel-icon {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 13px;
+}
+
+/* Timetable */
+
+.student-schedule-timetable {
+  min-height: 390px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.student-schedule-timetable > div {
+  width: 100%;
+}
+
+/* Today's classes */
+
+.student-today-panel {
+  margin-bottom: 18px;
+}
+
+.student-schedule-today-empty {
+  min-height: 230px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+}
+
+.student-schedule-today-empty > div {
+  width: 100%;
+}
+
+/* Information */
+
+.student-schedule-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 15px 17px;
+  border: 1px dashed #d3dce8;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.student-schedule-info-icon {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: #eef4fb;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.student-schedule-info strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #516481;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.student-schedule-info p {
+  margin: 0;
+  color: #71819e;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+/* Future metadata */
+
+.student-schedule-data-reference {
+  display: none;
+}
+
+/* Responsive */
+
+@media (max-width: 800px) {
+  .student-schedule-header {
+    flex-direction: column;
+  }
+
+  .student-schedule-semester {
+    width: fit-content;
+  }
+
+  .student-schedule-controls {
+    flex-wrap: wrap;
+  }
+
+  .student-schedule-week {
+    min-width: 150px;
+    order: -1;
+  }
+}
+
+@media (max-width: 600px) {
+  .student-schedule {
+    padding-bottom: 24px;
+  }
+
+  .student-schedule-header h1 {
+    font-size: 24px;
+  }
+
+  .student-schedule-header p {
+    font-size: 12px;
+  }
+
+  .student-schedule-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .student-schedule-week {
+    grid-column: 1 / -1;
+    order: -1;
+    padding: 5px 0;
+  }
+
+  .student-schedule-controls button {
+    justify-content: center;
+  }
+
+  .student-schedule-controls .student-schedule-today {
+    grid-column: 1 / -1;
+  }
+
+  .student-schedule-panel-header {
+    padding: 16px;
+  }
+
+  .student-schedule-timetable {
+    min-height: 330px;
+    padding: 18px;
+  }
+
+  .student-schedule-info {
+    padding: 13px 14px;
+  }
+}
