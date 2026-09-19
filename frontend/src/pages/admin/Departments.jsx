@@ -1,95 +1,447 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-import DataTable from "../../components/DataTable";
-import PageState from "../../components/PageState";
+import "./Departments.css";
 
-import "./AdminManagement.css";
+const departments = [];
+
+const EMPTY_METRICS = {
+  total: null,
+  active: null,
+  inactive: null,
+};
+
+function formatMetric(value) {
+  return value === null ? "N/A" : value;
+}
+
+function getInitials(name) {
+  if (!name) {
+    return "DE";
+  }
+
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
 
 function Departments() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [status, setStatus] = useState("All");
+  const [showAddModal, setShowAddModal] = useState(false);
 
-  // Temporary frontend demonstration data.
-  // Replace with API data when the department endpoint is available.
-  const departments = [];
-
-  const columns = [
-    { key: "departmentId", label: "Department ID" },
-    { key: "name", label: "Department Name" },
-    { key: "code", label: "Code" },
-  ];
-
-  const filteredDepartments = departments.filter((department) => {
-    const search = searchTerm.toLowerCase();
-
-    return (
-      department.departmentId?.toLowerCase().includes(search) ||
-      department.name?.toLowerCase().includes(search) ||
-      department.code?.toLowerCase().includes(search)
-    );
+  const [formData, setFormData] = useState({
+    departmentId: "",
+    departmentName: "",
+    description: "",
   });
 
-  return (
-    <section className="admin-management-page">
-      <div className="management-heading">
-        <div>
-          <span className="management-eyebrow">Management</span>
+  const metrics = EMPTY_METRICS;
 
-          <h1>Departments</h1>
+  const statuses = ["All"];
+
+  const filteredDepartments = useMemo(() => {
+    const search = searchTerm.trim().toLowerCase();
+
+    return departments.filter((department) => {
+      const matchesSearch =
+        !search ||
+        department.departmentId?.toLowerCase().includes(search) ||
+        department.name?.toLowerCase().includes(search);
+
+      const matchesStatus =
+        status === "All" || department.status === status;
+
+      return matchesSearch && matchesStatus;
+    });
+  }, [searchTerm, status]);
+
+  const handleClearFilters = () => {
+    setSearchTerm("");
+    setStatus("All");
+  };
+
+  const handleFormChange = (event) => {
+    const { name, value } = event.target;
+
+    setFormData((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  };
+
+  const handleAddDepartment = (event) => {
+    event.preventDefault();
+
+    // Backend integration is pending.
+    // Do not create fake department records here.
+  };
+
+  return (
+    <section className="department-management-page">
+      <header className="department-page-header">
+        <div>
+          <span className="department-eyebrow">Admin Portal</span>
+
+          <h1>Department Management</h1>
 
           <p>
-            Manage and view departments registered in the SAMS-FR system.
+            Manage academic departments and their associated faculty and
+            student records.
           </p>
         </div>
 
-        <div className="management-count">
-          <strong>{departments.length}</strong>
+        <button
+          type="button"
+          className="department-primary-button"
+          onClick={() => setShowAddModal(true)}
+        >
+          <span aria-hidden="true">+</span>
+          Add Department
+        </button>
+      </header>
 
-          <span>Active departments</span>
-        </div>
+      <div className="department-summary-grid">
+        <article className="department-summary-card department-summary-blue">
+          <div className="department-summary-icon" aria-hidden="true">
+            <span>▦</span>
+          </div>
+
+          <span>Total Departments</span>
+
+          <strong>{formatMetric(metrics.total)}</strong>
+        </article>
+
+        <article className="department-summary-card department-summary-green">
+          <div className="department-summary-icon" aria-hidden="true">
+            <span>✓</span>
+          </div>
+
+          <span>Active Departments</span>
+
+          <strong>{formatMetric(metrics.active)}</strong>
+        </article>
+
+        <article className="department-summary-card department-summary-red">
+          <div className="department-summary-icon" aria-hidden="true">
+            <span>−</span>
+          </div>
+
+          <span>Inactive Departments</span>
+
+          <strong>{formatMetric(metrics.inactive)}</strong>
+        </article>
       </div>
 
-      <div className="management-toolbar">
-        <div className="management-search">
+      <div className="department-filter-panel">
+        <div className="department-search-field">
           <label htmlFor="department-search">
-            Search departments
+            Search Department
           </label>
 
-          <input
-            id="department-search"
-            type="search"
-            placeholder="Search by department ID, name, or code"
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-          />
+          <div className="department-input-with-icon">
+            <span aria-hidden="true">⌕</span>
+
+            <input
+              id="department-search"
+              type="search"
+              placeholder="Search by department name or ID..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="department-filter-field">
+          <label htmlFor="department-status">Status</label>
+
+          <select
+            id="department-status"
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+          >
+            {statuses.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="button"
+          className="department-clear-button"
+          onClick={handleClearFilters}
+        >
+          ↻ Clear Filters
+        </button>
+      </div>
+
+      <div className="department-table-card">
+        <div className="department-table-wrapper">
+          <table className="department-table">
+            <thead>
+              <tr>
+                <th>Department</th>
+                <th>Department ID</th>
+                <th>Head / HOD</th>
+                <th>Faculty</th>
+                <th>Students</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredDepartments.map((department) => (
+                <tr key={department.departmentId}>
+                  <td>
+                    <div className="department-identity">
+                      <div className="department-avatar">
+                        {getInitials(department.name)}
+                      </div>
+
+                      <div>
+                        <strong>{department.name}</strong>
+                        <span>{department.departmentId}</span>
+                      </div>
+                    </div>
+                  </td>
+
+                  <td>{department.departmentId}</td>
+
+                  <td>{department.headName || "N/A"}</td>
+
+                  <td>{department.facultyCount ?? "N/A"}</td>
+
+                  <td>{department.studentCount ?? "N/A"}</td>
+
+                  <td>
+                    <span
+                      className={`department-status department-status-${department.status?.toLowerCase()}`}
+                    >
+                      ● {department.status}
+                    </span>
+                  </td>
+
+                  <td>
+                    <button
+                      type="button"
+                      className="department-action-button"
+                      aria-label={`Actions for ${department.name}`}
+                    >
+                      ⋮
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {departments.length === 0 ? (
+            <div className="department-empty-state">
+              <div
+                className="department-empty-icon"
+                aria-hidden="true"
+              >
+                ▦
+              </div>
+
+              <h2>No departments available</h2>
+
+              <p>
+                Department records will be displayed here when they
+                are provided by the backend.
+              </p>
+            </div>
+          ) : filteredDepartments.length === 0 ? (
+            <div className="department-empty-state department-search-empty">
+              <div
+                className="department-empty-icon"
+                aria-hidden="true"
+              >
+                ⌕
+              </div>
+
+              <h2>No matching departments</h2>
+
+              <p>
+                Try adjusting your search terms or filters.
+              </p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="department-pagination">
+          <span>
+            Showing {filteredDepartments.length} of{" "}
+            {departments.length} departments
+          </span>
+
+          <div className="department-pagination-controls">
+            <button type="button" disabled>
+              ‹ Previous
+            </button>
+
+            <button
+              type="button"
+              className="department-page-number"
+              disabled
+            >
+              1
+            </button>
+
+            <button type="button" disabled>
+              Next ›
+            </button>
+          </div>
         </div>
       </div>
 
-      {departments.length === 0 ? (
-        <PageState
-          title="No departments available"
-          message="Department records will be displayed here when they are provided by the backend."
-        />
-      ) : filteredDepartments.length === 0 ? (
-        <PageState
-          title="No matching departments"
-          message="Try adjusting your search terms."
-        />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={filteredDepartments}
-          emptyMessage="No department records found."
-        />
-      )}
+      <div className="department-integration-notice">
+        <div
+          className="department-integration-icon"
+          aria-hidden="true"
+        >
+          i
+        </div>
 
-      <div className="management-footer-note">
-        <strong>Backend integration pending</strong>
+        <div>
+          <strong>Backend integration pending</strong>
 
-        <span>
-          Department records will be loaded from the backend API when
-          the required endpoint is available.
+          <span>
+            Department records will be loaded from the backend API
+            when the required endpoint is available.
+          </span>
+        </div>
+
+        <span className="department-integration-badge">
+          Integration Pending
         </span>
       </div>
+
+      {showAddModal && (
+        <div
+          className="department-modal-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowAddModal(false);
+            }
+          }}
+        >
+          <div
+            className="department-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-department-title"
+          >
+            <div className="department-modal-header">
+              <div>
+                <span className="department-eyebrow">
+                  Department Management
+                </span>
+
+                <h2 id="add-department-title">
+                  Add Department
+                </h2>
+
+                <p>
+                  Enter the department information required by the
+                  system.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="department-modal-close"
+                onClick={() => setShowAddModal(false)}
+                aria-label="Close add department dialog"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleAddDepartment}>
+              <div className="department-form-section">
+                <h3>Department Information</h3>
+
+                <div className="department-form-grid">
+                  <div className="department-form-field">
+                    <label htmlFor="department-id">
+                      Department ID
+                    </label>
+
+                    <input
+                      id="department-id"
+                      name="departmentId"
+                      type="text"
+                      value={formData.departmentId}
+                      onChange={handleFormChange}
+                      placeholder="Enter department ID"
+                    />
+                  </div>
+
+                  <div className="department-form-field">
+                    <label htmlFor="department-name">
+                      Department Name
+                    </label>
+
+                    <input
+                      id="department-name"
+                      name="departmentName"
+                      type="text"
+                      value={formData.departmentName}
+                      onChange={handleFormChange}
+                      placeholder="Enter department name"
+                    />
+                  </div>
+
+                  <div className="department-form-field department-form-full">
+                    <label htmlFor="department-description">
+                      Description
+                      <span className="department-optional">
+                        Optional
+                      </span>
+                    </label>
+
+                    <textarea
+                      id="department-description"
+                      name="description"
+                      value={formData.description}
+                      onChange={handleFormChange}
+                      placeholder="Enter department description"
+                      rows="4"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="department-modal-footer">
+                <button
+                  type="button"
+                  className="department-secondary-button"
+                  onClick={() => setShowAddModal(false)}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="department-primary-button"
+                  disabled
+                  title="Department API is not available yet"
+                >
+                  Add Department
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
