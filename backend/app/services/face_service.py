@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import cv2
-
+import numpy as np
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -225,4 +225,61 @@ class FaceService:
             "matched": False,
             "similarity_score": best_similarity,
             "status": "not_recognized",
+        }
+
+    def enroll_student(self, image):
+        """
+        Generate a face encoding for a student enrollment image.
+        Args:
+            image: A BGR image represented as a NumPy array.
+        Returns:
+            dict: Enrollment result containing status and, if successful,
+                  the generated face encoding.
+        """
+        # Step 1: Validate the input image.
+        if image is None or image.size == 0:
+            return {
+                "status": "invalid_image",
+                "encoding": None,
+            }
+        # Step 2: Detect faces in the image.
+        faces = self.detect_faces(image)
+        if len(faces) == 0:
+            return {
+                "status": "no_face",
+                "encoding": None,
+            }
+        if len(faces) > 1:
+            return {
+                "status": "multiple_faces",
+                "encoding": None,
+            }
+        # Step 3: Align and crop the detected face.
+        face = faces[0]
+        try:
+            aligned_face = self.extract_face(image, face)
+            # Step 4: Generate the face encoding.
+            encoding = self.generate_encoding(aligned_face)
+        except (cv2.error, ValueError):
+            return {
+                "status": "encoding_failed",
+                "encoding": None,
+            }
+        # Step 5: Validate the generated encoding.
+        if(
+            encoding is None
+            or not isinstance(encoding, np.ndarray)
+            or encoding.shape != (1, 128)
+            or encoding.dtype != np.float32
+            or not np.isfinite(encoding).all()
+        ):
+            return {
+                "status": "invalid_encoding",
+                "encoding": None,
+            }
+
+        # Step 6: Return the successful enrollment result.
+        return {
+            "status": "enrolled",
+            "encoding": encoding,
         }
