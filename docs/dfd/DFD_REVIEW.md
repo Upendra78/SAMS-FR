@@ -2,11 +2,11 @@
 
 ## Processes
 
-1. 1.0 Authentication
-2. 2.0 User & Academic Management
-3. 3.0 Face Recognition & Attendance
-4. 4.0 Attendance Management
-5. 5.0 Report Generation
+1.0 Authentication
+2.0 User & Academic Management
+3.0 Face Recognition & Attendance
+4.0 Attendance Management
+5.0 Report Generation
 
 ## External Users
 

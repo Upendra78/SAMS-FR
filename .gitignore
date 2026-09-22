@@ -16,3 +16,8 @@ backend/cookies.txt
 backend/faculty-cookies.txt
 backend/student-cookies.txt
 
+# Computer Vision models
+.cv-models/
+
+# VS Code workspace settings
+.vscode/

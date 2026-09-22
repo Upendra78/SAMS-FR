@@ -1,10 +1,520 @@
-function Students() {
+import { useMemo, useState } from "react";
+
+import "./Student.css";
+
+const students = [];
+
+const EMPTY_METRICS = {
+  total: null,
+  active: null,
+  inactive: null,
+  departments: null,
+};
+
+function formatMetric(value) {
+  return value === null ? "N/A" : value;
+}
+
+function getInitials(name) {
+  if (!name) {
+    return "ST";
+  }
+
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function Student() {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [department, setDepartment] = useState("All");
+  const [program, setProgram] = useState("All");
+  const [yearSemester, setYearSemester] = useState("All");
+  const [status, setStatus] = useState("All");
+  const [showAddModal, setShowAddModal] = useState(false);
+
+  const [formData, setFormData] = useState({
+    studentId: "",
+    fullName: "",
+    email: "",
+    department: "",
+    program: "",
+    yearSemester: "",
+  });
+
+  const metrics = EMPTY_METRICS;
+
+  const departments = ["All"];
+  const programs = ["All"];
+  const yearSemesters = ["All"];
+  const statuses = ["All"];
+
+  const filteredStudents = useMemo(() => {
+    const search = searchTerm.trim().toLowerCase();
+
+    return students.filter((student) => {
+      const matchesSearch =
+        !search ||
+        student.studentId?.toLowerCase().includes(search) ||
+        student.name?.toLowerCase().includes(search) ||
+        student.email?.toLowerCase().includes(search);
+
+      const matchesDepartment =
+        department === "All" || student.department === department;
+
+      const matchesProgram =
+        program === "All" || student.program === program;
+
+      const matchesYearSemester =
+        yearSemester === "All" ||
+        student.yearSemester === yearSemester;
+
+      const matchesStatus =
+        status === "All" || student.status === status;
+
+      return (
+        matchesSearch &&
+        matchesDepartment &&
+        matchesProgram &&
+        matchesYearSemester &&
+        matchesStatus
+      );
+    });
+  }, [searchTerm, department, program, yearSemester, status]);
+
+  const handleClearFilters = () => {
+    setSearchTerm("");
+    setDepartment("All");
+    setProgram("All");
+    setYearSemester("All");
+    setStatus("All");
+  };
+
+  const handleFormChange = (event) => {
+    const { name, value } = event.target;
+
+    setFormData((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  };
+
+  const handleAddStudent = (event) => {
+    event.preventDefault();
+
+    // Backend integration is pending.
+    // Do not submit or create fake student records here.
+  };
+
   return (
-    <section>
-      <h1>Students</h1>
-      <p>Student management will be connected to the backend later.</p>
+    <section className="student-management-page">
+      <header className="student-page-header">
+        <div>
+          <span className="student-eyebrow">Admin Portal</span>
+          <h1>Student Management</h1>
+          <p>
+            Manage student profiles, academic information, enrollment and
+            attendance access.
+          </p>
+        </div>
+
+        <button
+          type="button"
+          className="student-primary-button"
+          onClick={() => setShowAddModal(true)}
+        >
+          <span aria-hidden="true">+</span>
+          Add Student
+        </button>
+      </header>
+
+      <div className="student-summary-grid">
+        <article className="student-summary-card student-summary-blue">
+          <div className="student-summary-icon" aria-hidden="true">
+            <span>♟</span>
+          </div>
+          <span>Total Students</span>
+          <strong>{formatMetric(metrics.total)}</strong>
+        </article>
+
+        <article className="student-summary-card student-summary-green">
+          <div className="student-summary-icon" aria-hidden="true">
+            <span>✓</span>
+          </div>
+          <span>Active</span>
+          <strong>{formatMetric(metrics.active)}</strong>
+        </article>
+
+        <article className="student-summary-card student-summary-red">
+          <div className="student-summary-icon" aria-hidden="true">
+            <span>−</span>
+          </div>
+          <span>Inactive</span>
+          <strong>{formatMetric(metrics.inactive)}</strong>
+        </article>
+
+        <article className="student-summary-card student-summary-purple">
+          <div className="student-summary-icon" aria-hidden="true">
+            <span>▦</span>
+          </div>
+          <span>Departments</span>
+          <strong>{formatMetric(metrics.departments)}</strong>
+        </article>
+      </div>
+
+      <div className="student-filter-panel">
+        <div className="student-search-field">
+          <label htmlFor="student-search">Search Student</label>
+          <div className="student-input-with-icon">
+            <span aria-hidden="true">⌕</span>
+            <input
+              id="student-search"
+              type="search"
+              placeholder="Search by Student ID, name or email..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="student-filter-field">
+          <label htmlFor="student-department">Department</label>
+          <select
+            id="student-department"
+            value={department}
+            onChange={(event) => setDepartment(event.target.value)}
+          >
+            {departments.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="student-filter-field">
+          <label htmlFor="student-program">Program</label>
+          <select
+            id="student-program"
+            value={program}
+            onChange={(event) => setProgram(event.target.value)}
+          >
+            {programs.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="student-filter-field">
+          <label htmlFor="student-year">Year / Semester</label>
+          <select
+            id="student-year"
+            value={yearSemester}
+            onChange={(event) => setYearSemester(event.target.value)}
+          >
+            {yearSemesters.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="student-filter-field">
+          <label htmlFor="student-status">Status</label>
+          <select
+            id="student-status"
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+          >
+            {statuses.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="button"
+          className="student-clear-button"
+          onClick={handleClearFilters}
+        >
+          ↻ Clear Filters
+        </button>
+      </div>
+
+      <div className="student-table-card">
+        <div className="student-table-wrapper">
+          <table className="student-table">
+            <thead>
+              <tr>
+                <th>Student</th>
+                <th>Department</th>
+                <th>Program</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {filteredStudents.map((student) => (
+                <tr key={student.studentId}>
+                  <td>
+                    <div className="student-identity">
+                      <div className="student-avatar">
+                        {getInitials(student.name)}
+                      </div>
+
+                      <div>
+                        <strong>{student.name}</strong>
+                        <span>{student.studentId}</span>
+                      </div>
+                    </div>
+                  </td>
+
+                  <td>{student.department}</td>
+                  <td>{student.program}</td>
+                  <td>{student.email}</td>
+
+                  <td>
+                    <span
+                      className={`student-status student-status-${student.status?.toLowerCase()}`}
+                    >
+                      ● {student.status}
+                    </span>
+                  </td>
+
+                  <td>
+                    <button
+                      type="button"
+                      className="student-action-button"
+                      aria-label={`Actions for ${student.name}`}
+                    >
+                      ⋮
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {students.length === 0 ? (
+            <div className="student-empty-state">
+              <div className="student-empty-icon" aria-hidden="true">
+                ♟
+              </div>
+
+              <h2>No students available</h2>
+              <p>
+                Student records will be displayed here when they are provided
+                by the backend.
+              </p>
+            </div>
+          ) : filteredStudents.length === 0 ? (
+            <div className="student-empty-state student-search-empty">
+              <div className="student-empty-icon" aria-hidden="true">
+                ⌕
+              </div>
+
+              <h2>No matching students</h2>
+              <p>Try adjusting your search terms or filters.</p>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="student-pagination">
+          <span>
+            Showing {filteredStudents.length} of {students.length} students
+          </span>
+
+          <div className="student-pagination-controls">
+            <button type="button" disabled>
+              ‹ Previous
+            </button>
+            <button type="button" className="student-page-number" disabled>
+              1
+            </button>
+            <button type="button" disabled>
+              Next ›
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="student-integration-notice">
+        <div className="student-integration-icon" aria-hidden="true">
+          i
+        </div>
+
+        <div>
+          <strong>Backend integration pending</strong>
+          <span>
+            Student records will be loaded from the backend API when the
+            required endpoint is available.
+          </span>
+        </div>
+
+        <span className="student-integration-badge">
+          Integration Pending
+        </span>
+      </div>
+
+      {showAddModal && (
+        <div
+          className="student-modal-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              setShowAddModal(false);
+            }
+          }}
+        >
+          <div
+            className="student-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="add-student-title"
+          >
+            <div className="student-modal-header">
+              <div>
+                <span className="student-eyebrow">Student Management</span>
+                <h2 id="add-student-title">Add Student</h2>
+                <p>
+                  Enter the student information required by the system.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                className="student-modal-close"
+                onClick={() => setShowAddModal(false)}
+                aria-label="Close add student dialog"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleAddStudent}>
+              <div className="student-form-section">
+                <h3>Student Information</h3>
+
+                <div className="student-form-grid">
+                  <div className="student-form-field">
+                    <label htmlFor="student-id">Student ID</label>
+                    <input
+                      id="student-id"
+                      name="studentId"
+                      type="text"
+                      value={formData.studentId}
+                      onChange={handleFormChange}
+                      placeholder="Enter student ID"
+                    />
+                  </div>
+
+                  <div className="student-form-field">
+                    <label htmlFor="student-full-name">Full Name</label>
+                    <input
+                      id="student-full-name"
+                      name="fullName"
+                      type="text"
+                      value={formData.fullName}
+                      onChange={handleFormChange}
+                      placeholder="Enter full name"
+                    />
+                  </div>
+
+                  <div className="student-form-field student-form-full">
+                    <label htmlFor="student-email">Email</label>
+                    <input
+                      id="student-email"
+                      name="email"
+                      type="email"
+                      value={formData.email}
+                      onChange={handleFormChange}
+                      placeholder="Enter email address"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="student-form-section">
+                <h3>Academic Information</h3>
+
+                <div className="student-form-grid">
+                  <div className="student-form-field">
+                    <label htmlFor="student-department-modal">
+                      Department
+                    </label>
+                    <select
+                      id="student-department-modal"
+                      name="department"
+                      value={formData.department}
+                      onChange={handleFormChange}
+                    >
+                      <option value="">Select department</option>
+                    </select>
+                  </div>
+
+                  <div className="student-form-field">
+                    <label htmlFor="student-program-modal">Program</label>
+                    <select
+                      id="student-program-modal"
+                      name="program"
+                      value={formData.program}
+                      onChange={handleFormChange}
+                    >
+                      <option value="">Select program</option>
+                    </select>
+                  </div>
+
+                  <div className="student-form-field">
+                    <label htmlFor="student-year-modal">
+                      Year / Semester
+                    </label>
+                    <select
+                      id="student-year-modal"
+                      name="yearSemester"
+                      value={formData.yearSemester}
+                      onChange={handleFormChange}
+                    >
+                      <option value="">Select year / semester</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="student-modal-footer">
+                <button
+                  type="button"
+                  className="student-secondary-button"
+                  onClick={() => setShowAddModal(false)}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="student-primary-button"
+                  disabled
+                  title="Student API is not available yet"
+                >
+                  Add Student
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
 
-export default Students;
+export default Student;
