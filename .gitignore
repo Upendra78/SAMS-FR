@@ -10,6 +10,12 @@ backend/.venv/
 .env.*
 !.env.example
 
+
+# Local authentication cookies
+backend/cookies.txt
+backend/faculty-cookies.txt
+backend/student-cookies.txt
+
 # Computer Vision models
 .cv-models/
 
