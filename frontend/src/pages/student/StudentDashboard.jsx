@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -13,6 +14,7 @@ import {
   faChartPie,
 } from "@fortawesome/free-solid-svg-icons";
 import "./StudentDashboard.css";
+import { getStudentDashboard } from "../../services/portalService";
 
 const summaryCards = [
   {
@@ -66,6 +68,56 @@ const quickActions = [
 
 function StudentDashboard() {
   const navigate = useNavigate();
+
+  const [backendStatus, setBackendStatus] = useState("loading");
+  const [backendMessage, setBackendMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadStudentAccess() {
+      try {
+        const result = await getStudentDashboard();
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (result?.success && result?.data?.role === "STUDENT") {
+          setBackendStatus("connected");
+          setBackendMessage("Student backend access confirmed.");
+        } else {
+          setBackendStatus("error");
+          setBackendMessage(
+            result?.message || "Unable to verify student backend access."
+          );
+        }
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        if (error?.response?.status === 401) {
+          setBackendStatus("error");
+          setBackendMessage("Your session has expired. Please log in again.");
+        } else if (error?.response?.status === 403) {
+          setBackendStatus("error");
+          setBackendMessage("Student access is required for this portal.");
+        } else {
+          setBackendStatus("error");
+          setBackendMessage(
+            "Student backend service is currently unavailable."
+          );
+        }
+      }
+    }
+
+    loadStudentAccess();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   return (
     <div className="student-dashboard">
@@ -285,6 +337,34 @@ function StudentDashboard() {
               />
             </button>
           ))}
+        </div>
+      </section>
+      <section className="student-dashboard-card">
+        <div className="student-card-header">
+          <div>
+            <h2>Backend Connection</h2>
+            <p>Student portal access status</p>
+          </div>
+
+          <div className="student-card-icon">
+            <FontAwesomeIcon icon={faCircleCheck} />
+          </div>
+        </div>
+
+        <div className="student-alert-empty">
+          <span>
+            {backendStatus === "loading"
+              ? "Verifying student backend access..."
+              : backendMessage}
+          </span>
+
+          <strong>
+            {backendStatus === "loading"
+              ? "Connecting"
+              : backendStatus === "connected"
+                ? "Connected"
+                : "Connection Issue"}
+          </strong>
         </div>
       </section>
     </div>

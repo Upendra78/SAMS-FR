@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import "./FacultyDashboard.css";
+import { getFacultyDashboard } from "../../services/portalService";
 
 const EMPTY_METRICS = {
   assignedCourses: null,
@@ -15,6 +16,55 @@ function formatMetric(value) {
 
 function FacultyDashboard() {
   const [showAttendanceNotice, setShowAttendanceNotice] = useState(false);
+  const [backendStatus, setBackendStatus] = useState("loading");
+  const [backendMessage, setBackendMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadFacultyAccess() {
+      try {
+        const result = await getFacultyDashboard();
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (result?.success && result?.data?.role === "FACULTY") {
+          setBackendStatus("connected");
+          setBackendMessage("Faculty backend access confirmed.");
+        } else {
+          setBackendStatus("error");
+          setBackendMessage(
+            result?.message || "Unable to verify faculty backend access."
+          );
+        }
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        if (error?.response?.status === 401) {
+          setBackendStatus("error");
+          setBackendMessage("Your session has expired. Please log in again.");
+        } else if (error?.response?.status === 403) {
+          setBackendStatus("error");
+          setBackendMessage("Faculty access is required for this portal.");
+        } else {
+          setBackendStatus("error");
+          setBackendMessage(
+            "Faculty backend service is currently unavailable."
+          );
+        }
+      }
+    }
+
+    loadFacultyAccess();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const metrics = EMPTY_METRICS;
 
@@ -365,17 +415,27 @@ function FacultyDashboard() {
         </div>
 
         <div>
-          <strong>Backend integration pending</strong>
+          <strong>
+            {backendStatus === "loading"
+              ? "Connecting to faculty backend"
+              : backendStatus === "connected"
+                ? "Faculty backend connected"
+                : "Faculty backend connection issue"}
+          </strong>
 
           <span>
-            Faculty-specific courses, schedules, attendance sessions,
-            students and statistics will be loaded from the backend
-            API when the required endpoints are available.
+            {backendStatus === "loading"
+              ? "Verifying your faculty access..."
+              : backendMessage}
           </span>
         </div>
 
         <span className="faculty-integration-badge">
-          Integration Pending
+          {backendStatus === "loading"
+            ? "Connecting"
+            : backendStatus === "connected"
+              ? "Connected"
+              : "Connection Issue"}
         </span>
       </div>
 

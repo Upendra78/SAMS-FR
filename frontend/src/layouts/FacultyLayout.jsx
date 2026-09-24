@@ -1,5 +1,6 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, Outlet } from "react-router-dom";
 import "./FacultyLayout.css";
+
 
 const navigationItems = [
   {
@@ -94,7 +95,7 @@ function FacultyNavigationItem({ item }) {
   );
 }
 
-function FacultyLayout({ children }) {
+function FacultyLayout() {
   return (
     <div className="faculty-layout">
       <aside className="faculty-sidebar">
@@ -190,7 +191,9 @@ function FacultyLayout({ children }) {
         </header>
 
         {/* Page Content */}
-        <main className="faculty-content">{children}</main>
+        <main className="faculty-content">
+          <Outlet />
+        </main>
       </div>
     </div>
   );
