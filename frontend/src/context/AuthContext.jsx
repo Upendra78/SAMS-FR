@@ -1,23 +1,46 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import AuthContext from "./authContext";
 import {
   login as loginRequest,
   logout as logoutRequest,
+  getCurrentUser,
 } from "../services/authService";
 
 export function AuthProvider({ children }) {
-  // Temporary frontend testing user
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
-  // Backend authentication is not ready yet
-  const [loading] = useState(false);
+  // Restore authenticated user from the backend JWT cookie.
+  useEffect(() => {
+    async function restoreSession() {
+      try {
+        const result = await getCurrentUser();
+
+        if (result?.success && result?.data) {
+          setUser(result.data);
+        } else {
+          setUser(null);
+        }
+      } catch {
+        // No valid session or backend unavailable.
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    restoreSession();
+  }, []);
 
   async function login(credentials) {
-    const result = await loginRequest(credentials);
+    const result = await loginRequest({
+      email: credentials.email,
+      password: credentials.password,
+    });
 
-    if (result?.success && result?.user) {
-      setUser(result.user);
+    if (result?.success && result?.data) {
+      setUser(result.data);
     }
 
     return result;
@@ -27,38 +50,10 @@ export function AuthProvider({ children }) {
     try {
       await logoutRequest();
     } catch {
-      // Backend may not be available during frontend testing
+      // Clear frontend session even if backend logout fails.
     } finally {
       setUser(null);
     }
-  }
-
-  // TEMPORARY: Used only for testing portals without backend
-  function setTestUser(role) {
-    const testUsers = {
-      ADMIN: {
-        user_id: 1,
-        name: "Test Administrator",
-        email: "admin@test.local",
-        role: "ADMIN",
-      },
-
-      FACULTY: {
-        user_id: 2,
-        name: "Test Faculty",
-        email: "faculty@test.local",
-        role: "FACULTY",
-      },
-
-      STUDENT: {
-        user_id: 3,
-        name: "Test Student",
-        email: "student@test.local",
-        role: "STUDENT",
-      },
-    };
-
-    setUser(testUsers[role] || null);
   }
 
   const value = {
@@ -66,7 +61,6 @@ export function AuthProvider({ children }) {
     loading,
     login,
     logout,
-    setTestUser,
     isAuthenticated: Boolean(user),
   };
 

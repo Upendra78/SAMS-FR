@@ -10,6 +10,7 @@ import {
   faSchool,
   faUser,
   faUsers,
+  faUserShield,
 } from "@fortawesome/free-solid-svg-icons";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 
@@ -32,6 +33,11 @@ const navigationItems = [
     label: "Faculty",
     path: "/admin/faculty",
     icon: faChalkboardUser,
+  },
+  {
+    label: "Admin Management",
+    path: "/admin/management",
+    icon: faUserShield,
   },
   {
     label: "Departments",
