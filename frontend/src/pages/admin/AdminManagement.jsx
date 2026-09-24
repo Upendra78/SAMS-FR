@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 
 import {
   createUser,
   getUsers,
+  updateUser,
   deleteUser,
 } from "../../services/adminService";
 
-import { getCurrentUser } from "../../services/authService";
+import AuthContext from "../../context/authContext";
 
 import "./AdminManagement.css";
 
@@ -18,11 +19,26 @@ function AdminManagement() {
     confirmPassword: "",
   });
 
-  const [admins, setAdmins] = useState([]);
+  const [editFormData, setEditFormData] = useState({
+    name: "",
+    email: "",
+    role: "ADMIN",
+    password: "",
+    confirmPassword: "",
+  });
+  
 
-  const [currentUser, setCurrentUser] = useState(null);
+  const [admins, setAdmins] = useState([]);
+  const [editingAdmin, setEditingAdmin] = useState(null);
+
+  const { user: currentUser } = useContext(AuthContext);
 
   const [status, setStatus] = useState({
+    type: "",
+    message: "",
+  });
+
+  const [editStatus, setEditStatus] = useState({
     type: "",
     message: "",
   });
@@ -30,16 +46,14 @@ function AdminManagement() {
   const [submitting, setSubmitting] = useState(false);
   const [loadingAdmins, setLoadingAdmins] = useState(true);
   const [deletingUserId, setDeletingUserId] = useState(null);
+  const [updatingUserId, setUpdatingUserId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   async function loadAdminData() {
     setLoadingAdmins(true);
 
     try {
-      const [usersResult, currentUserResult] = await Promise.all([
-        getUsers(),
-        getCurrentUser(),
-      ]);
+      const usersResult = await getUsers();
 
       if (!usersResult?.success) {
         setStatus({
@@ -57,13 +71,6 @@ function AdminManagement() {
       );
 
       setAdmins(adminUsers);
-
-      if (
-        currentUserResult?.success &&
-        currentUserResult?.data
-      ) {
-        setCurrentUser(currentUserResult.data);
-      }
     } catch (error) {
       setStatus({
         type: "error",
@@ -80,13 +87,8 @@ function AdminManagement() {
     let active = true;
 
     async function initializeAdminData() {
-      setLoadingAdmins(true);
-
       try {
-        const [usersResult, currentUserResult] = await Promise.all([
-          getUsers(),
-          getCurrentUser(),
-        ]);
+        const usersResult = await getUsers();
 
         if (!active) {
           return;
@@ -108,13 +110,6 @@ function AdminManagement() {
         );
 
         setAdmins(adminUsers);
-
-        if (
-          currentUserResult?.success &&
-          currentUserResult?.data
-        ) {
-          setCurrentUser(currentUserResult.data);
-        }
       } catch (error) {
         if (!active) {
           return;
@@ -144,6 +139,15 @@ function AdminManagement() {
     const { name, value } = event.target;
 
     setFormData((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  function handleEditChange(event) {
+    const { name, value } = event.target;
+
+    setEditFormData((current) => ({
       ...current,
       [name]: value,
     }));
@@ -221,6 +225,176 @@ function AdminManagement() {
     }
   }
 
+  function startEditingAdmin(admin) {
+    setStatus({
+      type: "",
+      message: "",
+    });
+
+    setEditingAdmin(admin);
+
+    setEditFormData({
+      name: admin.name || "",
+      email: admin.email || "",
+      role: admin.role || "ADMIN",
+      password: "",
+      confirmPassword: "",
+    });
+  }
+
+  function cancelEditingAdmin() {
+    setEditingAdmin(null);
+
+    setEditFormData({
+      name: "",
+      email: "",
+      role: "ADMIN",
+      password: "",
+      confirmPassword: "",
+    });
+
+    setStatus({
+      type: "",
+      message: "",
+    });
+  }
+
+  async function handleUpdateAdmin(event) {
+    event.preventDefault();
+
+    if (!editingAdmin?.user_id) {
+      return;
+    }
+
+    setEditStatus({
+      type: "",
+      message: "",
+    });
+
+    const name = editFormData.name.trim();
+    const email = editFormData.email.trim();
+
+    if (!name) {
+      setEditStatus({
+        type: "error",
+        message: "Name cannot be empty.",
+      });
+
+      return;
+    }
+
+    if (!email) {
+      setEditStatus({
+        type: "error",
+        message: "Email cannot be empty.",
+      });
+
+      return;
+    }
+
+    if (
+      editFormData.password &&
+      editFormData.password.length < 8
+    ) {
+      setEditStatus({
+        type: "error",
+        message: "Password must be at least 8 characters.",
+      });
+
+      return;
+    }
+
+    if (
+      editFormData.password !== editFormData.confirmPassword
+    ) {
+      setEditStatus({
+        type: "error",
+        message: "Passwords do not match.",
+      });
+
+      return;
+    }
+
+    const isCurrentUser =
+      currentUser?.user_id === editingAdmin.user_id;
+
+    if (isCurrentUser && editFormData.role !== "ADMIN") {
+      setEditStatus({
+        type: "error",
+        message:
+          "Your current account must remain an administrator.",
+      });
+
+      return;
+    }
+
+    const updateData = {
+      name,
+      email,
+      role: editFormData.role,
+    };
+
+    if (editFormData.password) {
+      updateData.password = editFormData.password;
+    }
+
+    setUpdatingUserId(editingAdmin.user_id);
+
+    try {
+      const result = await updateUser(
+        editingAdmin.user_id,
+        updateData
+      );
+
+      if (!result?.success) {
+        setEditStatus({
+          type: "error",
+          message:
+            result?.message ||
+            "Unable to update administrator.",
+        });
+
+        return;
+      }
+
+      setAdmins((currentAdmins) =>
+        currentAdmins.map((admin) =>
+          admin.user_id === editingAdmin.user_id
+            ? {
+                ...admin,
+                ...result.data,
+              }
+            : admin
+        )
+      );
+
+      if (isCurrentUser) {
+        setStatus({
+          type: "success",
+          message:
+            "Your administrator account was updated successfully.",
+        });
+      } else {
+        setStatus({
+          type: "success",
+          message:
+            "Administrator updated successfully.",
+        });
+      }
+
+      cancelEditingAdmin();
+    } catch (error) {
+      setEditStatus({
+        type: "error",
+        message:
+          error?.response?.data?.message ||
+          "Unable to update administrator. Please try again.",
+      });
+    } finally {
+      setUpdatingUserId(null);
+    }
+  }
+
   async function handleDeleteAdmin(user) {
     if (!user?.user_id) {
       return;
@@ -232,7 +406,8 @@ function AdminManagement() {
     ) {
       setStatus({
         type: "error",
-        message: "You cannot delete your currently logged-in account.",
+        message:
+          "You cannot delete your current account.",
       });
 
       return;
@@ -269,7 +444,8 @@ function AdminManagement() {
 
       setStatus({
         type: "success",
-        message: "Administrator deleted successfully.",
+        message:
+          "Administrator deleted successfully.",
       });
 
       setAdmins((currentAdmins) =>
@@ -423,6 +599,144 @@ function AdminManagement() {
         </form>
       </section>
 
+      {editingAdmin && (
+        <section className="admin-management-card admin-edit-card">
+          <div className="admin-management-card-header">
+            <div>
+              <h2>Edit Administrator</h2>
+
+              <p>
+                Update the selected administrator account.
+              </p>
+            </div>
+          </div>
+
+          <form
+            className="admin-management-form"
+            onSubmit={handleUpdateAdmin}
+          >
+            <div className="admin-form-field">
+              <label htmlFor="edit-admin-name">
+                Name
+              </label>
+
+              <input
+                id="edit-admin-name"
+                name="name"
+                type="text"
+                value={editFormData.name}
+                onChange={handleEditChange}
+                placeholder="Enter administrator name"
+                disabled={updatingUserId !== null}
+                required
+              />
+            </div>
+
+            <div className="admin-form-field">
+              <label htmlFor="edit-admin-email">
+                Email
+              </label>
+
+              <input
+                id="edit-admin-email"
+                name="email"
+                type="email"
+                value={editFormData.email}
+                onChange={handleEditChange}
+                placeholder="Enter administrator email"
+                disabled={updatingUserId !== null}
+                required
+              />
+            </div>
+
+            <div className="admin-form-field">
+              <label htmlFor="edit-admin-role">
+                Role
+              </label>
+
+              <select
+                id="edit-admin-role"
+                name="role"
+                value={editFormData.role}
+                onChange={handleEditChange}
+                disabled={
+                  updatingUserId !== null ||
+                  currentUser?.user_id === editingAdmin.user_id
+                }
+              >
+                <option value="ADMIN">ADMIN</option>
+                <option value="FACULTY">FACULTY</option>
+                <option value="STUDENT">STUDENT</option>
+              </select>
+            </div>
+
+            <div className="admin-form-field">
+              <label htmlFor="edit-admin-password">
+                New Password
+              </label>
+
+              <input
+                id="edit-admin-password"
+                name="password"
+                type="password"
+                value={editFormData.password}
+                onChange={handleEditChange}
+                placeholder="Leave blank to keep current password"
+                minLength={8}
+                disabled={updatingUserId !== null}
+              />
+            </div>
+
+            <div className="admin-form-field">
+              <label htmlFor="edit-admin-confirm-password">
+                Confirm New Password
+              </label>
+
+              <input
+                id="edit-admin-confirm-password"
+                name="confirmPassword"
+                type="password"
+                value={editFormData.confirmPassword}
+                onChange={handleEditChange}
+                placeholder="Re-enter new password"
+                minLength={8}
+                disabled={updatingUserId !== null}
+              />
+            </div>
+
+            {editStatus.message && (
+              <div
+                className={`admin-form-status admin-form-status-${editStatus.type}`}
+                role="alert"
+              >
+                {editStatus.message}
+              </div>
+            )}
+
+            <div className="admin-management-form-actions">
+              <button
+                type="button"
+                className="admin-edit-cancel-button"
+                onClick={cancelEditingAdmin}
+                disabled={updatingUserId !== null}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="submit"
+                className="admin-management-submit"
+                disabled={updatingUserId !== null}
+              >
+                {updatingUserId !== null
+                  ? "Saving Changes..."
+                  : "Save Changes"}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
+
       <section className="admin-management-card admin-list-card">
         <div className="admin-management-card-header admin-list-header">
           <div>
@@ -493,6 +807,9 @@ function AdminManagement() {
                   const isDeleting =
                     deletingUserId === admin.user_id;
 
+                  const isUpdating =
+                    updatingUserId === admin.user_id;
+
                   return (
                     <tr key={admin.user_id}>
                       <td>
@@ -518,27 +835,45 @@ function AdminManagement() {
                       <td>{admin.user_id}</td>
 
                       <td>
-                        <button
-                          type="button"
-                          className="admin-delete-button"
-                          onClick={() =>
-                            handleDeleteAdmin(admin)
-                          }
-                          disabled={
-                            isCurrentUser || isDeleting
-                          }
-                          title={
-                            isCurrentUser
-                              ? "You cannot delete your current account."
-                              : "Delete administrator"
-                          }
-                        >
-                          {isDeleting
-                            ? "Deleting..."
-                            : isCurrentUser
-                              ? "Current"
-                              : "Delete"}
-                        </button>
+                        <div className="admin-action-buttons">
+                          <button
+                            type="button"
+                            className="admin-edit-button"
+                            onClick={() =>
+                              startEditingAdmin(admin)
+                            }
+                            disabled={
+                              isDeleting ||
+                              isUpdating
+                            }
+                          >
+                            Edit
+                          </button>
+
+                          <button
+                            type="button"
+                            className="admin-delete-button"
+                            onClick={() =>
+                              handleDeleteAdmin(admin)
+                            }
+                            disabled={
+                              isCurrentUser ||
+                              isDeleting ||
+                              isUpdating
+                            }
+                            title={
+                              isCurrentUser
+                                ? "You cannot delete your current account."
+                                : "Delete administrator"
+                            }
+                          >
+                            {isDeleting
+                              ? "Deleting..."
+                              : isCurrentUser
+                                ? "Current"
+                                : "Delete"}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
