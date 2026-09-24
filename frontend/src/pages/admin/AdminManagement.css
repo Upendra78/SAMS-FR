@@ -477,6 +477,176 @@
 }
 
 /* =========================================================
+   EDIT ADMINISTRATOR
+   ========================================================= */
+
+.admin-edit-card {
+  border-color: #c7d2fe;
+}
+
+.admin-form-field select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  outline: none;
+  background: #ffffff;
+  color: #111827;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition:
+    border-color 0.18s ease,
+    box-shadow 0.18s ease,
+    background-color 0.18s ease;
+}
+
+.admin-form-field select:hover {
+  border-color: #9ca3af;
+}
+
+.admin-form-field select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.admin-form-field select:disabled {
+  cursor: not-allowed;
+  background: #f9fafb;
+  opacity: 0.7;
+}
+
+.admin-edit-cancel-button {
+  min-height: 44px;
+  margin-right: 10px;
+  padding: 10px 20px;
+  border: 1px solid #d1d5db;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #374151;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 650;
+  cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.admin-edit-cancel-button:hover:not(:disabled) {
+  border-color: #a5b4fc;
+  background: #f5f7ff;
+  color: #4338ca;
+}
+
+.admin-edit-cancel-button:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.2);
+  outline-offset: 2px;
+}
+
+.admin-edit-cancel-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* =========================================================
+   ADMIN ACTION BUTTONS
+   ========================================================= */
+
+.admin-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.admin-edit-button {
+  min-width: 58px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid #c7d2fe;
+  border-radius: 8px;
+  background: #eef2ff;
+  color: #4338ca;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.admin-edit-button:hover:not(:disabled) {
+  border-color: #a5b4fc;
+  background: #e0e7ff;
+  color: #3730a3;
+  transform: translateY(-1px);
+}
+
+.admin-edit-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.admin-edit-button:focus-visible {
+  outline: 3px solid rgba(99, 102, 241, 0.18);
+  outline-offset: 2px;
+}
+
+.admin-edit-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+[data-theme="dark"] .admin-edit-card {
+  border-color: #3730a3;
+}
+
+[data-theme="dark"] .admin-form-field select {
+  border-color: #374151;
+  background: #11161f;
+  color: #f9fafb;
+}
+
+[data-theme="dark"] .admin-form-field select:hover {
+  border-color: #4b5563;
+}
+
+[data-theme="dark"] .admin-form-field select:disabled {
+  background: #0f141c;
+}
+
+[data-theme="dark"] .admin-edit-cancel-button {
+  border-color: #374151;
+  background: #11161f;
+  color: #d1d5db;
+}
+
+[data-theme="dark"] .admin-edit-cancel-button:hover:not(:disabled) {
+  border-color: #6366f1;
+  background: #1e1b4b;
+  color: #c7d2fe;
+}
+
+[data-theme="dark"] .admin-edit-button {
+  border-color: #4338ca;
+  background: #1e1b4b;
+  color: #c7d2fe;
+}
+
+[data-theme="dark"] .admin-edit-button:hover:not(:disabled) {
+  border-color: #6366f1;
+  background: #312e81;
+  color: #e0e7ff;
+}
+
+/* =========================================================
    EMPTY / LOADING STATE
    ========================================================= */
 
@@ -520,6 +690,8 @@
     grid-column: auto;
   }
 }
+
+
 
 /* =========================================================
    RESPONSIVE - MOBILE

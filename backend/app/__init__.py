@@ -16,7 +16,6 @@ from app.models import (
 from app.config import Config
 from app.extensions import bcrypt, db, jwt, migrate
 from app.routes import health_bp
-from app.routes import health_bp
 from app.routes.auth import auth_bp
 from app.routes.admin import admin_bp
 from app.routes.faculty import faculty_bp
@@ -40,6 +39,7 @@ def create_app():
     CORS(
         app,
         origins=app.config["CORS_ORIGINS"],
+        supports_credentials=True,
     )
     # Register routes 
     app.register_blueprint(health_bp)
