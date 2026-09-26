@@ -20,6 +20,7 @@ from app.routes.auth import auth_bp
 from app.routes.admin import admin_bp
 from app.routes.faculty import faculty_bp
 from app.routes.student import student_bp
+from app.routes.enrollment import enrollment_bp
 
 
 
@@ -47,4 +48,5 @@ def create_app():
     app.register_blueprint(admin_bp)
     app.register_blueprint(faculty_bp)
     app.register_blueprint(student_bp)
+    app.register_blueprint(enrollment_bp)
     return app
