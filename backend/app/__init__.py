@@ -23,6 +23,7 @@ from app.routes.student import student_bp
 from app.routes.enrollment import enrollment_bp
 from app.routes.attendance import attendance_bp
 from app.routes.student_attendance import student_attendance_bp
+from app.routes.face_profile import face_profile_bp
 
 
 
@@ -53,4 +54,5 @@ def create_app():
     app.register_blueprint(enrollment_bp)
     app.register_blueprint(attendance_bp)
     app.register_blueprint(student_attendance_bp)
+    app.register_blueprint(face_profile_bp)
     return app
