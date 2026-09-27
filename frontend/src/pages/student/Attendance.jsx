@@ -1,4 +1,9 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  getStudentAttendance,
+  getStudentAttendanceSummary,
+} from "../../services/attendanceService";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCalendarCheck,
@@ -18,12 +23,168 @@ import "./Attendance.css";
 function Attendance() {
   const navigate = useNavigate();
 
+  const [attendance, setAttendance] = useState([]);
+  const [summary, setSummary] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function loadAttendance() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const [attendanceResult, summaryResult] = await Promise.all([
+          getStudentAttendance(),
+          getStudentAttendanceSummary(),
+        ]);
+
+        if (attendanceResult?.success) {
+          setAttendance(attendanceResult.data ?? []);
+        } else {
+          setAttendance([]);
+        }
+
+        if (summaryResult?.success) {
+          setSummary(summaryResult.data ?? []);
+        } else {
+          setSummary([]);
+        }
+      } catch (err) {
+        setAttendance([]);
+        setSummary([]);
+
+        setError(
+          err?.response?.data?.message ||
+            "Unable to load attendance data."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadAttendance();
+  }, []);
+
+  const totalClasses = summary.reduce(
+    (total, course) => total + Number(course.total_sessions || 0),
+    0
+  );
+
+  const totalPresent = summary.reduce(
+    (total, course) => total + Number(course.present_sessions || 0),
+    0
+  );
+
+  const totalAbsent = summary.reduce(
+    (total, course) => total + Number(course.absent_sessions || 0),
+    0
+  );
+
+  const overallAttendance =
+    totalClasses > 0
+      ? (totalPresent / totalClasses) * 100
+      : null;
+
+  const currentSemester =
+    summary.length > 0
+      ? summary[0]?.semester || "N/A"
+      : "N/A";
+
+  const academicYear =
+    summary.length > 0
+      ? summary[0]?.academic_year || "N/A"
+      : "N/A";
+
+  const formatPercentage = (value) => {
+    if (value === null || value === undefined) {
+      return "N/A";
+    }
+
+    const numericValue = Number(value);
+
+    if (Number.isNaN(numericValue)) {
+      return "N/A";
+    }
+
+    return `${numericValue.toFixed(1)}%`;
+  };
+
+  const formatDate = (dateValue) => {
+    if (!dateValue) {
+      return "N/A";
+    }
+
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+      return dateValue;
+    }
+
+    return date.toLocaleDateString();
+  };
+
+  const formatTime = (dateValue) => {
+    if (!dateValue) {
+      return "N/A";
+    }
+
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+      return "N/A";
+    }
+
+    return date.toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const getStatusLabel = (status) => {
+    if (!status) {
+      return "N/A";
+    }
+
+    return String(status).replace(/_/g, " ");
+  };
+
   return (
     <section className="student-attendance">
+      {/* Loading State */}
+      {loading && (
+        <div className="student-attendance-note">
+          <div className="student-attendance-note-icon">
+            <FontAwesomeIcon icon={faClock} />
+          </div>
+
+          <div>
+            <strong>Loading attendance</strong>
+            <span>Fetching your attendance records...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error State */}
+      {!loading && error && (
+        <div className="student-attendance-note">
+          <div className="student-attendance-note-icon">
+            <FontAwesomeIcon icon={faCircleXmark} />
+          </div>
+
+          <div>
+            <strong>Unable to load attendance</strong>
+            <span>{error}</span>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="student-attendance-header">
         <div>
-          <p className="student-attendance-eyebrow">ATTENDANCE MONITORING</p>
+          <p className="student-attendance-eyebrow">
+            ATTENDANCE MONITORING
+          </p>
 
           <h1>Attendance</h1>
 
@@ -34,8 +195,10 @@ function Attendance() {
 
         <div className="student-attendance-semester">
           <span>Current Semester</span>
-          <strong>N/A</strong>
-          <small>Academic Year: N/A</small>
+
+          <strong>{currentSemester}</strong>
+
+          <small>Academic Year: {academicYear}</small>
 
           <div className="student-attendance-semester-icon">
             <FontAwesomeIcon icon={faBookOpen} />
@@ -52,7 +215,11 @@ function Attendance() {
 
           <div>
             <span>Overall Attendance</span>
-            <strong>N/A</strong>
+
+            <strong>
+              {formatPercentage(overallAttendance)}
+            </strong>
+
             <small>Attendance rate</small>
           </div>
         </article>
@@ -64,7 +231,11 @@ function Attendance() {
 
           <div>
             <span>Classes Attended</span>
-            <strong>N/A</strong>
+
+            <strong>
+              {summary.length > 0 ? totalPresent : "N/A"}
+            </strong>
+
             <small>Present sessions</small>
           </div>
         </article>
@@ -76,7 +247,11 @@ function Attendance() {
 
           <div>
             <span>Classes Missed</span>
-            <strong>N/A</strong>
+
+            <strong>
+              {summary.length > 0 ? totalAbsent : "N/A"}
+            </strong>
+
             <small>Absent sessions</small>
           </div>
         </article>
@@ -88,7 +263,11 @@ function Attendance() {
 
           <div>
             <span>Total Classes</span>
-            <strong>N/A</strong>
+
+            <strong>
+              {summary.length > 0 ? totalClasses : "N/A"}
+            </strong>
+
             <small>Recorded sessions</small>
           </div>
         </article>
@@ -100,6 +279,7 @@ function Attendance() {
           <div className="student-attendance-card-header">
             <div>
               <h2>Attendance Overview</h2>
+
               <p>Your attendance summary</p>
             </div>
 
@@ -110,15 +290,18 @@ function Attendance() {
 
           <div className="student-attendance-overview">
             <div className="student-attendance-circle">
-              <span>N/A</span>
+              <span>
+                {formatPercentage(overallAttendance)}
+              </span>
             </div>
 
             <div className="student-attendance-overview-text">
               <strong>Overall Attendance</strong>
 
               <span>
-                Attendance data will appear here once attendance records are
-                available.
+                {summary.length > 0
+                  ? "Your attendance summary is based on the recorded sessions provided by the backend."
+                  : "Attendance data will appear here once attendance records are available."}
               </span>
             </div>
           </div>
@@ -129,7 +312,10 @@ function Attendance() {
 
               <div>
                 <small>Present</small>
-                <strong>N/A</strong>
+
+                <strong>
+                  {summary.length > 0 ? totalPresent : "N/A"}
+                </strong>
               </div>
             </div>
 
@@ -138,7 +324,10 @@ function Attendance() {
 
               <div>
                 <small>Absent</small>
-                <strong>N/A</strong>
+
+                <strong>
+                  {summary.length > 0 ? totalAbsent : "N/A"}
+                </strong>
               </div>
             </div>
 
@@ -147,6 +336,7 @@ function Attendance() {
 
               <div>
                 <small>Late</small>
+
                 <strong>N/A</strong>
               </div>
             </div>
@@ -156,7 +346,10 @@ function Attendance() {
 
               <div>
                 <small>Total Classes</small>
-                <strong>N/A</strong>
+
+                <strong>
+                  {summary.length > 0 ? totalClasses : "N/A"}
+                </strong>
               </div>
             </div>
           </div>
@@ -166,6 +359,7 @@ function Attendance() {
           <div className="student-attendance-card-header">
             <div>
               <h2>Today's Schedule</h2>
+
               <p>Your classes for today</p>
             </div>
 
@@ -194,6 +388,7 @@ function Attendance() {
         <div className="student-attendance-card-header course-header">
           <div>
             <h2>Course-wise Attendance</h2>
+
             <p>Your attendance by course</p>
           </div>
         </div>
@@ -252,22 +447,56 @@ function Attendance() {
             </thead>
 
             <tbody>
-              <tr>
-                <td colSpan="8">
-                  <div className="student-table-empty">
-                    <div className="student-attendance-empty-icon">
-                      <FontAwesomeIcon icon={faFileLines} />
+              {summary.length > 0 ? (
+                summary.map((course) => (
+                  <tr
+                    key={`${course.offering_id}-${course.course_code}`}
+                  >
+                    <td>{course.course_code || "N/A"}</td>
+
+                    <td>{course.course_name || "N/A"}</td>
+
+                    <td>{course.semester || "N/A"}</td>
+
+                    <td>
+                      {course.total_sessions ?? "N/A"}
+                    </td>
+
+                    <td>
+                      {course.present_sessions ?? "N/A"}
+                    </td>
+
+                    <td>
+                      {course.absent_sessions ?? "N/A"}
+                    </td>
+
+                    <td>N/A</td>
+
+                    <td>
+                      {formatPercentage(
+                        course.attendance_percentage
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="8">
+                    <div className="student-table-empty">
+                      <div className="student-attendance-empty-icon">
+                        <FontAwesomeIcon icon={faFileLines} />
+                      </div>
+
+                      <h3>No course data available</h3>
+
+                      <p>
+                        Course-wise attendance will appear here once
+                        attendance records are available.
+                      </p>
                     </div>
-
-                    <h3>No course data available</h3>
-
-                    <p>
-                      Course-wise attendance will appear here once attendance
-                      records are available.
-                    </p>
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -278,15 +507,19 @@ function Attendance() {
         <div className="student-attendance-card-header course-header">
           <div>
             <h2>Recent Attendance</h2>
+
             <p>Your latest attendance records</p>
           </div>
 
           <button
             type="button"
             className="student-attendance-view-all"
-            onClick={() => navigate("/student/attendance-history")}
+            onClick={() =>
+              navigate("/student/attendance-history")
+            }
           >
             View All
+
             <FontAwesomeIcon icon={faArrowRight} />
           </button>
         </div>
@@ -304,22 +537,56 @@ function Attendance() {
             </thead>
 
             <tbody>
-              <tr>
-                <td colSpan="5">
-                  <div className="student-table-empty">
-                    <div className="student-attendance-empty-icon">
-                      <FontAwesomeIcon icon={faCalendarCheck} />
+              {attendance.length > 0 ? (
+                attendance.slice(0, 5).map((record) => (
+                  <tr key={record.attendance_id}>
+                    <td>
+                      {formatDate(record.session_date)}
+                    </td>
+
+                    <td>
+                      <div>
+                        <strong>
+                          {record.course_code || "N/A"}
+                        </strong>
+
+                        <small>
+                          {record.course_name || "N/A"}
+                        </small>
+                      </div>
+                    </td>
+
+                    <td>
+                      {record.section || "N/A"}
+                    </td>
+
+                    <td>
+                      {formatTime(record.marked_at)}
+                    </td>
+
+                    <td>
+                      {getStatusLabel(record.status)}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5">
+                    <div className="student-table-empty">
+                      <div className="student-attendance-empty-icon">
+                        <FontAwesomeIcon icon={faCalendarCheck} />
+                      </div>
+
+                      <h3>No attendance records available</h3>
+
+                      <p>
+                        Recent attendance records will appear here once
+                        attendance data is available.
+                      </p>
                     </div>
-
-                    <h3>No attendance records available</h3>
-
-                    <p>
-                      Recent attendance records will appear here once
-                      attendance data is available.
-                    </p>
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -335,9 +602,9 @@ function Attendance() {
           <strong>Attendance data</strong>
 
           <span>
-            Attendance records will be provided by the backend for the
-            authenticated student. The frontend will display the returned
-            attendance information and will not store attendance results
+            Attendance records are provided by the backend for the
+            authenticated student. The frontend displays the returned
+            attendance information and does not store attendance results
             locally.
           </span>
         </div>

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+
 import "./Students.css";
 
 const students = [];
@@ -86,7 +87,7 @@ function Students() {
   };
 
   const hasFilters =
-    searchTerm ||
+    Boolean(searchTerm) ||
     selectedClass !== "All Classes" ||
     department !== "All" ||
     semester !== "All" ||
@@ -214,14 +215,21 @@ function Students() {
       <section className="students-page-header">
         <div>
           <span className="students-eyebrow">FACULTY PORTAL</span>
+
           <h1>Students</h1>
+
           <p>
             View students enrolled in your assigned classes and monitor their
             academic and attendance information.
           </p>
         </div>
 
-        <button type="button" className="students-primary-button" disabled>
+        <button
+          type="button"
+          className="students-primary-button"
+          disabled
+          title="Attendance data is not connected yet"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
               d="M4 5h16v14H4z"
@@ -238,6 +246,7 @@ function Students() {
               strokeLinecap="round"
             />
           </svg>
+
           View Attendance
         </button>
       </section>
@@ -259,7 +268,10 @@ function Students() {
 
       <section className="students-filters-card">
         <div className="students-filter search-filter">
-          <label htmlFor="student-search">Search Students</label>
+          <label htmlFor="student-search">
+            Search Students
+          </label>
+
           <div className="students-search-wrapper">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle
@@ -291,6 +303,7 @@ function Students() {
 
         <div className="students-filter">
           <label htmlFor="student-class">Class</label>
+
           <select
             id="student-class"
             value={selectedClass}
@@ -305,7 +318,10 @@ function Students() {
         </div>
 
         <div className="students-filter">
-          <label htmlFor="student-department">Department</label>
+          <label htmlFor="student-department">
+            Department
+          </label>
+
           <select
             id="student-department"
             value={department}
@@ -320,7 +336,10 @@ function Students() {
         </div>
 
         <div className="students-filter">
-          <label htmlFor="student-semester">Semester</label>
+          <label htmlFor="student-semester">
+            Semester
+          </label>
+
           <select
             id="student-semester"
             value={semester}
@@ -335,7 +354,10 @@ function Students() {
         </div>
 
         <div className="students-filter">
-          <label htmlFor="student-status">Status</label>
+          <label htmlFor="student-status">
+            Status
+          </label>
+
           <select
             id="student-status"
             value={status}
@@ -355,7 +377,7 @@ function Students() {
           onClick={clearFilters}
           disabled={!hasFilters}
         >
-          <span>↻</span>
+          <span aria-hidden="true">↻</span>
           Clear Filters
         </button>
       </section>
@@ -364,7 +386,10 @@ function Students() {
         <div className="students-section-heading">
           <div>
             <h2>Students</h2>
-            <p>Students enrolled in your assigned classes.</p>
+
+            <p>
+              Students enrolled in your assigned classes.
+            </p>
           </div>
         </div>
 
@@ -399,6 +424,7 @@ function Students() {
               </div>
 
               <h3>No students available</h3>
+
               <p>
                 Students enrolled in your assigned classes will appear here
                 when enrollment data is provided by the backend.
@@ -427,7 +453,10 @@ function Students() {
               </div>
 
               <h3>No matching students</h3>
-              <p>Try changing your search or filters.</p>
+
+              <p>
+                Try changing your search or filters.
+              </p>
             </div>
           ) : (
             <div className="students-table-wrapper">
@@ -461,9 +490,18 @@ function Students() {
                       </td>
 
                       <td>{student.studentId}</td>
-                      <td>{student.className || "N/A"}</td>
-                      <td>{student.department || "N/A"}</td>
-                      <td>{student.attendanceRate || "N/A"}</td>
+
+                      <td>
+                        {student.className || "N/A"}
+                      </td>
+
+                      <td>
+                        {student.department || "N/A"}
+                      </td>
+
+                      <td>
+                        {student.attendanceRate || "N/A"}
+                      </td>
 
                       <td>
                         <span
@@ -501,9 +539,15 @@ function Students() {
             <button type="button" disabled>
               ‹ Previous
             </button>
-            <button type="button" className="active" disabled>
+
+            <button
+              type="button"
+              className="active"
+              disabled
+            >
               1
             </button>
+
             <button type="button" disabled>
               Next ›
             </button>
@@ -525,10 +569,14 @@ function Students() {
         </div>
 
         <div>
-          <strong>Student data integration pending</strong>
+          <strong>
+            Student data integration pending
+          </strong>
+
           <p>
-            Student enrollment, attendance and profile information will be
-            loaded from the Flask backend once the API is available.
+            Student enrollment, attendance and profile information
+            will be loaded from the Flask backend when the required
+            faculty student API is available.
           </p>
         </div>
       </div>
@@ -536,16 +584,25 @@ function Students() {
       {selectedStudent && (
         <div
           className="students-modal-backdrop"
+          role="presentation"
           onMouseDown={closeStudentModal}
         >
           <div
             className="students-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="faculty-student-profile-title"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="students-modal-header">
               <div>
-                <span className="students-eyebrow">STUDENT PROFILE</span>
-                <h2>Student Overview</h2>
+                <span className="students-eyebrow">
+                  STUDENT PROFILE
+                </span>
+
+                <h2 id="faculty-student-profile-title">
+                  Student Overview
+                </h2>
               </div>
 
               <button
@@ -565,7 +622,9 @@ function Students() {
 
               <div>
                 <h3>{selectedStudent.fullName}</h3>
+
                 <p>{selectedStudent.studentId}</p>
+
                 <span>{selectedStudent.email}</span>
               </div>
             </div>
@@ -573,27 +632,40 @@ function Students() {
             <div className="student-profile-grid">
               <div>
                 <span>Department</span>
-                <strong>{selectedStudent.department || "N/A"}</strong>
+
+                <strong>
+                  {selectedStudent.department || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Program</span>
-                <strong>{selectedStudent.program || "N/A"}</strong>
+
+                <strong>
+                  {selectedStudent.program || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Semester</span>
-                <strong>{selectedStudent.semester || "N/A"}</strong>
+
+                <strong>
+                  {selectedStudent.semester || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Status</span>
-                <strong>{selectedStudent.status || "N/A"}</strong>
+
+                <strong>
+                  {selectedStudent.status || "N/A"}
+                </strong>
               </div>
             </div>
 
             <div className="student-profile-section">
               <h3>Enrolled Classes</h3>
+
               <div className="student-profile-empty">
                 Enrollment details will appear when backend data is available.
               </div>
@@ -601,6 +673,7 @@ function Students() {
 
             <div className="student-profile-section">
               <h3>Attendance Summary</h3>
+
               <div className="student-attendance-summary">
                 <div>
                   <span>Overall Attendance</span>

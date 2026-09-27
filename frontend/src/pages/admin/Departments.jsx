@@ -11,7 +11,7 @@ const EMPTY_METRICS = {
 };
 
 function formatMetric(value) {
-  return value === null ? "N/A" : value;
+  return value === null || value === undefined ? "N/A" : value;
 }
 
 function getInitials(name) {
@@ -20,7 +20,8 @@ function getInitials(name) {
   }
 
   return name
-    .split(" ")
+    .trim()
+    .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0])
@@ -49,15 +50,21 @@ function Departments() {
     return departments.filter((department) => {
       const matchesSearch =
         !search ||
-        department.departmentId?.toLowerCase().includes(search) ||
+        department.departmentId
+          ?.toLowerCase()
+          .includes(search) ||
         department.name?.toLowerCase().includes(search);
 
       const matchesStatus =
-        status === "All" || department.status === status;
+        status === "All" ||
+        department.status === status;
 
       return matchesSearch && matchesStatus;
     });
   }, [searchTerm, status]);
+
+  const hasActiveFilters =
+    Boolean(searchTerm) || status !== "All";
 
   const handleClearFilters = () => {
     setSearchTerm("");
@@ -75,22 +82,31 @@ function Departments() {
 
   const handleAddDepartment = (event) => {
     event.preventDefault();
+  };
 
-    // Backend integration is pending.
-    // Do not create fake department records here.
+  const handleCloseModal = () => {
+    setShowAddModal(false);
+
+    setFormData({
+      departmentId: "",
+      departmentName: "",
+      description: "",
+    });
   };
 
   return (
     <section className="department-management-page">
       <header className="department-page-header">
         <div>
-          <span className="department-eyebrow">Admin Portal</span>
+          <span className="department-eyebrow">
+            Admin Portal
+          </span>
 
           <h1>Department Management</h1>
 
           <p>
-            Manage academic departments and their associated faculty and
-            student records.
+            Manage academic departments and their associated
+            faculty and student records.
           </p>
         </div>
 
@@ -106,33 +122,48 @@ function Departments() {
 
       <div className="department-summary-grid">
         <article className="department-summary-card department-summary-blue">
-          <div className="department-summary-icon" aria-hidden="true">
-            <span>▦</span>
+          <div
+            className="department-summary-icon"
+            aria-hidden="true"
+          >
+            <span>▪</span>
           </div>
 
           <span>Total Departments</span>
 
-          <strong>{formatMetric(metrics.total)}</strong>
+          <strong>
+            {formatMetric(metrics.total)}
+          </strong>
         </article>
 
         <article className="department-summary-card department-summary-green">
-          <div className="department-summary-icon" aria-hidden="true">
+          <div
+            className="department-summary-icon"
+            aria-hidden="true"
+          >
             <span>✓</span>
           </div>
 
           <span>Active Departments</span>
 
-          <strong>{formatMetric(metrics.active)}</strong>
+          <strong>
+            {formatMetric(metrics.active)}
+          </strong>
         </article>
 
         <article className="department-summary-card department-summary-red">
-          <div className="department-summary-icon" aria-hidden="true">
+          <div
+            className="department-summary-icon"
+            aria-hidden="true"
+          >
             <span>−</span>
           </div>
 
           <span>Inactive Departments</span>
 
-          <strong>{formatMetric(metrics.inactive)}</strong>
+          <strong>
+            {formatMetric(metrics.inactive)}
+          </strong>
         </article>
       </div>
 
@@ -150,18 +181,24 @@ function Departments() {
               type="search"
               placeholder="Search by department name or ID..."
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(event) =>
+                setSearchTerm(event.target.value)
+              }
             />
           </div>
         </div>
 
         <div className="department-filter-field">
-          <label htmlFor="department-status">Status</label>
+          <label htmlFor="department-status">
+            Status
+          </label>
 
           <select
             id="department-status"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            onChange={(event) =>
+              setStatus(event.target.value)
+            }
           >
             {statuses.map((item) => (
               <option key={item} value={item}>
@@ -175,6 +212,7 @@ function Departments() {
           type="button"
           className="department-clear-button"
           onClick={handleClearFilters}
+          disabled={!hasActiveFilters}
         >
           ↻ Clear Filters
         </button>
@@ -205,25 +243,38 @@ function Departments() {
                       </div>
 
                       <div>
-                        <strong>{department.name}</strong>
-                        <span>{department.departmentId}</span>
+                        <strong>
+                          {department.name}
+                        </strong>
+
+                        <span>
+                          {department.departmentId}
+                        </span>
                       </div>
                     </div>
                   </td>
 
-                  <td>{department.departmentId}</td>
+                  <td>
+                    {department.departmentId}
+                  </td>
 
-                  <td>{department.headName || "N/A"}</td>
+                  <td>
+                    {department.headName || "N/A"}
+                  </td>
 
-                  <td>{department.facultyCount ?? "N/A"}</td>
+                  <td>
+                    {department.facultyCount ?? "N/A"}
+                  </td>
 
-                  <td>{department.studentCount ?? "N/A"}</td>
+                  <td>
+                    {department.studentCount ?? "N/A"}
+                  </td>
 
                   <td>
                     <span
                       className={`department-status department-status-${department.status?.toLowerCase()}`}
                     >
-                      ● {department.status}
+                      ● {department.status || "N/A"}
                     </span>
                   </td>
 
@@ -232,6 +283,8 @@ function Departments() {
                       type="button"
                       className="department-action-button"
                       aria-label={`Actions for ${department.name}`}
+                      disabled
+                      title="Department management API is not available yet"
                     >
                       ⋮
                     </button>
@@ -247,14 +300,15 @@ function Departments() {
                 className="department-empty-icon"
                 aria-hidden="true"
               >
-                ▦
+                ▪
               </div>
 
               <h2>No departments available</h2>
 
               <p>
-                Department records will be displayed here when they
-                are provided by the backend.
+                Department records will appear here when the
+                required department management API is available
+                from the backend.
               </p>
             </div>
           ) : filteredDepartments.length === 0 ? (
@@ -310,11 +364,14 @@ function Departments() {
         </div>
 
         <div>
-          <strong>Backend integration pending</strong>
+          <strong>
+            Department management integration pending
+          </strong>
 
           <span>
-            Department records will be loaded from the backend API
-            when the required endpoint is available.
+            The current Flask backend does not expose the
+            department management API required to load, create,
+            update or delete department records.
           </span>
         </div>
 
@@ -329,7 +386,7 @@ function Departments() {
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setShowAddModal(false);
+              handleCloseModal();
             }
           }}
         >
@@ -350,15 +407,15 @@ function Departments() {
                 </h2>
 
                 <p>
-                  Enter the department information required by the
-                  system.
+                  Enter department information once the
+                  department management API is available.
                 </p>
               </div>
 
               <button
                 type="button"
                 className="department-modal-close"
-                onClick={() => setShowAddModal(false)}
+                onClick={handleCloseModal}
                 aria-label="Close add department dialog"
               >
                 ×
@@ -382,6 +439,7 @@ function Departments() {
                       value={formData.departmentId}
                       onChange={handleFormChange}
                       placeholder="Enter department ID"
+                      disabled
                     />
                   </div>
 
@@ -397,6 +455,7 @@ function Departments() {
                       value={formData.departmentName}
                       onChange={handleFormChange}
                       placeholder="Enter department name"
+                      disabled
                     />
                   </div>
 
@@ -415,16 +474,27 @@ function Departments() {
                       onChange={handleFormChange}
                       placeholder="Enter department description"
                       rows="4"
+                      disabled
                     />
                   </div>
                 </div>
+              </div>
+
+              <div className="department-modal-backend-note">
+                <span aria-hidden="true">i</span>
+
+                <span>
+                  Department creation is currently disabled
+                  until the Flask Department API contract is
+                  available.
+                </span>
               </div>
 
               <div className="department-modal-footer">
                 <button
                   type="button"
                   className="department-secondary-button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={handleCloseModal}
                 >
                   Cancel
                 </button>

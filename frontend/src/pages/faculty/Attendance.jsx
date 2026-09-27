@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+
 import "./Attendance.css";
 
 const attendanceRecords = [];
@@ -61,7 +62,12 @@ function Attendance() {
       const matchesStatus =
         status === "All" || record.status === status;
 
-      return matchesSearch && matchesClass && matchesDate && matchesStatus;
+      return (
+        matchesSearch &&
+        matchesClass &&
+        matchesDate &&
+        matchesStatus
+      );
     });
   }, [searchTerm, selectedClass, date, status]);
 
@@ -73,9 +79,9 @@ function Attendance() {
   };
 
   const hasFilters =
-    searchTerm ||
+    Boolean(searchTerm) ||
     selectedClass !== "All Classes" ||
-    date ||
+    Boolean(date) ||
     status !== "All";
 
   const metrics = [
@@ -191,11 +197,15 @@ function Attendance() {
     <div className="faculty-attendance-page">
       <section className="attendance-page-header">
         <div>
-          <span className="attendance-eyebrow">FACULTY PORTAL</span>
+          <span className="attendance-eyebrow">
+            FACULTY PORTAL
+          </span>
+
           <h1>Attendance</h1>
+
           <p>
-            Conduct attendance sessions, monitor attendance records and review
-            student attendance for your assigned classes.
+            Conduct attendance sessions, monitor attendance records and
+            review student attendance for your assigned classes.
           </p>
         </div>
 
@@ -204,15 +214,20 @@ function Attendance() {
           className="attendance-primary-button"
           onClick={() => setShowStartModal(true)}
         >
-          <span>+</span>
+          <span aria-hidden="true">+</span>
           Start Attendance
         </button>
       </section>
 
       <section className="attendance-metrics-grid">
         {metrics.map((metric) => (
-          <article className="attendance-metric-card" key={metric.label}>
-            <div className={`attendance-metric-icon ${metric.tone}`}>
+          <article
+            className="attendance-metric-card"
+            key={metric.label}
+          >
+            <div
+              className={`attendance-metric-icon ${metric.tone}`}
+            >
               {metric.icon}
             </div>
 
@@ -256,10 +271,13 @@ function Attendance() {
             </svg>
           </div>
 
-          <h3>No attendance session is currently active</h3>
+          <h3>
+            No attendance session is currently active
+          </h3>
+
           <p>
-            Start a session for one of your assigned classes when attendance
-            services are available.
+            Start a session for one of your assigned classes when
+            attendance session services are available.
           </p>
 
           <button
@@ -276,13 +294,18 @@ function Attendance() {
         <div className="attendance-section-heading">
           <div>
             <h2>Attendance Records</h2>
-            <p>Review attendance records for your assigned classes.</p>
+
+            <p>
+              Review attendance records for your assigned classes.
+            </p>
           </div>
         </div>
 
         <div className="attendance-filters-card">
           <div className="attendance-filter search-filter">
-            <label htmlFor="attendance-search">Search Student</label>
+            <label htmlFor="attendance-search">
+              Search Student
+            </label>
 
             <div className="attendance-search-wrapper">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -307,18 +330,25 @@ function Attendance() {
                 id="attendance-search"
                 type="search"
                 value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
+                onChange={(event) =>
+                  setSearchTerm(event.target.value)
+                }
                 placeholder="Search by student ID or name..."
               />
             </div>
           </div>
 
           <div className="attendance-filter">
-            <label htmlFor="attendance-class">Class</label>
+            <label htmlFor="attendance-class">
+              Class
+            </label>
+
             <select
               id="attendance-class"
               value={selectedClass}
-              onChange={(event) => setSelectedClass(event.target.value)}
+              onChange={(event) =>
+                setSelectedClass(event.target.value)
+              }
             >
               {classOptions.map((option) => (
                 <option key={option} value={option}>
@@ -329,21 +359,31 @@ function Attendance() {
           </div>
 
           <div className="attendance-filter">
-            <label htmlFor="attendance-date">Date</label>
+            <label htmlFor="attendance-date">
+              Date
+            </label>
+
             <input
               id="attendance-date"
               type="date"
               value={date}
-              onChange={(event) => setDate(event.target.value)}
+              onChange={(event) =>
+                setDate(event.target.value)
+              }
             />
           </div>
 
           <div className="attendance-filter">
-            <label htmlFor="attendance-status">Status</label>
+            <label htmlFor="attendance-status">
+              Status
+            </label>
+
             <select
               id="attendance-status"
               value={status}
-              onChange={(event) => setStatus(event.target.value)}
+              onChange={(event) =>
+                setStatus(event.target.value)
+              }
             >
               {statuses.map((option) => (
                 <option key={option} value={option}>
@@ -359,7 +399,7 @@ function Attendance() {
             onClick={clearFilters}
             disabled={!hasFilters}
           >
-            <span>↻</span>
+            <span aria-hidden="true">↻</span>
             Clear Filters
           </button>
         </div>
@@ -386,10 +426,13 @@ function Attendance() {
                 </svg>
               </div>
 
-              <h3>No attendance records available</h3>
+              <h3>
+                No attendance records available
+              </h3>
+
               <p>
-                Attendance records will appear here when attendance session
-                data is provided by the backend.
+                Attendance records will appear here when a faculty
+                attendance-record API is provided by the backend.
               </p>
             </div>
           ) : filteredRecords.length === 0 ? (
@@ -415,7 +458,10 @@ function Attendance() {
               </div>
 
               <h3>No matching records</h3>
-              <p>Try changing your search or filters.</p>
+
+              <p>
+                Try changing your search or filters.
+              </p>
             </div>
           ) : (
             <div className="attendance-table-wrapper">
@@ -441,19 +487,27 @@ function Attendance() {
                             {getInitials(record.studentName)}
                           </div>
 
-                          <strong>{record.studentName}</strong>
+                          <strong>
+                            {record.studentName}
+                          </strong>
                         </div>
                       </td>
 
                       <td>{record.studentId}</td>
-                      <td>{record.className || "N/A"}</td>
+
+                      <td>
+                        {record.className || "N/A"}
+                      </td>
+
                       <td>{record.date || "N/A"}</td>
+
                       <td>{record.time || "N/A"}</td>
 
                       <td>
                         <span
                           className={`attendance-status ${
-                            record.status?.toLowerCase() || "unknown"
+                            record.status?.toLowerCase() ||
+                            "unknown"
                           }`}
                         >
                           {record.status || "N/A"}
@@ -464,7 +518,9 @@ function Attendance() {
                         <button
                           type="button"
                           className="attendance-view-button"
-                          onClick={() => setSelectedRecord(record)}
+                          onClick={() =>
+                            setSelectedRecord(record)
+                          }
                         >
                           View
                         </button>
@@ -479,17 +535,23 @@ function Attendance() {
 
         <div className="attendance-list-footer">
           <span>
-            Showing {filteredRecords.length} of {attendanceRecords.length}{" "}
-            records
+            Showing {filteredRecords.length} of{" "}
+            {attendanceRecords.length} records
           </span>
 
           <div className="attendance-pagination">
             <button type="button" disabled>
               ‹ Previous
             </button>
-            <button type="button" className="active" disabled>
+
+            <button
+              type="button"
+              className="active"
+              disabled
+            >
               1
             </button>
+
             <button type="button" disabled>
               Next ›
             </button>
@@ -501,7 +563,10 @@ function Attendance() {
         <div className="attendance-section-heading">
           <div>
             <h2>Recent Attendance Sessions</h2>
-            <p>Review completed attendance sessions.</p>
+
+            <p>
+              Review completed attendance sessions.
+            </p>
           </div>
         </div>
 
@@ -528,10 +593,13 @@ function Attendance() {
                 </svg>
               </div>
 
-              <h3>No attendance sessions available</h3>
+              <h3>
+                No attendance sessions available
+              </h3>
+
               <p>
-                Completed attendance sessions will appear here when backend
-                session data is available.
+                Completed attendance sessions will appear here when
+                backend session data is available.
               </p>
             </div>
           ) : (
@@ -556,6 +624,7 @@ function Attendance() {
                       <td>{session.session || "N/A"}</td>
                       <td>{session.students || "N/A"}</td>
                       <td>{session.status || "N/A"}</td>
+
                       <td>
                         <button
                           type="button"
@@ -574,14 +643,21 @@ function Attendance() {
       </section>
 
       <section className="attendance-integration-notice">
-        <div className="attendance-notice-icon">i</div>
+        <div className="attendance-notice-icon">
+          i
+        </div>
 
         <div>
-          <strong>Attendance service integration pending</strong>
+          <strong>
+            Attendance session integration pending
+          </strong>
+
           <p>
-            Attendance sessions, face recognition results and attendance
-            records will be loaded from the Flask backend once the API is
-            available.
+            The Flask backend currently provides the face-recognition
+            attendance recording endpoint, but faculty session creation,
+            session listing and attendance-record retrieval APIs are not
+            available yet. These APIs are required before this page can
+            perform live attendance operations.
           </p>
         </div>
       </section>
@@ -589,16 +665,27 @@ function Attendance() {
       {showStartModal && (
         <div
           className="attendance-modal-backdrop"
+          role="presentation"
           onMouseDown={() => setShowStartModal(false)}
         >
           <div
             className="attendance-modal"
-            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="start-attendance-title"
+            onMouseDown={(event) =>
+              event.stopPropagation()
+            }
           >
             <div className="attendance-modal-header">
               <div>
-                <span className="attendance-eyebrow">ATTENDANCE</span>
-                <h2>Start Attendance</h2>
+                <span className="attendance-eyebrow">
+                  ATTENDANCE
+                </span>
+
+                <h2 id="start-attendance-title">
+                  Start Attendance
+                </h2>
               </div>
 
               <button
@@ -613,10 +700,19 @@ function Attendance() {
 
             <div className="attendance-modal-body">
               <div className="attendance-form-group">
-                <label htmlFor="start-class">Class</label>
-                <select id="start-class" defaultValue="All Classes">
+                <label htmlFor="start-class">
+                  Class
+                </label>
+
+                <select
+                  id="start-class"
+                  defaultValue="All Classes"
+                >
                   {classOptions.map((option) => (
-                    <option key={option} value={option}>
+                    <option
+                      key={option}
+                      value={option}
+                    >
                       {option}
                     </option>
                   ))}
@@ -624,17 +720,28 @@ function Attendance() {
               </div>
 
               <div className="attendance-form-group">
-                <label htmlFor="start-date">Date</label>
-                <input id="start-date" type="date" />
+                <label htmlFor="start-date">
+                  Date
+                </label>
+
+                <input
+                  id="start-date"
+                  type="date"
+                />
               </div>
 
               <div className="attendance-session-pending">
                 <div className="attendance-pending-dot" />
+
                 <div>
-                  <strong>Attendance service unavailable</strong>
+                  <strong>
+                    Attendance session API unavailable
+                  </strong>
+
                   <p>
-                    A session can be started once the Flask attendance API and
-                    face-recognition service are connected.
+                    The current backend does not yet provide the
+                    session-creation endpoint required to start an
+                    attendance session.
                   </p>
                 </div>
               </div>
@@ -664,18 +771,27 @@ function Attendance() {
       {selectedRecord && (
         <div
           className="attendance-modal-backdrop"
+          role="presentation"
           onMouseDown={() => setSelectedRecord(null)}
         >
           <div
             className="attendance-modal"
-            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="attendance-details-title"
+            onMouseDown={(event) =>
+              event.stopPropagation()
+            }
           >
             <div className="attendance-modal-header">
               <div>
                 <span className="attendance-eyebrow">
                   ATTENDANCE RECORD
                 </span>
-                <h2>Attendance Details</h2>
+
+                <h2 id="attendance-details-title">
+                  Attendance Details
+                </h2>
               </div>
 
               <button
@@ -691,37 +807,58 @@ function Attendance() {
             <div className="attendance-detail-grid">
               <div>
                 <span>Student</span>
-                <strong>{selectedRecord.studentName || "N/A"}</strong>
+
+                <strong>
+                  {selectedRecord.studentName || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Student ID</span>
-                <strong>{selectedRecord.studentId || "N/A"}</strong>
+
+                <strong>
+                  {selectedRecord.studentId || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Class</span>
-                <strong>{selectedRecord.className || "N/A"}</strong>
+
+                <strong>
+                  {selectedRecord.className || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Date</span>
-                <strong>{selectedRecord.date || "N/A"}</strong>
+
+                <strong>
+                  {selectedRecord.date || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Time</span>
-                <strong>{selectedRecord.time || "N/A"}</strong>
+
+                <strong>
+                  {selectedRecord.time || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Status</span>
-                <strong>{selectedRecord.status || "N/A"}</strong>
+
+                <strong>
+                  {selectedRecord.status || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Recognition</span>
-                <strong>{selectedRecord.recognition || "N/A"}</strong>
+
+                <strong>
+                  {selectedRecord.recognition || "N/A"}
+                </strong>
               </div>
             </div>
 
