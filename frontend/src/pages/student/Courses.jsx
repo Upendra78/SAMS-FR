@@ -1,3 +1,4 @@
+import { useEffect, useMemo, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faBookOpen,
@@ -13,11 +14,101 @@ import {
   faArrowRight,
   faCircleInfo,
 } from "@fortawesome/free-solid-svg-icons";
+import {
+  getStudentCourses,
+} from "../../services/attendanceService";
 import "./Courses.css";
 
-const courseCards = [];
-
 function Courses() {
+  const [courses, setCourses] = useState([]);
+  const [search, setSearch] = useState("");
+  const [semesterFilter, setSemesterFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    async function loadCourses() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const result = await getStudentCourses();
+
+        if (result?.success) {
+          setCourses(result.data ?? []);
+        } else {
+          setCourses([]);
+          setError(
+            result?.message || "Unable to load course information.",
+          );
+        }
+      } catch (err) {
+        setCourses([]);
+        setError(
+          err?.response?.data?.message ||
+            "Unable to load course information.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadCourses();
+  }, []);
+
+  const semesters = useMemo(() => {
+    const uniqueSemesters = courses
+      .map((course) => course.semester)
+      .filter(Boolean);
+
+    return [...new Set(uniqueSemesters)];
+  }, [courses]);
+
+  const filteredCourses = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+
+    return courses.filter((course) => {
+      const matchesSearch =
+        !normalizedSearch ||
+        String(course.course_code || "")
+          .toLowerCase()
+          .includes(normalizedSearch) ||
+        String(course.course_name || "")
+          .toLowerCase()
+          .includes(normalizedSearch);
+
+      const matchesSemester =
+        semesterFilter === "all" ||
+        String(course.semester || "") === semesterFilter;
+
+      /*
+       * The confirmed backend course endpoint does not provide
+       * a course status field. Until that field exists, the only
+       * supported status value is "all".
+       */
+      const matchesStatus = statusFilter === "all";
+
+      return matchesSearch && matchesSemester && matchesStatus;
+    });
+  }, [courses, search, semesterFilter, statusFilter]);
+
+  const currentSemester =
+    courses.length > 0
+      ? courses[0]?.semester || "N/A"
+      : "N/A";
+
+  const academicYear =
+    courses.length > 0
+      ? courses[0]?.academic_year || "N/A"
+      : "N/A";
+
+  const clearFilters = () => {
+    setSearch("");
+    setSemesterFilter("all");
+    setStatusFilter("all");
+  };
+
   return (
     <section className="student-courses">
       {/* Header */}
@@ -35,8 +126,10 @@ function Courses() {
 
         <div className="student-courses-semester">
           <span>Current Semester</span>
-          <strong>N/A</strong>
-          <small>Academic Year: N/A</small>
+
+          <strong>{currentSemester}</strong>
+
+          <small>Academic Year: {academicYear}</small>
 
           <div className="student-courses-semester-icon">
             <FontAwesomeIcon icon={faGraduationCap} />
@@ -53,7 +146,11 @@ function Courses() {
 
           <div>
             <span>Enrolled Courses</span>
-            <strong>N/A</strong>
+
+            <strong>
+              {courses.length > 0 ? courses.length : "N/A"}
+            </strong>
+
             <small>Total courses enrolled</small>
           </div>
         </article>
@@ -65,8 +162,12 @@ function Courses() {
 
           <div>
             <span>Active Courses</span>
+
             <strong>N/A</strong>
-            <small>Currently in progress</small>
+
+            <small>
+              Course status is not provided by the API
+            </small>
           </div>
         </article>
 
@@ -77,8 +178,12 @@ function Courses() {
 
           <div>
             <span>Completed Courses</span>
+
             <strong>N/A</strong>
-            <small>Successfully completed</small>
+
+            <small>
+              Completion status is not provided by the API
+            </small>
           </div>
         </article>
 
@@ -89,8 +194,12 @@ function Courses() {
 
           <div>
             <span>Average Attendance</span>
+
             <strong>N/A</strong>
-            <small>Across all courses</small>
+
+            <small>
+              Attendance is provided by the attendance API
+            </small>
           </div>
         </article>
       </section>
@@ -104,22 +213,42 @@ function Courses() {
             type="search"
             placeholder="Search courses by code or name..."
             aria-label="Search courses"
-            disabled
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            disabled={loading || Boolean(error)}
           />
         </div>
 
         <label className="student-courses-filter">
           <span>Semester</span>
 
-          <select defaultValue="all" disabled>
+          <select
+            value={semesterFilter}
+            onChange={(event) =>
+              setSemesterFilter(event.target.value)
+            }
+            disabled={loading || Boolean(error)}
+          >
             <option value="all">All</option>
+
+            {semesters.map((semester) => (
+              <option key={semester} value={semester}>
+                {semester}
+              </option>
+            ))}
           </select>
         </label>
 
         <label className="student-courses-filter">
           <span>Status</span>
 
-          <select defaultValue="all" disabled>
+          <select
+            value={statusFilter}
+            onChange={(event) =>
+              setStatusFilter(event.target.value)
+            }
+            disabled
+          >
             <option value="all">All</option>
           </select>
         </label>
@@ -127,9 +256,17 @@ function Courses() {
         <button
           type="button"
           className="student-courses-clear"
-          disabled
+          onClick={clearFilters}
+          disabled={
+            loading ||
+            Boolean(error) ||
+            (!search &&
+              semesterFilter === "all" &&
+              statusFilter === "all")
+          }
         >
           <FontAwesomeIcon icon={faRotate} />
+
           Clear Filters
         </button>
       </section>
@@ -139,98 +276,159 @@ function Courses() {
         <div className="student-courses-section-heading">
           <div>
             <p>ACADEMIC ENROLLMENT</p>
+
             <h2>Your Courses</h2>
           </div>
 
           <span className="student-courses-count">
-            N/A Courses
+            {loading
+              ? "Loading..."
+              : `${filteredCourses.length} ${
+                  filteredCourses.length === 1
+                    ? "Course"
+                    : "Courses"
+                }`}
           </span>
         </div>
 
-        {courseCards.length === 0 ? (
+        {loading ? (
+          <div className="student-courses-empty">
+            <div className="student-courses-empty-icon">
+              <FontAwesomeIcon icon={faClock} />
+            </div>
+
+            <h3>Loading course data</h3>
+
+            <p>
+              Fetching your enrolled courses from the backend.
+            </p>
+          </div>
+        ) : error ? (
+          <div className="student-courses-empty">
+            <div className="student-courses-empty-icon">
+              <FontAwesomeIcon icon={faCircleInfo} />
+            </div>
+
+            <h3>Unable to load courses</h3>
+
+            <p>{error}</p>
+          </div>
+        ) : filteredCourses.length === 0 ? (
           <div className="student-courses-empty">
             <div className="student-courses-empty-icon">
               <FontAwesomeIcon icon={faBookOpen} />
             </div>
 
-            <h3>No course data available</h3>
+            <h3>
+              {courses.length === 0
+                ? "No course data available"
+                : "No matching courses"}
+            </h3>
 
             <p>
-              Your enrolled courses will appear here once course information
-              is provided by the academic system.
+              {courses.length === 0
+                ? "Your enrolled courses will appear here once course information is available from the academic system."
+                : "No enrolled courses match the selected search or semester filter."}
             </p>
           </div>
         ) : (
           <div className="student-courses-grid">
-            {courseCards.map((course) => (
+            {filteredCourses.map((course) => (
               <article
                 className="student-course-card"
-                key={course.id}
+                key={
+                  course.enrollment_id ??
+                  course.offering_id ??
+                  course.course_id
+                }
               >
                 <div className="student-course-card-top">
                   <div className="student-course-code">
-                    {course.code}
+                    {course.course_code || "N/A"}
                   </div>
 
                   <span className="student-course-status">
-                    {course.status}
+                    Enrolled
                   </span>
                 </div>
 
-                <h3>{course.name}</h3>
+                <h3>
+                  {course.course_name || "N/A"}
+                </h3>
 
                 <div className="student-course-details">
                   <div>
                     <FontAwesomeIcon icon={faBuildingColumns} />
+
                     <span>
                       <small>Department</small>
-                      <strong>{course.department}</strong>
+
+                      <strong>N/A</strong>
                     </span>
                   </div>
 
                   <div>
                     <FontAwesomeIcon icon={faBookOpen} />
+
                     <span>
                       <small>Credits</small>
-                      <strong>{course.credits}</strong>
+
+                      <strong>N/A</strong>
                     </span>
                   </div>
 
                   <div>
                     <FontAwesomeIcon icon={faUserTie} />
+
                     <span>
                       <small>Faculty</small>
-                      <strong>{course.faculty}</strong>
+
+                      <strong>N/A</strong>
                     </span>
                   </div>
 
                   <div>
                     <FontAwesomeIcon icon={faCalendarDays} />
+
                     <span>
                       <small>Semester</small>
-                      <strong>{course.semester}</strong>
+
+                      <strong>
+                        {course.semester || "N/A"}
+                      </strong>
                     </span>
                   </div>
 
                   <div>
                     <FontAwesomeIcon icon={faClock} />
+
                     <span>
-                      <small>Schedule</small>
-                      <strong>{course.schedule}</strong>
+                      <small>Room</small>
+
+                      <strong>
+                        {course.room || "N/A"}
+                      </strong>
                     </span>
                   </div>
 
                   <div>
                     <FontAwesomeIcon icon={faChartPie} />
+
                     <span>
                       <small>Attendance</small>
-                      <strong>{course.attendance}</strong>
+
+                      <strong>N/A</strong>
                     </span>
                   </div>
                 </div>
 
-                <button type="button" className="student-course-view">
+                <button
+                  type="button"
+                  className="student-course-view"
+                  disabled
+                >
                   View Course
+
                   <FontAwesomeIcon icon={faArrowRight} />
                 </button>
               </article>
@@ -249,9 +447,10 @@ function Courses() {
           <strong>Course information</strong>
 
           <span>
-            Your enrolled courses will be retrieved for the authenticated
-            student from the backend. Course information displayed here will
-            come from the academic system and will not be stored locally.
+            Your enrolled courses are retrieved for the authenticated
+            student from the backend. Only information provided by the
+            approved course API is displayed; unavailable academic
+            fields remain N/A and are not fabricated or stored locally.
           </span>
         </div>
       </section>

@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import "./Settings.css";
 
+import useAppearance from "../../hooks/useAppearance";
+
 const SETTINGS_STORAGE_KEY = "sams-faculty-settings";
 
-const DEFAULT_SETTINGS = {
-  theme: "light",
-  sidebar: "expanded",
+const DEFAULT_FACULTY_SETTINGS = {
   attendanceView: "list",
   confirmBeforeStart: true,
   sessionNotifications: true,
@@ -14,43 +14,42 @@ const DEFAULT_SETTINGS = {
   systemAnnouncements: true,
 };
 
-const loadSettings = () => {
+const loadFacultySettings = () => {
   try {
-    const storedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    const storedSettings = localStorage.getItem(
+      SETTINGS_STORAGE_KEY,
+    );
 
     if (!storedSettings) {
-      return DEFAULT_SETTINGS;
+      return DEFAULT_FACULTY_SETTINGS;
     }
 
+    const parsedSettings = JSON.parse(storedSettings);
+
     return {
-      ...DEFAULT_SETTINGS,
-      ...JSON.parse(storedSettings),
+      ...DEFAULT_FACULTY_SETTINGS,
+      ...parsedSettings,
     };
   } catch {
-    return DEFAULT_SETTINGS;
+    return DEFAULT_FACULTY_SETTINGS;
   }
 };
 
 function Settings() {
-  const [settings, setSettings] = useState(loadSettings);
+  const {
+    theme,
+    setTheme,
+    sidebarMode,
+    setSidebarMode,
+  } = useAppearance();
+
+  const [settings, setSettings] = useState(loadFacultySettings);
   const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
     localStorage.setItem(
       SETTINGS_STORAGE_KEY,
-      JSON.stringify(settings)
-    );
-
-    if (settings.theme === "dark") {
-      document.documentElement.setAttribute("data-faculty-theme", "dark");
-    } else {
-      document.documentElement.setAttribute("data-faculty-theme", "light");
-    }
-
-    window.dispatchEvent(
-      new CustomEvent("faculty-settings-change", {
-        detail: settings,
-      })
+      JSON.stringify(settings),
     );
   }, [settings]);
 
@@ -63,8 +62,22 @@ function Settings() {
     setSaveMessage("Settings saved.");
   };
 
+  const updateAppearance = (key, value) => {
+    if (key === "theme") {
+      setTheme(value);
+    }
+
+    if (key === "sidebar") {
+      setSidebarMode(value);
+    }
+
+    setSaveMessage("Settings saved.");
+  };
+
   const handleReset = () => {
-    setSettings(DEFAULT_SETTINGS);
+    setSettings(DEFAULT_FACULTY_SETTINGS);
+    setTheme("light");
+    setSidebarMode("expanded");
     setSaveMessage("Settings restored to default.");
   };
 
@@ -73,7 +86,7 @@ function Settings() {
     value,
     label,
     currentValue,
-    onChange
+    onChange,
   ) => (
     <label className="faculty-settings-radio-option">
       <input
@@ -83,6 +96,7 @@ function Settings() {
         checked={currentValue === value}
         onChange={() => onChange(value)}
       />
+
       <span>{label}</span>
     </label>
   );
@@ -111,7 +125,7 @@ function Settings() {
 
       {saveMessage && (
         <div className="faculty-settings-save-message">
-          <span>✓</span>
+          <span aria-hidden="true">✓</span>
           {saveMessage}
         </div>
       )}
@@ -121,16 +135,20 @@ function Settings() {
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>Appearance</h2>
-          <p>Customize how the faculty portal looks and behaves.</p>
+
+          <p>
+            Customize how the faculty portal looks and behaves.
+          </p>
         </div>
 
         <div className="faculty-settings-card">
           <div className="faculty-settings-row">
             <div className="faculty-settings-row-content">
               <h3>Theme</h3>
+
               <p>
-                Choose the appearance used throughout the faculty
-                portal.
+                Choose the appearance used throughout the SAMS-FR
+                application.
               </p>
             </div>
 
@@ -139,24 +157,24 @@ function Settings() {
                 "theme",
                 "light",
                 "Light",
-                settings.theme,
-                (value) => updateSetting("theme", value)
+                theme,
+                (value) => updateAppearance("theme", value),
               )}
 
               {renderRadioOption(
                 "theme",
                 "dark",
                 "Dark",
-                settings.theme,
-                (value) => updateSetting("theme", value)
+                theme,
+                (value) => updateAppearance("theme", value),
               )}
 
               {renderRadioOption(
                 "theme",
                 "system",
                 "System",
-                settings.theme,
-                (value) => updateSetting("theme", value)
+                theme,
+                (value) => updateAppearance("theme", value),
               )}
             </div>
           </div>
@@ -166,6 +184,7 @@ function Settings() {
           <div className="faculty-settings-row">
             <div className="faculty-settings-row-content">
               <h3>Sidebar</h3>
+
               <p>
                 Choose whether the Faculty sidebar starts expanded
                 or compact.
@@ -177,16 +196,18 @@ function Settings() {
                 "sidebar",
                 "expanded",
                 "Expanded",
-                settings.sidebar,
-                (value) => updateSetting("sidebar", value)
+                sidebarMode,
+                (value) =>
+                  updateAppearance("sidebar", value),
               )}
 
               {renderRadioOption(
                 "sidebar",
                 "compact",
                 "Compact",
-                settings.sidebar,
-                (value) => updateSetting("sidebar", value)
+                sidebarMode,
+                (value) =>
+                  updateAppearance("sidebar", value),
               )}
             </div>
           </div>
@@ -198,6 +219,7 @@ function Settings() {
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>Attendance Preferences</h2>
+
           <p>
             Configure your preferred attendance workflow.
           </p>
@@ -207,6 +229,7 @@ function Settings() {
           <div className="faculty-settings-row">
             <div className="faculty-settings-row-content">
               <h3>Default Attendance View</h3>
+
               <p>
                 Select the preferred view when working with attendance
                 records.
@@ -219,7 +242,8 @@ function Settings() {
                 "list",
                 "List View",
                 settings.attendanceView,
-                (value) => updateSetting("attendanceView", value)
+                (value) =>
+                  updateSetting("attendanceView", value),
               )}
 
               {renderRadioOption(
@@ -227,7 +251,8 @@ function Settings() {
                 "session",
                 "Session View",
                 settings.attendanceView,
-                (value) => updateSetting("attendanceView", value)
+                (value) =>
+                  updateSetting("attendanceView", value),
               )}
             </div>
           </div>
@@ -237,6 +262,7 @@ function Settings() {
           <div className="faculty-settings-toggle-row">
             <div className="faculty-settings-row-content">
               <h3>Confirmation Before Starting Attendance</h3>
+
               <p>
                 Ask for confirmation before starting an attendance
                 session.
@@ -251,7 +277,7 @@ function Settings() {
               onClick={() =>
                 updateSetting(
                   "confirmBeforeStart",
-                  !settings.confirmBeforeStart
+                  !settings.confirmBeforeStart,
                 )
               }
               aria-pressed={settings.confirmBeforeStart}
@@ -266,6 +292,7 @@ function Settings() {
           <div className="faculty-settings-toggle-row">
             <div className="faculty-settings-row-content">
               <h3>Session Notifications</h3>
+
               <p>
                 Receive notifications related to your attendance
                 sessions.
@@ -280,7 +307,7 @@ function Settings() {
               onClick={() =>
                 updateSetting(
                   "sessionNotifications",
-                  !settings.sessionNotifications
+                  !settings.sessionNotifications,
                 )
               }
               aria-pressed={settings.sessionNotifications}
@@ -297,6 +324,7 @@ function Settings() {
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>Notifications</h2>
+
           <p>
             Manage the types of faculty notifications you want to
             receive.
@@ -307,6 +335,7 @@ function Settings() {
           <div className="faculty-settings-toggle-row">
             <div className="faculty-settings-row-content">
               <h3>Attendance Session Alerts</h3>
+
               <p>
                 Notifications related to attendance sessions.
               </p>
@@ -320,7 +349,7 @@ function Settings() {
               onClick={() =>
                 updateSetting(
                   "attendanceAlerts",
-                  !settings.attendanceAlerts
+                  !settings.attendanceAlerts,
                 )
               }
               aria-pressed={settings.attendanceAlerts}
@@ -335,6 +364,7 @@ function Settings() {
           <div className="faculty-settings-toggle-row">
             <div className="faculty-settings-row-content">
               <h3>Report Availability</h3>
+
               <p>
                 Notifications when attendance reports become
                 available.
@@ -349,7 +379,7 @@ function Settings() {
               onClick={() =>
                 updateSetting(
                   "reportAvailability",
-                  !settings.reportAvailability
+                  !settings.reportAvailability,
                 )
               }
               aria-pressed={settings.reportAvailability}
@@ -364,6 +394,7 @@ function Settings() {
           <div className="faculty-settings-toggle-row">
             <div className="faculty-settings-row-content">
               <h3>System Announcements</h3>
+
               <p>
                 Receive important announcements from the SAMS-FR
                 system.
@@ -378,7 +409,7 @@ function Settings() {
               onClick={() =>
                 updateSetting(
                   "systemAnnouncements",
-                  !settings.systemAnnouncements
+                  !settings.systemAnnouncements,
                 )
               }
               aria-pressed={settings.systemAnnouncements}
@@ -395,7 +426,10 @@ function Settings() {
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>System Information</h2>
-          <p>Technical information about the SAMS-FR application.</p>
+
+          <p>
+            Technical information about the SAMS-FR application.
+          </p>
         </div>
 
         <div className="faculty-settings-system-card">
@@ -441,9 +475,12 @@ function Settings() {
         </div>
       </section>
 
+      {/* Restore Defaults */}
+
       <section className="faculty-settings-actions">
         <div>
           <strong>Restore default preferences</strong>
+
           <p>
             Reset your faculty portal settings to their original
             defaults.

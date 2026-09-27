@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+
 import "./Classes.css";
 
 const classes = [];
@@ -282,6 +283,7 @@ function Classes() {
         <div className="faculty-classes-section-header">
           <div>
             <h2>My Classes</h2>
+
             <p>
               Courses currently assigned to your faculty account.
             </p>
