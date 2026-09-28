@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { deleteAdminEnrollment, getAdminEnrollments } from "../../services/enrollmentService";
 import "./AcademicManagement.css";
 
 const courses = [];
@@ -35,9 +36,21 @@ const TABS = [
 ];
 
 function formatMetric(value) {
-  return value === null || value === undefined
-    ? "N/A"
-    : value;
+  return value === null || value === undefined ? "N/A" : value;
+}
+
+function formatEnrollmentDate(value) {
+  if (!value) {
+    return "N/A";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
 }
 
 function AcademicManagement() {
@@ -47,12 +60,57 @@ function AcademicManagement() {
   const [status, setStatus] = useState("All");
   const [showAddModal, setShowAddModal] = useState(false);
 
+  const [enrollments, setEnrollments] = useState([]);
+  const [enrollmentsLoading, setEnrollmentsLoading] = useState(false);
+  const [enrollmentsError, setEnrollmentsError] = useState("");
+  const [deletingEnrollmentId, setDeletingEnrollmentId] = useState(null);
+  const [enrollmentActionError, setEnrollmentActionError] = useState("");
+  const [enrollmentActionMessage, setEnrollmentActionMessage] =
+    useState("");
+
   const [formData, setFormData] = useState({
     courseId: "",
     courseName: "",
     department: "",
     credits: "",
   });
+
+  useEffect(() => {
+    if (activeTab !== "enrollments") {
+      return;
+    }
+
+    async function loadEnrollments() {
+      setEnrollmentsLoading(true);
+      setEnrollmentsError("");
+      setEnrollmentActionError("");
+      setEnrollmentActionMessage("");
+
+      try {
+        const result = await getAdminEnrollments();
+
+        if (result?.success && Array.isArray(result.data)) {
+          setEnrollments(result.data);
+        } else {
+          setEnrollments([]);
+          setEnrollmentsError(
+            result?.message || "Unable to load enrollments.",
+          );
+        }
+      } catch (error) {
+        setEnrollments([]);
+
+        setEnrollmentsError(
+          error?.response?.data?.message ||
+            "Unable to load enrollments.",
+        );
+      } finally {
+        setEnrollmentsLoading(false);
+      }
+    }
+
+    loadEnrollments();
+  }, [activeTab]);
 
   const metrics = EMPTY_METRICS;
 
@@ -65,9 +123,7 @@ function AcademicManagement() {
     return courses.filter((course) => {
       const matchesSearch =
         !search ||
-        course.courseId
-          ?.toLowerCase()
-          .includes(search) ||
+        course.courseId?.toLowerCase().includes(search) ||
         course.name?.toLowerCase().includes(search);
 
       const matchesDepartment =
@@ -115,6 +171,8 @@ function AcademicManagement() {
     setSearchTerm("");
     setDepartment("All");
     setStatus("All");
+    setEnrollmentActionError("");
+    setEnrollmentActionMessage("");
   };
 
   const handleCloseModal = () => {
@@ -126,6 +184,49 @@ function AcademicManagement() {
       department: "",
       credits: "",
     });
+  };
+
+  const handleDeleteEnrollment = async (enrollmentId) => {
+    const confirmed = window.confirm(
+      `Remove enrollment #${enrollmentId}?`,
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingEnrollmentId(enrollmentId);
+    setEnrollmentActionError("");
+    setEnrollmentActionMessage("");
+
+    try {
+      const result = await deleteAdminEnrollment(enrollmentId);
+
+      if (!result?.success) {
+        setEnrollmentActionError(
+          result?.message || "Unable to remove enrollment.",
+        );
+        return;
+      }
+
+      setEnrollments((current) =>
+        current.filter(
+          (enrollment) =>
+            enrollment.enrollment_id !== enrollmentId,
+        ),
+      );
+
+      setEnrollmentActionMessage(
+        result.message || "Enrollment removed successfully.",
+      );
+    } catch (error) {
+      setEnrollmentActionError(
+        error?.response?.data?.message ||
+          "Unable to remove enrollment.",
+      );
+    } finally {
+      setDeletingEnrollmentId(null);
+    }
   };
 
   const getEmptyStateContent = () => {
@@ -142,7 +243,7 @@ function AcademicManagement() {
         return {
           title: "No enrollments available",
           description:
-            "Enrollment records will appear here when the academic enrollment integration is connected.",
+            "No enrollment records are currently available from the Admin enrollment API.",
           icon: "♟",
         };
 
@@ -464,6 +565,176 @@ function AcademicManagement() {
             </div>
           </div>
         </>
+      ) : activeTab === "enrollments" ? (
+        <div className="academic-table-card">
+          <div className="academic-table-wrapper">
+            {enrollmentsLoading && (
+              <div className="academic-empty-state">
+                <div
+                  className="academic-empty-icon"
+                  aria-hidden="true"
+                >
+                  ⟳
+                </div>
+
+                <h2>Loading enrollments</h2>
+
+                <p>
+                  Fetching enrollment records from the Flask
+                  backend.
+                </p>
+              </div>
+            )}
+
+            {!enrollmentsLoading && enrollmentsError && (
+              <div className="academic-empty-state">
+                <div
+                  className="academic-empty-icon"
+                  aria-hidden="true"
+                >
+                  !
+                </div>
+
+                <h2>Unable to load enrollments</h2>
+
+                <p>{enrollmentsError}</p>
+              </div>
+            )}
+
+            {!enrollmentsLoading &&
+              !enrollmentsError &&
+              enrollments.length > 0 && (
+                <table className="academic-table">
+                  <thead>
+                    <tr>
+                      <th>Enrollment ID</th>
+                      <th>Student ID</th>
+                      <th>Offering ID</th>
+                      <th>Status</th>
+                      <th>Enrolled At</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+
+                  <tbody>
+                    {enrollments.map((enrollment) => (
+                      <tr
+                        key={enrollment.enrollment_id}
+                      >
+                        <td>
+                          {enrollment.enrollment_id}
+                        </td>
+
+                        <td>
+                          {enrollment.student_id}
+                        </td>
+
+                        <td>
+                          {enrollment.offering_id}
+                        </td>
+
+                        <td>
+                          <span
+                            className={`academic-status academic-status-${enrollment.status?.toLowerCase()}`}
+                          >
+                            ● {enrollment.status || "N/A"}
+                          </span>
+                        </td>
+
+                        <td>
+                          {formatEnrollmentDate(
+                            enrollment.enrolled_at,
+                          )}
+                        </td>
+
+                        <td>
+                          <button
+                            type="button"
+                            className="academic-action-button"
+                            onClick={() =>
+                              handleDeleteEnrollment(
+                                enrollment.enrollment_id,
+                              )
+                            }
+                            disabled={
+                              deletingEnrollmentId ===
+                              enrollment.enrollment_id
+                            }
+                            aria-label={`Remove enrollment ${enrollment.enrollment_id}`}
+                            title="Remove enrollment"
+                          >
+                            {deletingEnrollmentId ===
+                            enrollment.enrollment_id
+                              ? "..."
+                              : "×"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+
+            {!enrollmentsLoading &&
+              !enrollmentsError &&
+              enrollments.length === 0 && (
+                <div className="academic-empty-state">
+                  <div
+                    className="academic-empty-icon"
+                    aria-hidden="true"
+                  >
+                    {emptyState.icon}
+                  </div>
+
+                  <h2>{emptyState.title}</h2>
+
+                  <p>{emptyState.description}</p>
+                </div>
+              )}
+          </div>
+
+          {enrollmentActionMessage && (
+            <div className="academic-integration-notice">
+              <div
+                className="academic-integration-icon"
+                aria-hidden="true"
+              >
+                ✓
+              </div>
+
+              <div>
+                <strong>
+                  Enrollment updated
+                </strong>
+
+                <span>
+                  {enrollmentActionMessage}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {enrollmentActionError && (
+            <div className="academic-integration-notice">
+              <div
+                className="academic-integration-icon"
+                aria-hidden="true"
+              >
+                !
+              </div>
+
+              <div>
+                <strong>
+                  Enrollment action failed
+                </strong>
+
+                <span>
+                  {enrollmentActionError}
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="academic-table-card academic-future-tab">
           <div className="academic-empty-state">
@@ -497,14 +768,13 @@ function AcademicManagement() {
           <span>
             Course, offering and faculty-assignment records
             require backend APIs that are not currently
-            available. Enrollment APIs exist in Flask but the
-            complete Academic Management contract is not yet
-            available to this frontend.
+            available. Enrollment listing and removal are
+            connected to the confirmed Flask APIs.
           </span>
         </div>
 
         <span className="academic-integration-badge">
-          Integration Pending
+          Partial Integration
         </span>
       </div>
 
