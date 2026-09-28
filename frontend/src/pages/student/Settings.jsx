@@ -16,6 +16,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import useAppearance from "../../hooks/useAppearance";
 import { getCurrentUser } from "../../services/authService";
+import { getStudentFaceProfile } from "../../services/faceProfileService";
 import "./Settings.css";
 
 const DEFAULT_SETTINGS = {
@@ -56,6 +57,7 @@ function Settings() {
   const [currentUser, setCurrentUser] = useState(null);
   const [userLoading, setUserLoading] = useState(true);
   const [userError, setUserError] = useState("");
+  const [faceProfileStatus, setFaceProfileStatus] = useState("Checking...");
 
   const [savedMessage, setSavedMessage] = useState("");
 
@@ -99,6 +101,42 @@ function Settings() {
     }
 
     loadCurrentUser();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadFaceProfile() {
+      try {
+        const result = await getStudentFaceProfile();
+
+        if (!result?.success || !result?.data) {
+          throw new Error(
+            result?.message || "Face profile not found.",
+          );
+        }
+
+        if (isMounted) {
+          setFaceProfileStatus(
+            result.data.is_active ? "Registered" : "Inactive",
+          );
+        }
+      } catch (error) {
+        if (isMounted) {
+          if (error?.response?.status === 404) {
+            setFaceProfileStatus("Not Registered");
+          } else {
+            setFaceProfileStatus("Unavailable");
+          }
+        }
+      }
+    }
+
+    loadFaceProfile();
 
     return () => {
       isMounted = false;
@@ -392,7 +430,7 @@ function Settings() {
         <div className="student-settings-info-grid">
           <InfoItem
             label="Face Recognition"
-            value="Registered"
+            value={faceProfileStatus}
           />
 
           <InfoItem
