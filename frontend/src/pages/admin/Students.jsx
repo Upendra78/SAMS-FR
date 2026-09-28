@@ -1,8 +1,7 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import "./Student.css";
-
-const students = [];
+import { getUsers } from "../../services/adminService";
 
 const EMPTY_METRICS = {
   total: null,
@@ -31,6 +30,10 @@ function getInitials(name) {
 }
 
 function Student() {
+  const [students, setStudents] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   const [searchTerm, setSearchTerm] = useState("");
   const [department, setDepartment] = useState("All");
   const [program, setProgram] = useState("All");
@@ -46,6 +49,54 @@ function Student() {
     program: "",
     yearSemester: "",
   });
+
+    useEffect(() => {
+      let mounted = true;
+
+      const loadStudents = async () => {
+        try {
+          setLoading(true);
+          setError("");
+
+          const response = await getUsers();
+
+          if (!mounted) return;
+
+          const users = response?.data ?? [];
+
+          setStudents(
+            users
+              .filter((user) => user.role === "STUDENT")
+              .map((user) => ({
+                studentId: String(user.user_id),
+                name: user.name,
+                email: user.email,
+                department: null,
+                program: null,
+                yearSemester: null,
+                status: null,
+              }))
+          );
+        } catch (requestError) {
+          if (!mounted) return;
+
+          setError(
+            requestError?.response?.data?.message ||
+              "Failed to load students."
+          );
+        } finally {
+          if (mounted) {
+            setLoading(false);
+          }
+        }
+      };
+
+      loadStudents();
+
+      return () => {
+        mounted = false;
+      };
+    }, []);
 
   const metrics = EMPTY_METRICS;
 
