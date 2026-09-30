@@ -1,337 +1,523 @@
-import { useMemo, useState } from "react";
-import useAuth from "../../hooks/useAuth";
-
+import { useEffect, useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import {
+  faCircleCheck,
+  faCircleInfo,
+  faEnvelope,
+  faUser,
+  faLock,
+  faXmark,
+  faLocationDot,
+  faUserShield,
+  faBuilding,
+} from "@fortawesome/free-solid-svg-icons";
+import { getCurrentUser } from "../../services/authService";
 import "./AdminProfile.css";
 
-function AdminProfile() {
-  const { user } = useAuth();
+const EMPTY_PROFILE = {
+  userId: "",
+  adminId: "",
+  fullName: "",
+  email: "",
+  phone: "",
+  gender: "",
+  dateOfBirth: "",
+  fatherName: "",
+  address: "",
+  city: "",
+  state: "",
+  country: "",
+  pincode: "",
+  department: "",
+  designation: "",
+  qualification: "",
+  joiningDate: "",
+  employmentStatus: "",
+  role: "",
+  accountStatus: "",
+};
 
-  const initialName = user?.name || "N/A";
+const displayValue = (value) => {
+  if (value === null || value === undefined || value === "") {
+    return "N/A";
+  }
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [fullName, setFullName] = useState(initialName);
-  const [savedName, setSavedName] = useState(initialName);
-  const [nameError, setNameError] = useState("");
-  const [saveMessage, setSaveMessage] = useState("");
+  return value;
+};
+
+const getInitials = (name) => {
+  if (!name) {
+    return "AD";
+  }
+
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+
+  return (
+    parts
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("") || "AD"
+  );
+};
+
+function Profile() {
+  const [profile, setProfile] = useState(EMPTY_PROFILE);
+
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [passwordError, setPasswordError] = useState("");
 
-  const email = user?.email || "N/A";
-  const role = user?.role || "ADMIN";
-  const userId = user?.user_id ?? "N/A";
+  const [passwords, setPasswords] = useState({
+    current: "",
+    newPassword: "",
+    confirm: "",
+  });
 
-  const initials = useMemo(() => {
-    if (!fullName || fullName === "N/A") {
-      return "A";
+  const [passwordMessage, setPasswordMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadProfile() {
+      setLoading(true);
+      setErrorMessage("");
+
+      try {
+        const result = await getCurrentUser();
+
+        if (!result?.success || !result?.data) {
+          throw new Error(
+            result?.message || "Unable to load your profile.",
+          );
+        }
+
+        const user = result.data;
+
+        if (user.role !== "ADMIN") {
+          throw new Error(
+            "The authenticated account is not an administrator account.",
+          );
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        setProfile({
+          userId: user.user_id ?? "",
+          adminId: user.admin_id ?? "",
+          fullName: user.name ?? "",
+          email: user.email ?? "",
+          phone: user.phone ?? "",
+          gender: user.gender ?? "",
+          dateOfBirth:
+            user.date_of_birth ??
+            user.dateOfBirth ??
+            "",
+          fatherName: user.father_name ?? "",
+          address: user.address ?? "",
+          city: user.city ?? "",
+          state: user.state ?? "",
+          country: user.country ?? "",
+          pincode: user.pincode ?? user.pin_code ?? "",
+          department: user.department ?? "",
+          designation: user.designation ?? "",
+          qualification: user.qualification ?? "",
+          joiningDate:
+            user.joining_date ??
+            user.joiningDate ??
+            "",
+          employmentStatus:
+            user.employment_status ??
+            user.employmentStatus ??
+            "",
+          role: user.role ?? "",
+          accountStatus:
+            user.account_status ??
+            user.accountStatus ??
+            "",
+        });
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setProfile(EMPTY_PROFILE);
+
+        setErrorMessage(
+          error?.message ||
+            "Unable to load your administrator profile.",
+        );
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
     }
 
-    const words = fullName.trim().split(/\s+/);
+    loadProfile();
 
-    if (words.length === 1) {
-      return words[0].slice(0, 2).toUpperCase();
-    }
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
-    return `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase();
-  }, [fullName]);
+  const initials = getInitials(profile.fullName);
 
-  const displayRole =
-    role.toLowerCase() === "admin" ? "Administrator" : role;
+  const handlePasswordChange = (event) => {
+    const { name, value } = event.target;
 
-  const handleEdit = () => {
-    setSaveMessage("");
-    setNameError("");
-    setFullName(savedName);
-    setIsEditing(true);
-  };
+    setPasswords((currentPasswords) => ({
+      ...currentPasswords,
+      [name]: value,
+    }));
 
-  const handleCancel = () => {
-    setFullName(savedName);
-    setNameError("");
-    setSaveMessage("");
-    setIsEditing(false);
-  };
-
-  const handleSave = (event) => {
-    event.preventDefault();
-
-    const trimmedName = fullName.trim();
-
-    if (!trimmedName) {
-      setNameError("Full name is required.");
-      return;
-    }
-
-    if (trimmedName.length < 2) {
-      setNameError("Full name must contain at least 2 characters.");
-      return;
-    }
-
-    if (trimmedName.length > 100) {
-      setNameError("Full name must not exceed 100 characters.");
-      return;
-    }
-
-    setSavedName(trimmedName);
-    setFullName(trimmedName);
-    setNameError("");
-    setSaveMessage(
-      "Profile changes are saved locally for this session. Backend synchronization will be enabled when the Flask API is connected.",
-    );
-    setIsEditing(false);
-  };
-
-  const openPasswordModal = () => {
-    setPasswordError("");
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    setShowPasswordModal(true);
-  };
-
-  const closePasswordModal = () => {
-    setShowPasswordModal(false);
-    setPasswordError("");
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+    setPasswordMessage("");
   };
 
   const handlePasswordSubmit = (event) => {
     event.preventDefault();
 
-    if (!currentPassword) {
-      setPasswordError("Enter your current password.");
-      return;
-    }
-
-    if (!newPassword) {
-      setPasswordError("Enter a new password.");
-      return;
-    }
-
-    if (newPassword.length < 8) {
-      setPasswordError(
-        "New password must contain at least 8 characters.",
-      );
-      return;
-    }
-
-    if (newPassword === currentPassword) {
-      setPasswordError(
-        "New password must be different from your current password.",
-      );
-      return;
-    }
-
-    if (newPassword !== confirmPassword) {
-      setPasswordError("New passwords do not match.");
-      return;
-    }
-
-    setPasswordError(
-      "Password change is pending backend integration.",
+    setPasswordMessage(
+      "Password changes are not available until the backend password service is connected.",
     );
   };
 
-  return (
-    <section className="admin-profile-page">
-      <header className="admin-page-header">
-        <div>
-          <span className="admin-page-eyebrow">Profile</span>
-          <h1>Profile</h1>
-          <p>Manage your administrator account information.</p>
-        </div>
-      </header>
+  const openPasswordModal = () => {
+    setPasswords({
+      current: "",
+      newPassword: "",
+      confirm: "",
+    });
 
-      {saveMessage && (
-        <div className="admin-profile-feedback" role="status">
-          <i className="fa-solid fa-circle-info" aria-hidden="true" />
-          <span>{saveMessage}</span>
-        </div>
-      )}
+    setPasswordMessage("");
+    setShowPasswordModal(true);
+  };
 
-      <section className="admin-profile-main-card">
-        {/* Identity */}
-        <div className="admin-profile-identity-panel">
-          <div className="admin-profile-avatar" aria-hidden="true">
-            {initials}
-          </div>
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
 
-          <div className="admin-profile-identity">
-            <span className="admin-profile-overline">
-              Administrator Account
+    setPasswords({
+      current: "",
+      newPassword: "",
+      confirm: "",
+    });
+
+    setPasswordMessage("");
+  };
+
+  if (loading) {
+    return (
+      <section className="admin-profile-page">
+        <div className="admin-profile-header">
+          <div>
+            <span className="admin-profile-eyebrow">
+              Account Management
             </span>
 
-            <h2>{fullName}</h2>
+            <h1>Admin Profile</h1>
 
-            <p>{email}</p>
-
-            <div className="admin-profile-tags">
-              <span className="admin-profile-tag">
-                <i
-                  className="fa-solid fa-shield-halved"
-                  aria-hidden="true"
-                />
-                {displayRole}
-              </span>
-            </div>
-          </div>
-
-          <div className="admin-profile-edit-area">
-            {!isEditing ? (
-              <button
-                type="button"
-                className="admin-profile-primary-button"
-                onClick={handleEdit}
-              >
-                <i className="fa-solid fa-pen" aria-hidden="true" />
-                Edit Profile
-              </button>
-            ) : (
-              <div className="admin-profile-edit-actions">
-                <button
-                  type="button"
-                  className="admin-profile-secondary-button"
-                  onClick={handleCancel}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  form="admin-profile-form"
-                  className="admin-profile-primary-button"
-                >
-                  <i
-                    className="fa-solid fa-check"
-                    aria-hidden="true"
-                  />
-                  Save Changes
-                </button>
-              </div>
-            )}
+            <p>
+              View your personal information, administrative details
+              and account security.
+            </p>
           </div>
         </div>
 
-        {/* Account Information */}
-        <form
-          id="admin-profile-form"
-          className="admin-profile-information"
-          onSubmit={handleSave}
-        >
-          <div className="admin-profile-section-heading">
-            <div className="admin-profile-section-icon">
-              <i className="fa-solid fa-id-card" aria-hidden="true" />
-            </div>
-
-            <div>
-              <h2>Administrator Information</h2>
-              <p>
-                Identity information associated with your administrator
-                account.
-              </p>
-            </div>
-          </div>
-
-          <div className="admin-profile-fields">
-            <div className="admin-profile-field">
-              <label htmlFor="admin-id">Admin ID</label>
-
-              <div className="admin-profile-readonly-field">
-                <span>{userId}</span>
-                <i className="fa-solid fa-lock" aria-hidden="true" />
-              </div>
-
-              <small>Administrator ID cannot be changed.</small>
-            </div>
-
-            <div className="admin-profile-field">
-              <label htmlFor="full-name">Full Name</label>
-
-              {isEditing ? (
-                <>
-                  <input
-                    id="full-name"
-                    type="text"
-                    value={fullName === "N/A" ? "" : fullName}
-                    onChange={(event) => {
-                      setFullName(event.target.value);
-                      setNameError("");
-                      setSaveMessage("");
-                    }}
-                    maxLength={100}
-                    autoComplete="name"
-                  />
-
-                  {nameError && (
-                    <small className="admin-profile-field-error">
-                      {nameError}
-                    </small>
-                  )}
-                </>
-              ) : (
-                <div className="admin-profile-readonly-field">
-                  <span>{savedName}</span>
-                </div>
-              )}
-            </div>
-
-            <div className="admin-profile-field">
-              <label htmlFor="admin-email">Email</label>
-
-              <div className="admin-profile-readonly-field">
-                <span>{email}</span>
-                <i className="fa-solid fa-lock" aria-hidden="true" />
-              </div>
-
-              <small>
-                Email changes are managed by the administrator/backend.
-              </small>
-            </div>
-
-            <div className="admin-profile-field">
-              <label htmlFor="admin-role">Role</label>
-
-              <div className="admin-profile-readonly-field">
-                <span>{displayRole}</span>
-                <i className="fa-solid fa-lock" aria-hidden="true" />
-              </div>
-
-              <small>
-                Role is controlled by the authorization system.
-              </small>
-            </div>
-          </div>
-        </form>
-      </section>
-
-      {/* Account Security */}
-      <section className="admin-profile-security-card">
-        <div className="admin-profile-section-heading">
-          <div className="admin-profile-section-icon admin-profile-green">
-            <i className="fa-solid fa-lock" aria-hidden="true" />
+        <section className="admin-profile-integration-notice">
+          <div className="admin-profile-notice-icon">
+            <FontAwesomeIcon icon={faCircleInfo} />
           </div>
 
           <div>
-            <h2>Account Security</h2>
-            <p>Manage your password through the secure authentication flow.</p>
+            <strong>Loading profile</strong>
+
+            <p>
+              Loading your authenticated administrator account
+              information from the backend.
+            </p>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <section className="admin-profile-page">
+        <div className="admin-profile-header">
+          <div>
+            <span className="admin-profile-eyebrow">
+              Account Management
+            </span>
+
+            <h1>Admin Profile</h1>
+
+            <p>
+              View your personal information, administrative details
+              and account security.
+            </p>
           </div>
         </div>
 
-        <div className="admin-profile-password-row">
-          <div className="admin-profile-password-icon">
-            <i className="fa-solid fa-key" aria-hidden="true" />
+        <section className="admin-profile-integration-notice">
+          <div className="admin-profile-notice-icon">
+            <FontAwesomeIcon icon={faCircleInfo} />
           </div>
 
-          <div className="admin-profile-password-content">
-            <strong>Password</strong>
+          <div>
+            <strong>Unable to load profile</strong>
+
+            <p>{errorMessage}</p>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  return (
+    <section className="admin-profile-page">
+      {/* Header */}
+      <div className="admin-profile-header">
+        <div>
+          <span className="admin-profile-eyebrow">
+            Account Management
+          </span>
+
+          <h1>Admin Profile</h1>
+
+          <p>
+            View your personal information, administrative details
+            and account security.
+          </p>
+        </div>
+
+        <div className="admin-profile-account-status">
+          <span>Administrator Account</span>
+
+          <strong>
+            <span className="admin-profile-status-dot" />
+            Authenticated
+          </strong>
+        </div>
+      </div>
+
+      {/* Profile Overview */}
+      <section className="admin-profile-overview">
+        <div className="admin-profile-avatar">
+          {initials}
+        </div>
+
+        <div className="admin-profile-overview-content">
+          <span className="admin-profile-overview-label">
+            Administrator Account
+          </span>
+
+          <h2>{displayValue(profile.fullName)}</h2>
+
+          <div className="admin-profile-overview-meta">
             <span>
-              Your password is securely stored and is never displayed.
+              <FontAwesomeIcon icon={faUser} />
+              User ID: {displayValue(profile.userId)}
             </span>
+
+            <span>
+              <FontAwesomeIcon icon={faEnvelope} />
+              {displayValue(profile.email)}
+            </span>
+
+            <span>
+              <FontAwesomeIcon icon={faUserShield} />
+              {displayValue(profile.designation)}
+            </span>
+          </div>
+        </div>
+
+        <div className="admin-profile-overview-status">
+          <span className="admin-profile-status-dot" />
+
+          {displayValue(profile.role)}
+        </div>
+      </section>
+
+      {/* Personal Information */}
+      <section className="admin-profile-panel">
+        <div className="admin-profile-panel-header">
+          <div>
+            <span>Personal Information</span>
+
+            <h2>Basic Personal Details</h2>
+          </div>
+
+          <div className="admin-profile-panel-icon">
+            <FontAwesomeIcon icon={faUser} />
+          </div>
+        </div>
+
+        <div className="admin-profile-info-grid">
+          <div>
+            <span>Full Name</span>
+            <strong>{displayValue(profile.fullName)}</strong>
+          </div>
+
+          <div>
+            <span>Email</span>
+            <strong>{displayValue(profile.email)}</strong>
+          </div>
+
+          <div>
+            <span>Phone Number</span>
+            <strong>{displayValue(profile.phone)}</strong>
+          </div>
+
+          <div>
+            <span>Gender</span>
+            <strong>{displayValue(profile.gender)}</strong>
+          </div>
+
+          <div>
+            <span>Date of Birth</span>
+            <strong>{displayValue(profile.dateOfBirth)}</strong>
+          </div>
+
+          <div>
+            <span>Father / Spouse Name</span>
+            <strong>{displayValue(profile.fatherName)}</strong>
+          </div>
+        </div>
+
+        <div className="admin-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Personal information is currently read-only. Fields not
+            provided by the backend are displayed as N/A.
+          </span>
+        </div>
+      </section>
+
+      {/* Contact Information */}
+      <section className="admin-profile-panel">
+        <div className="admin-profile-panel-header">
+          <div>
+            <span>Contact Information</span>
+
+            <h2>Address &amp; Location</h2>
+          </div>
+
+          <div className="admin-profile-panel-icon">
+            <FontAwesomeIcon icon={faLocationDot} />
+          </div>
+        </div>
+
+        <div className="admin-profile-info-grid">
+          <div className="admin-profile-wide-field">
+            <span>Address</span>
+            <strong>{displayValue(profile.address)}</strong>
+          </div>
+
+          <div>
+            <span>City</span>
+            <strong>{displayValue(profile.city)}</strong>
+          </div>
+
+          <div>
+            <span>State</span>
+            <strong>{displayValue(profile.state)}</strong>
+          </div>
+
+          <div>
+            <span>Country</span>
+            <strong>{displayValue(profile.country)}</strong>
+          </div>
+
+          <div>
+            <span>PIN Code</span>
+            <strong>{displayValue(profile.pincode)}</strong>
+          </div>
+        </div>
+      </section>
+
+      {/* Administrative Information */}
+      <section className="admin-profile-panel">
+        <div className="admin-profile-panel-header">
+          <div>
+            <span>Administrative Information</span>
+
+            <h2>Administrator Details</h2>
+          </div>
+
+          <div className="admin-profile-panel-icon">
+            <FontAwesomeIcon icon={faBuilding} />
+          </div>
+        </div>
+
+        <div className="admin-profile-info-grid">
+          <div>
+            <span>Admin ID</span>
+            <strong>{displayValue(profile.adminId)}</strong>
+          </div>
+
+          <div>
+            <span>Department</span>
+            <strong>{displayValue(profile.department)}</strong>
+          </div>
+
+          <div>
+            <span>Designation</span>
+            <strong>{displayValue(profile.designation)}</strong>
+          </div>
+
+          <div>
+            <span>Qualification</span>
+            <strong>{displayValue(profile.qualification)}</strong>
+          </div>
+
+          <div>
+            <span>Joining Date</span>
+            <strong>{displayValue(profile.joiningDate)}</strong>
+          </div>
+
+          <div>
+            <span>Employment Status</span>
+            <strong>{displayValue(profile.employmentStatus)}</strong>
+          </div>
+        </div>
+
+        <div className="admin-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Administrative information will be populated when the
+            corresponding backend profile data is provided.
+            Unavailable fields are displayed as N/A.
+          </span>
+        </div>
+      </section>
+
+      {/* Account Security */}
+      <section className="admin-profile-panel">
+        <div className="admin-profile-panel-header">
+          <div>
+            <span>Account Security</span>
+
+            <h2>Password &amp; Security</h2>
+          </div>
+
+          <div className="admin-profile-panel-icon">
+            <FontAwesomeIcon icon={faLock} />
+          </div>
+        </div>
+
+        <div className="admin-profile-security">
+          <div>
+            <strong>Password</strong>
+
+            <p>
+              Your password is securely protected and is never
+              displayed in the portal.
+            </p>
           </div>
 
           <button
@@ -342,62 +528,100 @@ function AdminProfile() {
             Change Password
           </button>
         </div>
+
+        <div className="admin-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Password changes are currently unavailable because the
+            confirmed Flask backend does not provide a
+            password-change endpoint.
+          </span>
+        </div>
       </section>
 
-      {/* Backend Integration */}
-      <section className="admin-profile-integration-card">
-        <div className="admin-profile-integration-icon">
-          <i className="fa-solid fa-server" aria-hidden="true" />
+      {/* Account Information */}
+      <section className="admin-profile-panel">
+        <div className="admin-profile-panel-header">
+          <div>
+            <span>Account Information</span>
+
+            <h2>System Account</h2>
+          </div>
         </div>
 
-        <div className="admin-profile-integration-content">
-          <span>Backend Integration</span>
-          <h2>Profile management API pending</h2>
+        <div className="admin-profile-account-grid">
+          <div>
+            <span>User ID</span>
+            <strong>{displayValue(profile.userId)}</strong>
+          </div>
+
+          <div>
+            <span>Account Status</span>
+            <strong>{displayValue(profile.accountStatus)}</strong>
+          </div>
+
+          <div>
+            <span>Role</span>
+            <strong>{displayValue(profile.role)}</strong>
+          </div>
+
+          <div>
+            <span>Department</span>
+            <strong>{displayValue(profile.department)}</strong>
+          </div>
+        </div>
+      </section>
+
+      {/* Integration Note */}
+      <section className="admin-profile-integration-note">
+        <div className="admin-profile-note-icon">
+          <FontAwesomeIcon icon={faCircleCheck} />
+        </div>
+
+        <div>
+          <strong>Admin profile integration</strong>
+
           <p>
-            Profile data currently comes from the authenticated frontend
-            user context. Saving profile changes and changing passwords
-            will be connected after the approved Flask API contract is
-            available.
+            Name, email, user ID and role are currently loaded from
+            the authenticated Flask session through the confirmed{" "}
+            <code>/api/auth/me</code> endpoint. Additional
+            administrator information will appear automatically when
+            supplied by the backend. Until then, unavailable fields
+            are shown as N/A.
           </p>
         </div>
-
-        <span className="admin-profile-pending-badge">
-          Integration Pending
-        </span>
       </section>
 
-      {/* Change Password Modal */}
+      {/* Password Modal */}
       {showPasswordModal && (
         <div
           className="admin-profile-modal-backdrop"
           role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              closePasswordModal();
-            }
-          }}
+          onClick={closePasswordModal}
         >
           <div
             className="admin-profile-modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="change-password-title"
+            aria-labelledby="admin-password-title"
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="admin-profile-modal-header">
               <div>
-                <span className="admin-profile-overline">
-                  Account Security
-                </span>
-                <h2 id="change-password-title">Change Password</h2>
+                <span>Account Security</span>
+
+                <h2 id="admin-password-title">
+                  Change Password
+                </h2>
               </div>
 
               <button
                 type="button"
-                className="admin-profile-modal-close"
+                aria-label="Close password modal"
                 onClick={closePasswordModal}
-                aria-label="Close change password dialog"
               >
-                <i className="fa-solid fa-xmark" aria-hidden="true" />
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
@@ -405,70 +629,55 @@ function AdminProfile() {
               className="admin-profile-password-form"
               onSubmit={handlePasswordSubmit}
             >
-              <div className="admin-profile-password-field">
-                <label htmlFor="current-password">
-                  Current Password
-                </label>
+              <label>
+                <span>Current Password</span>
+
                 <input
-                  id="current-password"
                   type="password"
-                  value={currentPassword}
-                  onChange={(event) => {
-                    setCurrentPassword(event.target.value);
-                    setPasswordError("");
-                  }}
+                  name="current"
+                  value={passwords.current}
+                  onChange={handlePasswordChange}
                   autoComplete="current-password"
+                  disabled
                 />
-              </div>
+              </label>
 
-              <div className="admin-profile-password-field">
-                <label htmlFor="new-password">New Password</label>
+              <label>
+                <span>New Password</span>
+
                 <input
-                  id="new-password"
                   type="password"
-                  value={newPassword}
-                  onChange={(event) => {
-                    setNewPassword(event.target.value);
-                    setPasswordError("");
-                  }}
+                  name="newPassword"
+                  value={passwords.newPassword}
+                  onChange={handlePasswordChange}
                   autoComplete="new-password"
+                  disabled
                 />
-              </div>
+              </label>
 
-              <div className="admin-profile-password-field">
-                <label htmlFor="confirm-password">
-                  Confirm New Password
-                </label>
+              <label>
+                <span>Confirm New Password</span>
+
                 <input
-                  id="confirm-password"
                   type="password"
-                  value={confirmPassword}
-                  onChange={(event) => {
-                    setConfirmPassword(event.target.value);
-                    setPasswordError("");
-                  }}
+                  name="confirm"
+                  value={passwords.confirm}
+                  onChange={handlePasswordChange}
                   autoComplete="new-password"
+                  disabled
                 />
-              </div>
+              </label>
 
-              <div className="admin-profile-password-note">
-                <i className="fa-solid fa-shield-halved" aria-hidden="true" />
-                <span>
-                  Password validation and secure password hashing will be
-                  handled by the Flask backend.
-                </span>
-              </div>
+              <p className="admin-profile-password-hint">
+                Password changes will become available after the
+                backend password service is implemented.
+              </p>
 
-              {passwordError && (
-                <div
-                  className="admin-profile-password-error"
-                  role="alert"
-                >
-                  <i
-                    className="fa-solid fa-circle-exclamation"
-                    aria-hidden="true"
-                  />
-                  {passwordError}
+              {passwordMessage && (
+                <div className="admin-profile-message">
+                  <FontAwesomeIcon icon={faCircleInfo} />
+
+                  <span>{passwordMessage}</span>
                 </div>
               )}
 
@@ -478,12 +687,13 @@ function AdminProfile() {
                   className="admin-profile-secondary-button"
                   onClick={closePasswordModal}
                 >
-                  Cancel
+                  Close
                 </button>
 
                 <button
                   type="submit"
                   className="admin-profile-primary-button"
+                  disabled
                 >
                   Change Password
                 </button>
@@ -496,4 +706,4 @@ function AdminProfile() {
   );
 }
 
-export default AdminProfile;
+export default Profile;

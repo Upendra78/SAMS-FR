@@ -5,10 +5,13 @@ import {
   faCircleInfo,
   faEnvelope,
   faGraduationCap,
+  faLocationDot,
   faLock,
+  faSignature,
   faUser,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
+
 import { getCurrentUser } from "../../services/authService";
 import "./Profile.css";
 
@@ -17,7 +20,15 @@ function Profile() {
     userId: "",
     studentId: "",
     fullName: "",
+    fatherName: "",
+    motherName: "",
     email: "",
+    signature: "",
+    bloodGroup: "",
+    country: "",
+    state: "",
+    city: "",
+    pincode: "",
     department: "",
     program: "",
     year: "",
@@ -63,14 +74,22 @@ function Profile() {
         if (isMounted) {
           setProfile({
             userId: user.user_id ?? "",
-            studentId: "",
+            studentId: user.student_id ?? "",
             fullName: user.name ?? "",
+            fatherName: user.father_name ?? "",
+            motherName: user.mother_name ?? "",
             email: user.email ?? "",
-            department: "",
-            program: "",
-            year: "",
-            semester: "",
-            enrollmentStatus: "",
+            signature: user.signature ?? "",
+            bloodGroup: user.blood_group ?? "",
+            country: user.country ?? "",
+            state: user.state ?? "",
+            city: user.city ?? "",
+            pincode: user.pincode ?? "",
+            department: user.department ?? "",
+            program: user.program ?? "",
+            year: user.year ?? "",
+            semester: user.semester ?? "",
+            enrollmentStatus: user.enrollment_status ?? "",
             role: user.role ?? "STUDENT",
           });
         }
@@ -125,6 +144,7 @@ function Profile() {
   const closePasswordModal = () => {
     setShowPasswordModal(false);
     setPasswordMessage("");
+
     setPasswords({
       current: "",
       newPassword: "",
@@ -140,10 +160,12 @@ function Profile() {
             <span className="student-profile-eyebrow">
               Account Management
             </span>
+
             <h1>Student Profile</h1>
+
             <p>
-              View and manage your personal information, academic details and
-              account security.
+              View your personal identity, academic information,
+              contact details and account security.
             </p>
           </div>
         </div>
@@ -156,9 +178,10 @@ function Profile() {
 
             <div>
               <strong>Loading profile</strong>
+
               <p>
-                Loading your authenticated account information from the
-                backend.
+                Loading your authenticated account information
+                from the backend.
               </p>
             </div>
           </div>
@@ -175,10 +198,12 @@ function Profile() {
             <span className="student-profile-eyebrow">
               Account Management
             </span>
+
             <h1>Student Profile</h1>
+
             <p>
-              View and manage your personal information, academic details and
-              account security.
+              View your personal identity, academic information,
+              contact details and account security.
             </p>
           </div>
         </div>
@@ -191,6 +216,7 @@ function Profile() {
 
             <div>
               <strong>Unable to load profile</strong>
+
               <p>{errorMessage}</p>
             </div>
           </div>
@@ -211,8 +237,8 @@ function Profile() {
           <h1>Student Profile</h1>
 
           <p>
-            View and manage your personal information, academic details and
-            account security.
+            View your personal identity, academic information,
+            contact details and account security.
           </p>
         </div>
 
@@ -228,7 +254,9 @@ function Profile() {
 
       {/* Profile Overview */}
       <section className="student-profile-overview">
-        <div className="student-profile-avatar">{initials}</div>
+        <div className="student-profile-avatar">
+          {initials}
+        </div>
 
         <div className="student-profile-overview-content">
           <span className="student-profile-overview-label">
@@ -252,7 +280,7 @@ function Profile() {
 
         <div className="student-profile-overview-status">
           <span className="student-profile-status-dot" />
-          {profile.role || "N/A"}
+          {profile.role || "STUDENT"}
         </div>
       </section>
 
@@ -261,24 +289,79 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Personal Information</span>
-            <h2>Basic Account Details</h2>
+
+            <h2>Identity Details</h2>
+          </div>
+
+          <div className="student-profile-panel-icon">
+            <FontAwesomeIcon icon={faUser} />
           </div>
         </div>
 
         <div className="student-profile-info-grid">
           <div>
             <span>Full Name</span>
+
             <strong>{profile.fullName || "N/A"}</strong>
           </div>
 
           <div>
+            <span>Father Name</span>
+
+            <strong>{profile.fatherName || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>Mother Name</span>
+
+            <strong>{profile.motherName || "N/A"}</strong>
+          </div>
+
+          <div>
             <span>Email</span>
+
             <strong>{profile.email || "N/A"}</strong>
           </div>
 
           <div>
             <span>User ID</span>
+
             <strong>{profile.userId || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>Student ID</span>
+
+            <strong>{profile.studentId || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>Blood Group</span>
+
+            <strong>{profile.bloodGroup || "N/A"}</strong>
+          </div>
+        </div>
+
+        <div className="student-profile-signature">
+          <div className="student-profile-signature-header">
+            <div>
+              <span>Signature</span>
+
+              <strong>Registered Signature</strong>
+            </div>
+
+            <FontAwesomeIcon icon={faSignature} />
+          </div>
+
+          <div className="student-profile-signature-box">
+            {profile.signature ? (
+              <img
+                src={profile.signature}
+                alt="Student signature"
+              />
+            ) : (
+              <span>Signature not available</span>
+            )}
           </div>
         </div>
 
@@ -286,8 +369,9 @@ function Profile() {
           <FontAwesomeIcon icon={faCircleInfo} />
 
           <span>
-            Profile editing is currently unavailable because the confirmed
-            Flask backend does not provide a student profile update endpoint.
+            Personal profile information is institution-managed.
+            Editing will be enabled when the approved student
+            profile API is available.
           </span>
         </div>
       </section>
@@ -297,6 +381,7 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Academic Information</span>
+
             <h2>Academic Details</h2>
           </div>
 
@@ -308,32 +393,40 @@ function Profile() {
         <div className="student-profile-info-grid">
           <div>
             <span>Student ID</span>
+
             <strong>{profile.studentId || "N/A"}</strong>
           </div>
 
           <div>
             <span>Department</span>
+
             <strong>{profile.department || "N/A"}</strong>
           </div>
 
           <div>
             <span>Program</span>
+
             <strong>{profile.program || "N/A"}</strong>
           </div>
 
           <div>
             <span>Year</span>
+
             <strong>{profile.year || "N/A"}</strong>
           </div>
 
           <div>
             <span>Semester</span>
+
             <strong>{profile.semester || "N/A"}</strong>
           </div>
 
           <div>
             <span>Enrollment Status</span>
-            <strong>{profile.enrollmentStatus || "N/A"}</strong>
+
+            <strong>
+              {profile.enrollmentStatus || "N/A"}
+            </strong>
           </div>
         </div>
 
@@ -341,8 +434,59 @@ function Profile() {
           <FontAwesomeIcon icon={faCircleInfo} />
 
           <span>
-            Academic information is managed by the institution. The current
-            backend does not provide a student academic profile endpoint.
+            Academic information is managed by the institution.
+            The current backend does not provide the complete
+            student academic profile.
+          </span>
+        </div>
+      </section>
+
+      {/* Contact & Location */}
+      <section className="student-profile-panel">
+        <div className="student-profile-panel-header">
+          <div>
+            <span>Contact &amp; Location</span>
+
+            <h2>Address Information</h2>
+          </div>
+
+          <div className="student-profile-panel-icon">
+            <FontAwesomeIcon icon={faLocationDot} />
+          </div>
+        </div>
+
+        <div className="student-profile-info-grid">
+          <div>
+            <span>Country</span>
+
+            <strong>{profile.country || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>State</span>
+
+            <strong>{profile.state || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>City</span>
+
+            <strong>{profile.city || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>PIN Code</span>
+
+            <strong>{profile.pincode || "N/A"}</strong>
+          </div>
+        </div>
+
+        <div className="student-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Location information will be populated when the
+            student profile data is available from the backend.
           </span>
         </div>
       </section>
@@ -352,6 +496,7 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Account Security</span>
+
             <h2>Password &amp; Security</h2>
           </div>
 
@@ -365,8 +510,8 @@ function Profile() {
             <strong>Password</strong>
 
             <p>
-              Your password is securely protected and is never displayed in
-              the portal.
+              Your password is securely protected and is never
+              displayed in the portal.
             </p>
           </div>
 
@@ -386,8 +531,9 @@ function Profile() {
           <FontAwesomeIcon icon={faCircleInfo} />
 
           <span>
-            Password changes are currently unavailable because the confirmed
-            Flask backend does not provide a password-change endpoint.
+            Password changes are currently unavailable because
+            the confirmed Flask backend does not provide a
+            password-change endpoint.
           </span>
         </div>
       </section>
@@ -397,6 +543,7 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Account Information</span>
+
             <h2>System Account</h2>
           </div>
         </div>
@@ -404,22 +551,26 @@ function Profile() {
         <div className="student-profile-account-grid">
           <div>
             <span>User ID</span>
+
             <strong>{profile.userId || "N/A"}</strong>
           </div>
 
           <div>
             <span>Account Status</span>
+
             <strong>Authenticated</strong>
           </div>
 
           <div>
             <span>Role</span>
+
             <strong>{profile.role || "N/A"}</strong>
           </div>
 
           <div>
-            <span>Department</span>
-            <strong>{profile.department || "N/A"}</strong>
+            <span>Student ID</span>
+
+            <strong>{profile.studentId || "N/A"}</strong>
           </div>
         </div>
       </section>
@@ -434,11 +585,13 @@ function Profile() {
           <strong>Profile data integration</strong>
 
           <p>
-            Name, email, user ID and role are loaded from the authenticated
-            Flask session through the confirmed <code>/api/auth/me</code>{" "}
-            endpoint. Student academic information and profile/password
-            updates remain unavailable until corresponding backend services
-            are provided.
+            Name, email, user ID and role are loaded from the
+            authenticated Flask session through the confirmed
+            <code> /api/auth/me </code>
+            endpoint. Father/mother name, signature, blood
+            group, location and academic information will be
+            populated when the corresponding student profile
+            backend service is available.
           </p>
         </div>
       </section>
@@ -455,13 +608,17 @@ function Profile() {
             role="dialog"
             aria-modal="true"
             aria-labelledby="student-password-title"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event) =>
+              event.stopPropagation()
+            }
           >
             <div className="student-profile-modal-header">
               <div>
                 <span>Account Security</span>
 
-                <h2 id="student-password-title">Change Password</h2>
+                <h2 id="student-password-title">
+                  Change Password
+                </h2>
               </div>
 
               <button
@@ -517,8 +674,8 @@ function Profile() {
               </label>
 
               <p className="student-profile-password-hint">
-                Password changes will become available after the backend
-                password service is implemented.
+                Password changes will become available after
+                the backend password service is implemented.
               </p>
 
               {passwordMessage && (

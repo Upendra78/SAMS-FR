@@ -1,16 +1,41 @@
 import { useEffect, useState } from "react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import {
+  faCircleCheck,
+  faCircleInfo,
+  faEnvelope,
+  faGraduationCap,
+  faLock,
+  faUser,
+  faBriefcase,
+  faXmark,
+  faLocationDot,
+} from "@fortawesome/free-solid-svg-icons";
+import { getCurrentUser } from "../../services/authService";
 import "./Profile.css";
 
-import { getCurrentUser } from "../../services/authService";
-
 const EMPTY_PROFILE = {
-  userId: null,
-  fullName: null,
-  email: null,
-  facultyId: null,
-  department: null,
-  role: null,
-  accountStatus: null,
+  userId: "",
+  facultyId: "",
+  fullName: "",
+  email: "",
+  phone: "",
+  gender: "",
+  dateOfBirth: "",
+  fatherName: "",
+  address: "",
+  city: "",
+  state: "",
+  country: "",
+  pincode: "",
+  department: "",
+  designation: "",
+  qualification: "",
+  specialization: "",
+  joiningDate: "",
+  employmentStatus: "",
+  role: "",
+  accountStatus: "",
 };
 
 const displayValue = (value) => {
@@ -23,36 +48,43 @@ const displayValue = (value) => {
 
 const getInitials = (name) => {
   if (!name) {
-    return "FR";
+    return "FC";
   }
 
   const parts = name.trim().split(/\s+/).filter(Boolean);
 
-  return parts
-    .slice(0, 2)
-    .map((part) => part.charAt(0).toUpperCase())
-    .join("");
+  return (
+    parts
+      .slice(0, 2)
+      .map((part) => part.charAt(0).toUpperCase())
+      .join("") || "FC"
+  );
 };
 
 function Profile() {
   const [profile, setProfile] = useState(EMPTY_PROFILE);
+
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
 
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
+
+  const [passwords, setPasswords] = useState({
+    current: "",
+    newPassword: "",
+    confirm: "",
+  });
+
   const [passwordMessage, setPasswordMessage] = useState("");
 
   useEffect(() => {
     let isMounted = true;
 
     async function loadProfile() {
-      try {
-        setLoading(true);
-        setError("");
+      setLoading(true);
+      setErrorMessage("");
 
+      try {
         const result = await getCurrentUser();
 
         if (!result?.success || !result?.data) {
@@ -61,7 +93,9 @@ function Profile() {
           );
         }
 
-        if (result.data.role !== "FACULTY") {
+        const user = result.data;
+
+        if (user.role !== "FACULTY") {
           throw new Error(
             "The authenticated account is not a faculty account.",
           );
@@ -71,24 +105,59 @@ function Profile() {
           return;
         }
 
+        /*
+         * Only fields confirmed by the current backend are guaranteed:
+         * user_id, name, email and role.
+         *
+         * Other fields are read defensively. If the backend starts
+         * returning them later, they will automatically appear here.
+         * Otherwise the UI displays N/A.
+         */
         setProfile({
-          userId: result.data.user_id ?? null,
-          fullName: result.data.name ?? null,
-          email: result.data.email ?? null,
-          facultyId: null,
-          department: null,
-          role: result.data.role ?? null,
-          accountStatus: null,
+          userId: user.user_id ?? "",
+          facultyId: user.faculty_id ?? "",
+          fullName: user.name ?? "",
+          email: user.email ?? "",
+          phone: user.phone ?? "",
+          gender: user.gender ?? "",
+          dateOfBirth:
+            user.date_of_birth ??
+            user.dateOfBirth ??
+            "",
+          fatherName: user.father_name ?? "",
+          address: user.address ?? "",
+          city: user.city ?? "",
+          state: user.state ?? "",
+          country: user.country ?? "",
+          pincode: user.pincode ?? user.pin_code ?? "",
+          department: user.department ?? "",
+          designation: user.designation ?? "",
+          qualification: user.qualification ?? "",
+          specialization: user.specialization ?? "",
+          joiningDate:
+            user.joining_date ??
+            user.joiningDate ??
+            "",
+          employmentStatus:
+            user.employment_status ??
+            user.employmentStatus ??
+            "",
+          role: user.role ?? "",
+          accountStatus:
+            user.account_status ??
+            user.accountStatus ??
+            "",
         });
-      } catch (requestError) {
+      } catch (error) {
         if (!isMounted) {
           return;
         }
 
         setProfile(EMPTY_PROFILE);
-        setError(
-          requestError?.message ||
-            "Unable to load your profile information.",
+
+        setErrorMessage(
+          error?.message ||
+            "Unable to load your faculty profile.",
         );
       } finally {
         if (isMounted) {
@@ -104,378 +173,542 @@ function Profile() {
     };
   }, []);
 
-  const handleOpenPasswordModal = () => {
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+  const initials = getInitials(profile.fullName);
+
+  const handlePasswordChange = (event) => {
+    const { name, value } = event.target;
+
+    setPasswords((currentPasswords) => ({
+      ...currentPasswords,
+      [name]: value,
+    }));
+
+    setPasswordMessage("");
+  };
+
+  const handlePasswordSubmit = (event) => {
+    event.preventDefault();
+
+    setPasswordMessage(
+      "Password changes are not available until the backend password service is connected.",
+    );
+  };
+
+  const openPasswordModal = () => {
+    setPasswords({
+      current: "",
+      newPassword: "",
+      confirm: "",
+    });
+
     setPasswordMessage("");
     setShowPasswordModal(true);
   };
 
-  const handleClosePasswordModal = () => {
+  const closePasswordModal = () => {
     setShowPasswordModal(false);
-    setCurrentPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
+
+    setPasswords({
+      current: "",
+      newPassword: "",
+      confirm: "",
+    });
+
     setPasswordMessage("");
   };
 
-  const handleChangePassword = (event) => {
-    event.preventDefault();
+  if (loading) {
+    return (
+      <section className="faculty-profile-page">
+        <div className="faculty-profile-header">
+          <div>
+            <span className="faculty-profile-eyebrow">
+              Account Management
+            </span>
 
-    setPasswordMessage(
-      "Password change is unavailable until a backend password-change API is provided.",
-    );
-  };
+            <h1>Faculty Profile</h1>
 
-  return (
-    <div className="faculty-profile-page">
-      <section className="faculty-profile-header">
-        <div>
-          <span className="faculty-profile-eyebrow">
-            FACULTY PORTAL
-          </span>
-
-          <h1>Faculty Profile</h1>
-
-          <p>
-            View your faculty account information and security
-            settings.
-          </p>
+            <p>
+              View your personal information, professional details
+              and account security.
+            </p>
+          </div>
         </div>
-      </section>
 
-      {loading ? (
         <section className="faculty-profile-integration-notice">
-          <div className="faculty-profile-notice-icon">i</div>
+          <div className="faculty-profile-notice-icon">
+            <FontAwesomeIcon icon={faCircleInfo} />
+          </div>
 
           <div>
             <strong>Loading profile</strong>
 
             <p>
-              Your authenticated faculty account information is being
-              loaded.
+              Loading your authenticated faculty account information
+              from the backend.
             </p>
           </div>
         </section>
-      ) : error ? (
+      </section>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <section className="faculty-profile-page">
+        <div className="faculty-profile-header">
+          <div>
+            <span className="faculty-profile-eyebrow">
+              Account Management
+            </span>
+
+            <h1>Faculty Profile</h1>
+
+            <p>
+              View your personal information, professional details
+              and account security.
+            </p>
+          </div>
+        </div>
+
         <section className="faculty-profile-integration-notice">
-          <div className="faculty-profile-notice-icon">!</div>
+          <div className="faculty-profile-notice-icon">
+            <FontAwesomeIcon icon={faCircleInfo} />
+          </div>
 
           <div>
             <strong>Unable to load profile</strong>
 
-            <p>{error}</p>
+            <p>{errorMessage}</p>
           </div>
         </section>
-      ) : (
-        <>
-          <section className="faculty-profile-overview-card">
-            <div className="faculty-profile-avatar">
-              {getInitials(profile.fullName)}
-            </div>
+      </section>
+    );
+  }
 
-            <div className="faculty-profile-overview-content">
-              <h2>{displayValue(profile.fullName)}</h2>
+  return (
+    <section className="faculty-profile-page">
+      {/* Header */}
+      <div className="faculty-profile-header">
+        <div>
+          <span className="faculty-profile-eyebrow">
+            Account Management
+          </span>
 
-              <div className="faculty-profile-overview-meta">
-                <span>
-                  <strong>User ID:</strong>{" "}
-                  {displayValue(profile.userId)}
-                </span>
+          <h1>Faculty Profile</h1>
 
-                <span>
-                  <strong>Email:</strong>{" "}
-                  {displayValue(profile.email)}
-                </span>
+          <p>
+            View your personal information, professional details and
+            account security.
+          </p>
+        </div>
 
-                <span>
-                  <strong>Department:</strong>{" "}
-                  {displayValue(profile.department)}
-                </span>
-              </div>
-            </div>
-          </section>
+        <div className="faculty-profile-account-status">
+          <span>Faculty Account</span>
 
-          <section className="faculty-profile-section">
-            <div className="faculty-profile-section-heading">
-              <h2>Personal Information</h2>
+          <strong>
+            <span className="faculty-profile-status-dot" />
+            Authenticated
+          </strong>
+        </div>
+      </div>
 
-              <p>
-                Faculty account information and organizational
-                details.
-              </p>
-            </div>
+      {/* Profile Overview */}
+      <section className="faculty-profile-overview">
+        <div className="faculty-profile-avatar">
+          {initials}
+        </div>
 
-            <div className="faculty-profile-information-card">
-              <div className="faculty-profile-field">
-                <span>User ID</span>
+        <div className="faculty-profile-overview-content">
+          <span className="faculty-profile-overview-label">
+            Faculty Account
+          </span>
 
-                <strong>{displayValue(profile.userId)}</strong>
+          <h2>{displayValue(profile.fullName)}</h2>
 
-                <small>Read-only</small>
-              </div>
+          <div className="faculty-profile-overview-meta">
+            <span>
+              <FontAwesomeIcon icon={faUser} />
+              User ID: {displayValue(profile.userId)}
+            </span>
 
-              <div className="faculty-profile-field">
-                <span>Full Name</span>
+            <span>
+              <FontAwesomeIcon icon={faEnvelope} />
+              {displayValue(profile.email)}
+            </span>
 
-                <strong>{displayValue(profile.fullName)}</strong>
+            <span>
+              <FontAwesomeIcon icon={faBriefcase} />
+              {displayValue(profile.designation)}
+            </span>
+          </div>
+        </div>
 
-                <small>Read-only</small>
-              </div>
+        <div className="faculty-profile-overview-status">
+          <span className="faculty-profile-status-dot" />
 
-              <div className="faculty-profile-field">
-                <span>Email</span>
+          {displayValue(profile.role)}
+        </div>
+      </section>
 
-                <strong>{displayValue(profile.email)}</strong>
+      {/* Personal Information */}
+      <section className="faculty-profile-panel">
+        <div className="faculty-profile-panel-header">
+          <div>
+            <span>Personal Information</span>
 
-                <small>Read-only</small>
-              </div>
+            <h2>Basic Personal Details</h2>
+          </div>
 
-              <div className="faculty-profile-field">
-                <span>Department</span>
+          <div className="faculty-profile-panel-icon">
+            <FontAwesomeIcon icon={faUser} />
+          </div>
+        </div>
 
-                <strong>{displayValue(profile.department)}</strong>
+        <div className="faculty-profile-info-grid">
+          <div>
+            <span>Full Name</span>
+            <strong>{displayValue(profile.fullName)}</strong>
+          </div>
 
-                <small>
-                  Not provided by current backend contract
-                </small>
-              </div>
+          <div>
+            <span>Email</span>
+            <strong>{displayValue(profile.email)}</strong>
+          </div>
 
-              <div className="faculty-profile-field">
-                <span>Role</span>
+          <div>
+            <span>Phone Number</span>
+            <strong>{displayValue(profile.phone)}</strong>
+          </div>
 
-                <strong>{displayValue(profile.role)}</strong>
+          <div>
+            <span>Gender</span>
+            <strong>{displayValue(profile.gender)}</strong>
+          </div>
 
-                <small>Read-only</small>
-              </div>
-            </div>
-          </section>
+          <div>
+            <span>Date of Birth</span>
+            <strong>{displayValue(profile.dateOfBirth)}</strong>
+          </div>
 
-          <section className="faculty-profile-section">
-            <div className="faculty-profile-section-heading">
-              <h2>Account Security</h2>
+          <div>
+            <span>Father / Spouse Name</span>
+            <strong>{displayValue(profile.fatherName)}</strong>
+          </div>
+        </div>
 
-              <p>
-                Manage your password without exposing sensitive
-                account information.
-              </p>
-            </div>
+        <div className="faculty-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
 
-            <div className="faculty-profile-security-card">
-              <div className="faculty-profile-security-icon">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <rect
-                    x="5"
-                    y="10"
-                    width="14"
-                    height="11"
-                    rx="2"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                  />
+          <span>
+            Personal information is currently read-only. Fields that
+            are not provided by the backend are displayed as N/A.
+          </span>
+        </div>
+      </section>
 
-                  <path
-                    d="M8 10V7a4 4 0 0 1 8 0v3"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                  />
+      {/* Contact Information */}
+      <section className="faculty-profile-panel">
+        <div className="faculty-profile-panel-header">
+          <div>
+            <span>Contact Information</span>
 
-                  <circle
-                    cx="12"
-                    cy="15"
-                    r="1"
-                    fill="currentColor"
-                  />
-                </svg>
-              </div>
+            <h2>Address &amp; Location</h2>
+          </div>
 
-              <div className="faculty-profile-security-content">
-                <h3>Password</h3>
+          <div className="faculty-profile-panel-icon">
+            <FontAwesomeIcon icon={faLocationDot} />
+          </div>
+        </div>
 
-                <p>
-                  Your password is securely stored and never
-                  displayed.
-                </p>
-              </div>
+        <div className="faculty-profile-info-grid">
+          <div className="faculty-profile-wide-field">
+            <span>Address</span>
+            <strong>{displayValue(profile.address)}</strong>
+          </div>
 
-              <button
-                type="button"
-                className="faculty-profile-secondary-button"
-                onClick={handleOpenPasswordModal}
-              >
-                Change Password
-              </button>
-            </div>
-          </section>
+          <div>
+            <span>City</span>
+            <strong>{displayValue(profile.city)}</strong>
+          </div>
 
-          <section className="faculty-profile-section">
-            <div className="faculty-profile-section-heading">
-              <h2>Account Information</h2>
+          <div>
+            <span>State</span>
+            <strong>{displayValue(profile.state)}</strong>
+          </div>
 
-              <p>
-                Read-only information about your faculty account.
-              </p>
-            </div>
+          <div>
+            <span>Country</span>
+            <strong>{displayValue(profile.country)}</strong>
+          </div>
 
-            <div className="faculty-profile-account-card">
-              <div>
-                <span>User ID</span>
+          <div>
+            <span>PIN Code</span>
+            <strong>{displayValue(profile.pincode)}</strong>
+          </div>
+        </div>
+      </section>
 
-                <strong>{displayValue(profile.userId)}</strong>
-              </div>
+      {/* Professional Information */}
+      <section className="faculty-profile-panel">
+        <div className="faculty-profile-panel-header">
+          <div>
+            <span>Professional Information</span>
 
-              <div>
-                <span>Account Status</span>
+            <h2>Faculty Details</h2>
+          </div>
 
-                <strong>
-                  {profile.accountStatus ? (
-                    <span className="faculty-profile-status">
-                      {profile.accountStatus}
-                    </span>
-                  ) : (
-                    "N/A"
-                  )}
-                </strong>
-              </div>
+          <div className="faculty-profile-panel-icon">
+            <FontAwesomeIcon icon={faGraduationCap} />
+          </div>
+        </div>
 
-              <div>
-                <span>Role</span>
+        <div className="faculty-profile-info-grid">
+          <div>
+            <span>Faculty ID</span>
+            <strong>{displayValue(profile.facultyId)}</strong>
+          </div>
 
-                <strong>{displayValue(profile.role)}</strong>
-              </div>
+          <div>
+            <span>Department</span>
+            <strong>{displayValue(profile.department)}</strong>
+          </div>
 
-              <div>
-                <span>Department</span>
+          <div>
+            <span>Designation</span>
+            <strong>{displayValue(profile.designation)}</strong>
+          </div>
 
-                <strong>{displayValue(profile.department)}</strong>
-              </div>
-            </div>
-          </section>
+          <div>
+            <span>Qualification</span>
+            <strong>{displayValue(profile.qualification)}</strong>
+          </div>
 
-          <section className="faculty-profile-integration-notice">
-            <div className="faculty-profile-notice-icon">i</div>
+          <div>
+            <span>Specialization</span>
+            <strong>{displayValue(profile.specialization)}</strong>
+          </div>
 
-            <div>
-              <strong>
-                Faculty profile API integration partially available
-              </strong>
+          <div>
+            <span>Joining Date</span>
+            <strong>{displayValue(profile.joiningDate)}</strong>
+          </div>
 
-              <p>
-                Your name, email, user ID, and role are loaded from
-                the authenticated account. Faculty ID, department,
-                account status, profile editing, and password changes
-                require additional backend APIs.
-              </p>
-            </div>
-          </section>
-        </>
-      )}
+          <div>
+            <span>Employment Status</span>
+            <strong>{displayValue(profile.employmentStatus)}</strong>
+          </div>
+        </div>
 
+        <div className="faculty-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Professional information will be populated when the
+            corresponding faculty profile data is provided by the
+            backend. Unavailable fields are displayed as N/A.
+          </span>
+        </div>
+      </section>
+
+      {/* Account Security */}
+      <section className="faculty-profile-panel">
+        <div className="faculty-profile-panel-header">
+          <div>
+            <span>Account Security</span>
+
+            <h2>Password &amp; Security</h2>
+          </div>
+
+          <div className="faculty-profile-panel-icon">
+            <FontAwesomeIcon icon={faLock} />
+          </div>
+        </div>
+
+        <div className="faculty-profile-security">
+          <div>
+            <strong>Password</strong>
+
+            <p>
+              Your password is securely protected and is never
+              displayed in the portal.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="faculty-profile-secondary-button"
+            onClick={openPasswordModal}
+          >
+            Change Password
+          </button>
+        </div>
+
+        <div className="faculty-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Password changes are currently unavailable because the
+            confirmed Flask backend does not provide a
+            password-change endpoint.
+          </span>
+        </div>
+      </section>
+
+      {/* Account Information */}
+      <section className="faculty-profile-panel">
+        <div className="faculty-profile-panel-header">
+          <div>
+            <span>Account Information</span>
+
+            <h2>System Account</h2>
+          </div>
+        </div>
+
+        <div className="faculty-profile-account-grid">
+          <div>
+            <span>User ID</span>
+            <strong>{displayValue(profile.userId)}</strong>
+          </div>
+
+          <div>
+            <span>Account Status</span>
+            <strong>{displayValue(profile.accountStatus)}</strong>
+          </div>
+
+          <div>
+            <span>Role</span>
+            <strong>{displayValue(profile.role)}</strong>
+          </div>
+
+          <div>
+            <span>Department</span>
+            <strong>{displayValue(profile.department)}</strong>
+          </div>
+        </div>
+      </section>
+
+      {/* Integration Note */}
+      <section className="faculty-profile-integration-note">
+        <div className="faculty-profile-note-icon">
+          <FontAwesomeIcon icon={faCircleCheck} />
+        </div>
+
+        <div>
+          <strong>Faculty profile integration</strong>
+
+          <p>
+            Name, email, user ID and role are currently loaded from
+            the authenticated Flask session through the confirmed{" "}
+            <code>/api/auth/me</code> endpoint. Additional faculty
+            information will appear automatically when supplied by
+            the backend. Until then, unavailable fields are shown as
+            N/A.
+          </p>
+        </div>
+      </section>
+
+      {/* Password Modal */}
       {showPasswordModal && (
         <div
           className="faculty-profile-modal-backdrop"
-          onMouseDown={handleClosePasswordModal}
+          role="presentation"
+          onClick={closePasswordModal}
         >
           <div
             className="faculty-profile-modal"
-            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="faculty-password-title"
+            onClick={(event) => event.stopPropagation()}
           >
             <div className="faculty-profile-modal-header">
               <div>
-                <span className="faculty-profile-eyebrow">
-                  ACCOUNT SECURITY
-                </span>
+                <span>Account Security</span>
 
-                <h2>Change Password</h2>
+                <h2 id="faculty-password-title">
+                  Change Password
+                </h2>
               </div>
 
               <button
                 type="button"
-                className="faculty-profile-modal-close"
-                onClick={handleClosePasswordModal}
-                aria-label="Close"
+                aria-label="Close password modal"
+                onClick={closePasswordModal}
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
-            <form onSubmit={handleChangePassword}>
-              <div className="faculty-profile-modal-body">
-                <div className="faculty-profile-password-field">
-                  <label htmlFor="current-password">
-                    Current Password
-                  </label>
+            <form
+              className="faculty-profile-password-form"
+              onSubmit={handlePasswordSubmit}
+            >
+              <label>
+                <span>Current Password</span>
 
-                  <input
-                    id="current-password"
-                    type="password"
-                    value={currentPassword}
-                    onChange={(event) => {
-                      setCurrentPassword(event.target.value);
-                      setPasswordMessage("");
-                    }}
-                    autoComplete="current-password"
-                  />
+                <input
+                  type="password"
+                  name="current"
+                  value={passwords.current}
+                  onChange={handlePasswordChange}
+                  autoComplete="current-password"
+                  disabled
+                />
+              </label>
+
+              <label>
+                <span>New Password</span>
+
+                <input
+                  type="password"
+                  name="newPassword"
+                  value={passwords.newPassword}
+                  onChange={handlePasswordChange}
+                  autoComplete="new-password"
+                  disabled
+                />
+              </label>
+
+              <label>
+                <span>Confirm New Password</span>
+
+                <input
+                  type="password"
+                  name="confirm"
+                  value={passwords.confirm}
+                  onChange={handlePasswordChange}
+                  autoComplete="new-password"
+                  disabled
+                />
+              </label>
+
+              <p className="faculty-profile-password-hint">
+                Password changes will become available after the
+                backend password service is implemented.
+              </p>
+
+              {passwordMessage && (
+                <div className="faculty-profile-message">
+                  <FontAwesomeIcon icon={faCircleInfo} />
+
+                  <span>{passwordMessage}</span>
                 </div>
+              )}
 
-                <div className="faculty-profile-password-field">
-                  <label htmlFor="new-password">
-                    New Password
-                  </label>
-
-                  <input
-                    id="new-password"
-                    type="password"
-                    value={newPassword}
-                    onChange={(event) => {
-                      setNewPassword(event.target.value);
-                      setPasswordMessage("");
-                    }}
-                    autoComplete="new-password"
-                  />
-
-                  <small>Minimum 8 characters.</small>
-                </div>
-
-                <div className="faculty-profile-password-field">
-                  <label htmlFor="confirm-password">
-                    Confirm New Password
-                  </label>
-
-                  <input
-                    id="confirm-password"
-                    type="password"
-                    value={confirmPassword}
-                    onChange={(event) => {
-                      setConfirmPassword(event.target.value);
-                      setPasswordMessage("");
-                    }}
-                    autoComplete="new-password"
-                  />
-                </div>
-
-                <div className="faculty-profile-password-message">
-                  {passwordMessage ||
-                    "Password changes are currently unavailable because no backend password-change endpoint has been confirmed."}
-                </div>
-              </div>
-
-              <div className="faculty-profile-modal-footer">
+              <div className="faculty-profile-modal-actions">
                 <button
                   type="button"
                   className="faculty-profile-secondary-button"
-                  onClick={handleClosePasswordModal}
+                  onClick={closePasswordModal}
                 >
-                  Cancel
+                  Close
                 </button>
 
                 <button
                   type="submit"
                   className="faculty-profile-primary-button"
+                  disabled
                 >
                   Change Password
                 </button>
@@ -484,7 +717,7 @@ function Profile() {
           </div>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 

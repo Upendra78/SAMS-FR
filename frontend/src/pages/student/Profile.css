@@ -5,7 +5,9 @@
   padding-bottom: 32px;
 }
 
-/* Header */
+/* =========================================================
+   Header
+========================================================= */
 
 .student-profile-header {
   display: flex;
@@ -74,7 +76,9 @@
   background: #65a47a;
 }
 
-/* Overview */
+/* =========================================================
+   Profile Overview
+========================================================= */
 
 .student-profile-overview {
   display: flex;
@@ -155,7 +159,9 @@
   font-weight: 650;
 }
 
-/* Panels */
+/* =========================================================
+   Panels
+========================================================= */
 
 .student-profile-panel {
   margin-bottom: 18px;
@@ -204,7 +210,9 @@
   font-size: 13px;
 }
 
-/* Buttons */
+/* =========================================================
+   Buttons
+========================================================= */
 
 .student-profile-primary-button,
 .student-profile-secondary-button {
@@ -237,7 +245,9 @@
   background: #f1f5f9;
 }
 
-/* Information Grid */
+/* =========================================================
+   Information Grid
+========================================================= */
 
 .student-profile-info-grid {
   display: grid;
@@ -278,7 +288,94 @@
   font-weight: 700;
 }
 
-/* Form */
+/* =========================================================
+   Signature
+========================================================= */
+
+.student-profile-signature {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 130px;
+  padding: 16px 20px;
+  border-top: 1px solid #edf0f4;
+}
+
+.student-profile-signature-label {
+  color: #8793a5;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.student-profile-signature-box {
+  width: min(280px, 100%);
+  height: 82px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px dashed #cfd8e5;
+  border-radius: 8px;
+  background: #fbfcfe;
+}
+
+.student-profile-signature-box img {
+  display: block;
+  max-width: 92%;
+  max-height: 68px;
+  object-fit: contain;
+}
+
+.student-profile-signature-placeholder {
+  color: #9aa6b6;
+  font-size: 9px;
+  text-align: center;
+}
+
+/* =========================================================
+   Profile Photo
+========================================================= */
+
+.student-profile-photo-section {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 20px;
+}
+
+.student-profile-photo {
+  width: 96px;
+  height: 112px;
+  flex: 0 0 96px;
+  overflow: hidden;
+  border: 1px solid #dfe5ed;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.student-profile-photo img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.student-profile-photo-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #94a0b2;
+  font-size: 10px;
+  text-align: center;
+}
+
+/* =========================================================
+   Form
+========================================================= */
 
 .student-profile-form {
   display: grid;
@@ -359,7 +456,9 @@
   color: #718096;
 }
 
-/* Readonly note */
+/* =========================================================
+   Readonly Note
+========================================================= */
 
 .student-profile-readonly-note {
   display: flex;
@@ -380,7 +479,9 @@
   color: #8090a5;
 }
 
-/* Security */
+/* =========================================================
+   Security
+========================================================= */
 
 .student-profile-security {
   display: flex;
@@ -403,7 +504,9 @@
   line-height: 1.5;
 }
 
-/* Account */
+/* =========================================================
+   Account
+========================================================= */
 
 .student-profile-account-grid {
   display: grid;
@@ -423,7 +526,9 @@
   border-right: 0;
 }
 
-/* Integration */
+/* =========================================================
+   Integration
+========================================================= */
 
 .student-profile-integration-note {
   display: flex;
@@ -462,7 +567,9 @@
   line-height: 1.55;
 }
 
-/* Modal */
+/* =========================================================
+   Modal
+========================================================= */
 
 .student-profile-modal-backdrop {
   position: fixed;
@@ -552,7 +659,9 @@
   padding-top: 3px;
 }
 
-/* Responsive */
+/* =========================================================
+   Responsive
+========================================================= */
 
 @media (max-width: 900px) {
   .student-profile-info-grid {
@@ -635,6 +744,15 @@
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .student-profile-photo-section {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .student-profile-signature-box {
+    width: 100%;
+  }
 }
 
 @media (max-width: 520px) {
@@ -690,6 +808,14 @@
   }
 
   .student-profile-modal-header {
+    padding: 15px;
+  }
+
+  .student-profile-photo-section {
+    padding: 15px;
+  }
+
+  .student-profile-signature {
     padding: 15px;
   }
 }
