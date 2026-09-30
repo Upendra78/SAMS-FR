@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { getUsers } from "../../services/adminService";
 
 import "./Faculty.css";
 
@@ -8,8 +10,6 @@ const EMPTY_METRICS = {
   inactive: null,
   departments: null,
 };
-
-const faculty = [];
 
 function formatMetric(value) {
   return value === null || value === undefined ? "N/A" : value;
@@ -31,11 +31,68 @@ function getInitials(name) {
 }
 
 function Faculty() {
+  const [faculty, setFaculty] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   const [searchTerm, setSearchTerm] = useState("");
   const [department, setDepartment] = useState("All");
   const [designation, setDesignation] = useState("All");
   const [status, setStatus] = useState("All");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadFaculty = async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await getUsers();
+
+        if (!mounted) {
+          return;
+        }
+
+        const users = response?.data ?? [];
+
+        const facultyUsers = users
+          .filter((user) => user.role === "FACULTY")
+          .map((user) => ({
+            facultyId: String(user.user_id),
+            name: user.name,
+            email: user.email,
+            department: null,
+            designation: null,
+            status: null,
+          }));
+
+        setFaculty(facultyUsers);
+      } catch (requestError) {
+        if (!mounted) {
+          return;
+        }
+
+        setFaculty([]);
+
+        setError(
+          requestError?.response?.data?.message ||
+            "Failed to load faculty."
+        );
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadFaculty();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const metrics = EMPTY_METRICS;
 
@@ -72,7 +129,13 @@ function Faculty() {
         matchesStatus
       );
     });
-  }, [searchTerm, department, designation, status]);
+  }, [
+    faculty,
+    searchTerm,
+    department,
+    designation,
+    status,
+  ]);
 
   const hasActiveFilters =
     Boolean(searchTerm) ||
@@ -115,8 +178,13 @@ function Faculty() {
           type="button"
           className="faculty-add-button"
           onClick={() => setIsAddModalOpen(true)}
+          disabled
+          title="Faculty creation API is not available yet"
         >
-          <i className="fa-solid fa-plus" aria-hidden="true" />
+          <i
+            className="fa-solid fa-plus"
+            aria-hidden="true"
+          />
           Add Faculty
         </button>
       </header>
@@ -167,7 +235,9 @@ function Faculty() {
           <span>Inactive</span>
 
           <strong
-            className={metrics.inactive === null ? "is-empty" : ""}
+            className={
+              metrics.inactive === null ? "is-empty" : ""
+            }
           >
             {formatMetric(metrics.inactive)}
           </strong>
@@ -293,114 +363,156 @@ function Faculty() {
 
       <section className="faculty-table-card">
         <div className="faculty-table-scroll">
-          <table className="faculty-table">
-            <thead>
-              <tr>
-                <th>Faculty ID</th>
-                <th>Faculty</th>
-                <th>Department</th>
-                <th>Designation</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredFaculty.map((member) => (
-                <tr key={member.facultyId}>
-                  <td>{member.facultyId}</td>
-
-                  <td>
-                    <div className="faculty-member-cell">
-                      <div className="faculty-avatar">
-                        {getInitials(member.name)}
-                      </div>
-
-                      <div>
-                        <strong>{member.name}</strong>
-                        <span>{member.facultyId}</span>
-                      </div>
-                    </div>
-                  </td>
-
-                  <td>{member.department || "N/A"}</td>
-
-                  <td>{member.designation || "N/A"}</td>
-
-                  <td>{member.email || "N/A"}</td>
-
-                  <td>
-                    <span
-                      className={`faculty-status faculty-status-${member.status?.toLowerCase()}`}
-                    >
-                      <span aria-hidden="true" />
-                      {member.status || "N/A"}
-                    </span>
-                  </td>
-
-                  <td>
-                    <button
-                      type="button"
-                      className="faculty-row-action"
-                      aria-label={`Actions for ${member.name}`}
-                      disabled
-                      title="Faculty management API is not available yet"
-                    >
-                      <i
-                        className="fa-solid fa-ellipsis-vertical"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {faculty.length === 0 ? (
+          {loading ? (
             <div className="faculty-empty-state">
               <div
                 className="faculty-empty-icon"
                 aria-hidden="true"
               >
-                <i className="fa-solid fa-users" />
+                <i className="fa-solid fa-spinner fa-spin" />
               </div>
 
-              <h2>No faculty available</h2>
+              <h2>Loading faculty</h2>
 
               <p>
-                Faculty records will appear here when the
-                required faculty management API is available
-                from the backend.
+                Fetching faculty accounts from the backend.
               </p>
             </div>
-          ) : filteredFaculty.length === 0 ? (
+          ) : error ? (
             <div className="faculty-empty-state faculty-search-empty">
               <div
                 className="faculty-empty-icon"
                 aria-hidden="true"
               >
                 <i
-                  className="fa-solid fa-magnifying-glass"
+                  className="fa-solid fa-triangle-exclamation"
                   aria-hidden="true"
                 />
               </div>
 
-              <h2>No matching faculty</h2>
+              <h2>Unable to load faculty</h2>
 
-              <p>
-                Try adjusting your search terms or filters.
-              </p>
-
-              <button
-                type="button"
-                onClick={clearFilters}
-              >
-                Clear Filters
-              </button>
+              <p>{error}</p>
             </div>
-          ) : null}
+          ) : (
+            <>
+              <table className="faculty-table">
+                <thead>
+                  <tr>
+                    <th>Faculty ID</th>
+                    <th>Faculty</th>
+                    <th>Department</th>
+                    <th>Designation</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredFaculty.map((member) => (
+                    <tr key={member.facultyId}>
+                      <td>{member.facultyId}</td>
+
+                      <td>
+                        <div className="faculty-member-cell">
+                          <div className="faculty-avatar">
+                            {getInitials(member.name)}
+                          </div>
+
+                          <div>
+                            <strong>{member.name}</strong>
+                            <span>{member.facultyId}</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        {member.department || "N/A"}
+                      </td>
+
+                      <td>
+                        {member.designation || "N/A"}
+                      </td>
+
+                      <td>{member.email || "N/A"}</td>
+
+                      <td>
+                        {member.status ? (
+                          <span
+                            className={`faculty-status faculty-status-${member.status.toLowerCase()}`}
+                          >
+                            <span aria-hidden="true" />
+                            {member.status}
+                          </span>
+                        ) : (
+                          "N/A"
+                        )}
+                      </td>
+
+                      <td>
+                        <button
+                          type="button"
+                          className="faculty-row-action"
+                          aria-label={`Actions for ${member.name}`}
+                          disabled
+                          title="Faculty management API is not available yet"
+                        >
+                          <i
+                            className="fa-solid fa-ellipsis-vertical"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {faculty.length === 0 ? (
+                <div className="faculty-empty-state">
+                  <div
+                    className="faculty-empty-icon"
+                    aria-hidden="true"
+                  >
+                    <i className="fa-solid fa-users" />
+                  </div>
+
+                  <h2>No faculty available</h2>
+
+                  <p>
+                    No faculty accounts were returned by the
+                    current admin users API.
+                  </p>
+                </div>
+              ) : filteredFaculty.length === 0 ? (
+                <div className="faculty-empty-state faculty-search-empty">
+                  <div
+                    className="faculty-empty-icon"
+                    aria-hidden="true"
+                  >
+                    <i
+                      className="fa-solid fa-magnifying-glass"
+                      aria-hidden="true"
+                    />
+                  </div>
+
+                  <h2>No matching faculty</h2>
+
+                  <p>
+                    Try adjusting your search terms or filters.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
         <div className="faculty-integration-note">
@@ -413,18 +525,19 @@ function Faculty() {
 
           <div className="faculty-integration-content">
             <strong>
-              Faculty management integration pending
+              Faculty account listing connected
             </strong>
 
             <span>
-              The current Flask backend does not expose the
-              faculty profile CRUD API required to load, create,
-              update or delete faculty records.
+              Faculty accounts are loaded from the admin users
+              API. Department, designation, status and faculty
+              profile management require additional backend
+              faculty APIs.
             </span>
           </div>
 
           <span className="faculty-integration-status">
-            Integration Pending
+            Partially Integrated
           </span>
         </div>
       </section>
@@ -456,8 +569,8 @@ function Faculty() {
                 </h2>
 
                 <p>
-                  Enter faculty information once the faculty
-                  management API is available.
+                  Faculty creation will be enabled when the
+                  required backend contract is available.
                 </p>
               </div>
 
@@ -484,8 +597,8 @@ function Faculty() {
                     <h3>Basic Information</h3>
 
                     <p>
-                      Enter the faculty member&apos;s basic
-                      details.
+                      Faculty account details will be connected
+                      to the backend.
                     </p>
                   </div>
                 </div>
@@ -538,8 +651,8 @@ function Faculty() {
                     <h3>Academic Information</h3>
 
                     <p>
-                      Department and designation will be
-                      connected to backend data.
+                      Department and designation require
+                      faculty-profile backend support.
                     </p>
                   </div>
                 </div>
@@ -587,7 +700,8 @@ function Faculty() {
 
                 <span>
                   Faculty creation is currently disabled until
-                  the Flask Faculty API contract is available.
+                  the required Flask Faculty API contract is
+                  available.
                 </span>
               </div>
 
