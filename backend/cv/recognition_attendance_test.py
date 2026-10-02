@@ -2,12 +2,13 @@ from cv.embedding import generate_embedding
 
 from app import create_app
 from app.extensions import db
-from app.models import AttendanceRecord, AttendanceSession, Enrollment
+from app.models import AttendanceRecord, Enrollment
+from app.services.cv.attendance_service import get_active_session
 from app.services.cv.recognition_service import find_matching_student
 
 
 IMAGE_PATH = r"..\tests\cv\images\person_a_2.jpeg"
-SESSION_ID = 1
+FACULTY_ID = 1
 THRESHOLD = 0.60
 
 
@@ -21,10 +22,23 @@ def main():
     app = create_app()
 
     with app.app_context():
-        # 1. Recognize the student
+        # 1. Find the current active attendance session
+        session = get_active_session(FACULTY_ID)
+
+        if not session:
+            print("No active attendance session found.")
+            return
+
+        session_id = session.session_id
+
+        print("Active session ID:", session_id)
+        print("Offering ID:", session.offering_id)
+        print("Session status:", session.status)
+
+        # 2. Recognize the student
         student_id, confidence = find_matching_student(
             query_embedding,
-            threshold=THRESHOLD
+            threshold=THRESHOLD,
         )
 
         print("Recognized student:", student_id)
@@ -34,24 +48,11 @@ def main():
             print("No matching student found.")
             return
 
-        # 2. Verify the attendance session
-        session = AttendanceSession.query.filter_by(
-            session_id=SESSION_ID
-        ).first()
-
-        if not session:
-            print("Attendance session not found.")
-            return
-
-        if session.status != "ACTIVE":
-            print("Attendance session is not active.")
-            return
-
         # 3. Verify student enrollment
         enrollment = Enrollment.query.filter_by(
             student_id=student_id,
             offering_id=session.offering_id,
-            status="ACTIVE"
+            status="ACTIVE",
         ).first()
 
         if not enrollment:
@@ -60,18 +61,19 @@ def main():
 
         # 4. Prevent duplicate attendance
         existing = AttendanceRecord.query.filter_by(
-            session_id=SESSION_ID,
-            student_id=student_id
+            session_id=session_id,
+            student_id=student_id,
         ).first()
 
         if existing:
             print("Attendance already exists.")
             print("Attendance ID:", existing.attendance_id)
+            print("Session ID:", existing.session_id)
             return
 
         # 5. Create attendance
         attendance = AttendanceRecord(
-            session_id=SESSION_ID,
+            session_id=session_id,
             student_id=student_id,
             status="PRESENT",
             confidence_score=confidence,
