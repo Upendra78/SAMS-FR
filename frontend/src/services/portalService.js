@@ -9,3 +9,8 @@ export async function getStudentDashboard() {
   const response = await api.get("/student/dashboard");
   return response.data;
 }
+
+export async function getStudentCourses() {
+  const response = await api.get("/student/courses");
+  return response.data;
+}
