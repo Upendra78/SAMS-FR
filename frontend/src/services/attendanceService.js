@@ -1,12 +1,16 @@
 import api from "./api";
 
 export async function getStudentAttendance() {
-  const response = await api.get("/attendance/student");
+  const response = await api.get("/student/attendance/");
   return response.data;
 }
 
-const attendanceService = {
-  getStudentAttendance,
-};
+export async function getStudentAttendanceSummary() {
+  const response = await api.get("/student/attendance/summary");
+  return response.data;
+}
 
-export default attendanceService;
+export async function getStudentCourses() {
+  const response = await api.get("/student/courses");
+  return response.data;
+}

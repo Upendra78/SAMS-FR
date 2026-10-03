@@ -1,38 +1,117 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCircleCheck,
   faCircleInfo,
   faEnvelope,
   faGraduationCap,
+  faLocationDot,
   faLock,
+  faSignature,
   faUser,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
+
+import { getCurrentUser } from "../../services/authService";
 import "./Profile.css";
 
 function Profile() {
   const [profile, setProfile] = useState({
+    userId: "",
     studentId: "",
     fullName: "",
+    fatherName: "",
+    motherName: "",
     email: "",
+    signature: "",
+    bloodGroup: "",
+    country: "",
+    state: "",
+    city: "",
+    pincode: "",
     department: "",
     program: "",
     year: "",
     semester: "",
     enrollmentStatus: "",
+    role: "",
   });
 
-  const [isEditing, setIsEditing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [saveMessage, setSaveMessage] = useState("");
-  const [passwordMessage, setPasswordMessage] = useState("");
 
   const [passwords, setPasswords] = useState({
     current: "",
     newPassword: "",
     confirm: "",
   });
+
+  const [passwordMessage, setPasswordMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadProfile() {
+      setLoading(true);
+      setErrorMessage("");
+
+      try {
+        const result = await getCurrentUser();
+
+        if (!result?.success || !result?.data) {
+          throw new Error(
+            result?.message || "Unable to load your profile.",
+          );
+        }
+
+        const user = result.data;
+
+        if (user.role !== "STUDENT") {
+          throw new Error("Authenticated user is not a student.");
+        }
+
+        if (isMounted) {
+          setProfile({
+            userId: user.user_id ?? "",
+            studentId: user.student_id ?? "",
+            fullName: user.name ?? "",
+            fatherName: user.father_name ?? "",
+            motherName: user.mother_name ?? "",
+            email: user.email ?? "",
+            signature: user.signature ?? "",
+            bloodGroup: user.blood_group ?? "",
+            country: user.country ?? "",
+            state: user.state ?? "",
+            city: user.city ?? "",
+            pincode: user.pincode ?? "",
+            department: user.department ?? "",
+            program: user.program ?? "",
+            year: user.year ?? "",
+            semester: user.semester ?? "",
+            enrollmentStatus: user.enrollment_status ?? "",
+            role: user.role ?? "STUDENT",
+          });
+        }
+      } catch (error) {
+        if (isMounted) {
+          setErrorMessage(
+            error?.message || "Unable to load your profile.",
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const initials =
     profile.fullName
@@ -42,41 +121,6 @@ function Profile() {
       .slice(0, 2)
       .map((part) => part[0].toUpperCase())
       .join("") || "ST";
-
-  const handleProfileChange = (event) => {
-    const { name, value } = event.target;
-
-    setProfile((currentProfile) => ({
-      ...currentProfile,
-      [name]: value,
-    }));
-
-    setSaveMessage("");
-  };
-
-  const handleSaveProfile = (event) => {
-    event.preventDefault();
-
-    const trimmedName = profile.fullName.trim();
-
-    if (!trimmedName) {
-      setSaveMessage("Full name is required.");
-      return;
-    }
-
-    if (trimmedName.length < 2 || trimmedName.length > 100) {
-      setSaveMessage("Full name must contain between 2 and 100 characters.");
-      return;
-    }
-
-    setProfile((currentProfile) => ({
-      ...currentProfile,
-      fullName: trimmedName,
-    }));
-
-    setIsEditing(false);
-    setSaveMessage("Profile changes are ready for backend integration.");
-  };
 
   const handlePasswordChange = (event) => {
     const { name, value } = event.target;
@@ -92,24 +136,14 @@ function Profile() {
   const handlePasswordSubmit = (event) => {
     event.preventDefault();
 
-    if (!passwords.current) {
-      setPasswordMessage("Current password is required.");
-      return;
-    }
-
-    if (passwords.newPassword.length < 8) {
-      setPasswordMessage("New password must contain at least 8 characters.");
-      return;
-    }
-
-    if (passwords.newPassword !== passwords.confirm) {
-      setPasswordMessage("New password and confirmation do not match.");
-      return;
-    }
-
     setPasswordMessage(
-      "Password change is ready for backend integration.",
+      "Password changes are not available until the backend password service is connected.",
     );
+  };
+
+  const closePasswordModal = () => {
+    setShowPasswordModal(false);
+    setPasswordMessage("");
 
     setPasswords({
       current: "",
@@ -118,31 +152,111 @@ function Profile() {
     });
   };
 
+  if (loading) {
+    return (
+      <section className="student-profile">
+        <div className="student-profile-header">
+          <div>
+            <span className="student-profile-eyebrow">
+              Account Management
+            </span>
+
+            <h1>Student Profile</h1>
+
+            <p>
+              View your personal identity, academic information,
+              contact details and account security.
+            </p>
+          </div>
+        </div>
+
+        <section className="student-profile-panel">
+          <div className="student-profile-integration-note">
+            <div className="student-profile-note-icon">
+              <FontAwesomeIcon icon={faCircleInfo} />
+            </div>
+
+            <div>
+              <strong>Loading profile</strong>
+
+              <p>
+                Loading your authenticated account information
+                from the backend.
+              </p>
+            </div>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <section className="student-profile">
+        <div className="student-profile-header">
+          <div>
+            <span className="student-profile-eyebrow">
+              Account Management
+            </span>
+
+            <h1>Student Profile</h1>
+
+            <p>
+              View your personal identity, academic information,
+              contact details and account security.
+            </p>
+          </div>
+        </div>
+
+        <section className="student-profile-panel">
+          <div className="student-profile-integration-note">
+            <div className="student-profile-note-icon">
+              <FontAwesomeIcon icon={faCircleInfo} />
+            </div>
+
+            <div>
+              <strong>Unable to load profile</strong>
+
+              <p>{errorMessage}</p>
+            </div>
+          </div>
+        </section>
+      </section>
+    );
+  }
+
   return (
     <section className="student-profile">
       {/* Header */}
       <div className="student-profile-header">
         <div>
-          <span className="student-profile-eyebrow">Account Management</span>
+          <span className="student-profile-eyebrow">
+            Account Management
+          </span>
+
           <h1>Student Profile</h1>
+
           <p>
-            View and manage your personal information, academic details and
-            account security.
+            View your personal identity, academic information,
+            contact details and account security.
           </p>
         </div>
 
         <div className="student-profile-account-status">
           <span>Student Account</span>
+
           <strong>
             <span className="student-profile-status-dot" />
-            Active
+            Authenticated
           </strong>
         </div>
       </div>
 
       {/* Profile Overview */}
       <section className="student-profile-overview">
-        <div className="student-profile-avatar">{initials}</div>
+        <div className="student-profile-avatar">
+          {initials}
+        </div>
 
         <div className="student-profile-overview-content">
           <span className="student-profile-overview-label">
@@ -154,7 +268,7 @@ function Profile() {
           <div className="student-profile-overview-meta">
             <span>
               <FontAwesomeIcon icon={faUser} />
-              Student ID: {profile.studentId || "N/A"}
+              User ID: {profile.userId || "N/A"}
             </span>
 
             <span>
@@ -166,7 +280,7 @@ function Profile() {
 
         <div className="student-profile-overview-status">
           <span className="student-profile-status-dot" />
-          {profile.enrollmentStatus || "N/A"}
+          {profile.role || "STUDENT"}
         </div>
       </section>
 
@@ -175,111 +289,91 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Personal Information</span>
-            <h2>Basic Account Details</h2>
+
+            <h2>Identity Details</h2>
           </div>
 
-          {!isEditing && (
-            <button
-              type="button"
-              className="student-profile-primary-button"
-              onClick={() => {
-                setIsEditing(true);
-                setSaveMessage("");
-              }}
-            >
-              Edit Profile
-            </button>
-          )}
+          <div className="student-profile-panel-icon">
+            <FontAwesomeIcon icon={faUser} />
+          </div>
         </div>
 
-        {isEditing ? (
-          <form
-            className="student-profile-form"
-            onSubmit={handleSaveProfile}
-          >
-            <div className="student-profile-field">
-              <label htmlFor="student-id">Student ID</label>
-              <input
-                id="student-id"
-                name="studentId"
-                value={profile.studentId}
-                placeholder="N/A"
-                disabled
-              />
-              <small>Student ID cannot be changed from the portal.</small>
-            </div>
+        <div className="student-profile-info-grid">
+          <div>
+            <span>Full Name</span>
 
-            <div className="student-profile-field">
-              <label htmlFor="full-name">Full Name</label>
-              <input
-                id="full-name"
-                name="fullName"
-                value={profile.fullName}
-                onChange={handleProfileChange}
-                placeholder="Enter your full name"
-                maxLength={100}
-              />
-            </div>
-
-            <div className="student-profile-field">
-              <label htmlFor="student-email">Email</label>
-              <input
-                id="student-email"
-                name="email"
-                value={profile.email}
-                placeholder="N/A"
-                disabled
-              />
-              <small>
-                Email changes require backend verification.
-              </small>
-            </div>
-
-            <div className="student-profile-form-actions">
-              <button
-                type="button"
-                className="student-profile-secondary-button"
-                onClick={() => {
-                  setIsEditing(false);
-                  setSaveMessage("");
-                }}
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                className="student-profile-primary-button"
-              >
-                Save Changes
-              </button>
-            </div>
-
-            {saveMessage && (
-              <div className="student-profile-message">
-                <FontAwesomeIcon icon={faCircleInfo} />
-                <span>{saveMessage}</span>
-              </div>
-            )}
-          </form>
-        ) : (
-          <div className="student-profile-info-grid">
-            <div>
-              <span>Student ID</span>
-              <strong>{profile.studentId || "N/A"}</strong>
-            </div>
-
-            <div>
-              <span>Full Name</span>
-              <strong>{profile.fullName || "N/A"}</strong>
-            </div>
-
-            <div>
-              <span>Email</span>
-              <strong>{profile.email || "N/A"}</strong>
-            </div>
+            <strong>{profile.fullName || "N/A"}</strong>
           </div>
-        )}
+
+          <div>
+            <span>Father Name</span>
+
+            <strong>{profile.fatherName || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>Mother Name</span>
+
+            <strong>{profile.motherName || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>Email</span>
+
+            <strong>{profile.email || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>User ID</span>
+
+            <strong>{profile.userId || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>Student ID</span>
+
+            <strong>{profile.studentId || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>Blood Group</span>
+
+            <strong>{profile.bloodGroup || "N/A"}</strong>
+          </div>
+        </div>
+
+        <div className="student-profile-signature">
+          <div className="student-profile-signature-header">
+            <div>
+              <span>Signature</span>
+
+              <strong>Registered Signature</strong>
+            </div>
+
+            <FontAwesomeIcon icon={faSignature} />
+          </div>
+
+          <div className="student-profile-signature-box">
+            {profile.signature ? (
+              <img
+                src={profile.signature}
+                alt="Student signature"
+              />
+            ) : (
+              <span>Signature not available</span>
+            )}
+          </div>
+        </div>
+
+        <div className="student-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Personal profile information is institution-managed.
+            Editing will be enabled when the approved student
+            profile API is available.
+          </span>
+        </div>
       </section>
 
       {/* Academic Information */}
@@ -287,6 +381,7 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Academic Information</span>
+
             <h2>Academic Details</h2>
           </div>
 
@@ -297,36 +392,101 @@ function Profile() {
 
         <div className="student-profile-info-grid">
           <div>
+            <span>Student ID</span>
+
+            <strong>{profile.studentId || "N/A"}</strong>
+          </div>
+
+          <div>
             <span>Department</span>
+
             <strong>{profile.department || "N/A"}</strong>
           </div>
 
           <div>
             <span>Program</span>
+
             <strong>{profile.program || "N/A"}</strong>
           </div>
 
           <div>
             <span>Year</span>
+
             <strong>{profile.year || "N/A"}</strong>
           </div>
 
           <div>
             <span>Semester</span>
+
             <strong>{profile.semester || "N/A"}</strong>
           </div>
 
           <div>
             <span>Enrollment Status</span>
-            <strong>{profile.enrollmentStatus || "N/A"}</strong>
+
+            <strong>
+              {profile.enrollmentStatus || "N/A"}
+            </strong>
           </div>
         </div>
 
         <div className="student-profile-readonly-note">
           <FontAwesomeIcon icon={faCircleInfo} />
+
           <span>
-            Academic information is managed by the institution and cannot be
-            edited from the student portal.
+            Academic information is managed by the institution.
+            The current backend does not provide the complete
+            student academic profile.
+          </span>
+        </div>
+      </section>
+
+      {/* Contact & Location */}
+      <section className="student-profile-panel">
+        <div className="student-profile-panel-header">
+          <div>
+            <span>Contact &amp; Location</span>
+
+            <h2>Address Information</h2>
+          </div>
+
+          <div className="student-profile-panel-icon">
+            <FontAwesomeIcon icon={faLocationDot} />
+          </div>
+        </div>
+
+        <div className="student-profile-info-grid">
+          <div>
+            <span>Country</span>
+
+            <strong>{profile.country || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>State</span>
+
+            <strong>{profile.state || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>City</span>
+
+            <strong>{profile.city || "N/A"}</strong>
+          </div>
+
+          <div>
+            <span>PIN Code</span>
+
+            <strong>{profile.pincode || "N/A"}</strong>
+          </div>
+        </div>
+
+        <div className="student-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Location information will be populated when the
+            student profile data is available from the backend.
           </span>
         </div>
       </section>
@@ -336,7 +496,8 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Account Security</span>
-            <h2>Password & Security</h2>
+
+            <h2>Password &amp; Security</h2>
           </div>
 
           <div className="student-profile-panel-icon">
@@ -347,9 +508,10 @@ function Profile() {
         <div className="student-profile-security">
           <div>
             <strong>Password</strong>
+
             <p>
-              Your password is securely protected and is never displayed in
-              the portal.
+              Your password is securely protected and is never
+              displayed in the portal.
             </p>
           </div>
 
@@ -364,6 +526,16 @@ function Profile() {
             Change Password
           </button>
         </div>
+
+        <div className="student-profile-readonly-note">
+          <FontAwesomeIcon icon={faCircleInfo} />
+
+          <span>
+            Password changes are currently unavailable because
+            the confirmed Flask backend does not provide a
+            password-change endpoint.
+          </span>
+        </div>
       </section>
 
       {/* Account Information */}
@@ -371,29 +543,34 @@ function Profile() {
         <div className="student-profile-panel-header">
           <div>
             <span>Account Information</span>
+
             <h2>System Account</h2>
           </div>
         </div>
 
         <div className="student-profile-account-grid">
           <div>
-            <span>Student ID</span>
-            <strong>{profile.studentId || "N/A"}</strong>
+            <span>User ID</span>
+
+            <strong>{profile.userId || "N/A"}</strong>
           </div>
 
           <div>
             <span>Account Status</span>
-            <strong>{profile.enrollmentStatus || "N/A"}</strong>
+
+            <strong>Authenticated</strong>
           </div>
 
           <div>
             <span>Role</span>
-            <strong>STUDENT</strong>
+
+            <strong>{profile.role || "N/A"}</strong>
           </div>
 
           <div>
-            <span>Department</span>
-            <strong>{profile.department || "N/A"}</strong>
+            <span>Student ID</span>
+
+            <strong>{profile.studentId || "N/A"}</strong>
           </div>
         </div>
       </section>
@@ -406,10 +583,15 @@ function Profile() {
 
         <div>
           <strong>Profile data integration</strong>
+
           <p>
-            Profile information will be loaded for the authenticated student
-            from the backend. Changes and password operations will be persisted
-            only after the corresponding Flask services are connected.
+            Name, email, user ID and role are loaded from the
+            authenticated Flask session through the confirmed
+            <code> /api/auth/me </code>
+            endpoint. Father/mother name, signature, blood
+            group, location and academic information will be
+            populated when the corresponding student profile
+            backend service is available.
           </p>
         </div>
       </section>
@@ -419,25 +601,30 @@ function Profile() {
         <div
           className="student-profile-modal-backdrop"
           role="presentation"
-          onClick={() => setShowPasswordModal(false)}
+          onClick={closePasswordModal}
         >
           <div
             className="student-profile-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="student-password-title"
-            onClick={(event) => event.stopPropagation()}
+            onClick={(event) =>
+              event.stopPropagation()
+            }
           >
             <div className="student-profile-modal-header">
               <div>
                 <span>Account Security</span>
-                <h2 id="student-password-title">Change Password</h2>
+
+                <h2 id="student-password-title">
+                  Change Password
+                </h2>
               </div>
 
               <button
                 type="button"
                 aria-label="Close password modal"
-                onClick={() => setShowPasswordModal(false)}
+                onClick={closePasswordModal}
               >
                 <FontAwesomeIcon icon={faXmark} />
               </button>
@@ -449,44 +636,52 @@ function Profile() {
             >
               <label>
                 <span>Current Password</span>
+
                 <input
                   type="password"
                   name="current"
                   value={passwords.current}
                   onChange={handlePasswordChange}
                   autoComplete="current-password"
+                  disabled
                 />
               </label>
 
               <label>
                 <span>New Password</span>
+
                 <input
                   type="password"
                   name="newPassword"
                   value={passwords.newPassword}
                   onChange={handlePasswordChange}
                   autoComplete="new-password"
+                  disabled
                 />
               </label>
 
               <label>
                 <span>Confirm New Password</span>
+
                 <input
                   type="password"
                   name="confirm"
                   value={passwords.confirm}
                   onChange={handlePasswordChange}
                   autoComplete="new-password"
+                  disabled
                 />
               </label>
 
               <p className="student-profile-password-hint">
-                The new password must contain at least 8 characters.
+                Password changes will become available after
+                the backend password service is implemented.
               </p>
 
               {passwordMessage && (
                 <div className="student-profile-message">
                   <FontAwesomeIcon icon={faCircleInfo} />
+
                   <span>{passwordMessage}</span>
                 </div>
               )}
@@ -495,14 +690,15 @@ function Profile() {
                 <button
                   type="button"
                   className="student-profile-secondary-button"
-                  onClick={() => setShowPasswordModal(false)}
+                  onClick={closePasswordModal}
                 >
-                  Cancel
+                  Close
                 </button>
 
                 <button
                   type="submit"
                   className="student-profile-primary-button"
+                  disabled
                 >
                   Change Password
                 </button>

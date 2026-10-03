@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -13,30 +13,13 @@ import {
   faArrowRight,
   faChartPie,
 } from "@fortawesome/free-solid-svg-icons";
-
-import { getStudentDashboard } from "../../services/portalService";
-import { getStudentAttendance } from "../../services/attendanceService";
 import "./StudentDashboard.css";
-
-const summaryCards = [
-  {
-    label: "Overall Attendance",
-    icon: faCalendarCheck,
-  },
-  {
-    label: "Classes Attended",
-    icon: faCircleCheck,
-  },
-  {
-    label: "Classes Missed",
-    icon: faCircleXmark,
-  },
-  {
-    label: "Enrolled Courses",
-    value: "N/A",
-    icon: faBookOpen,
-  },
-];
+import { getStudentDashboard } from "../../services/portalService";
+import {
+  getStudentAttendance,
+  getStudentAttendanceSummary,
+  getStudentCourses,
+} from "../../services/attendanceService";
 
 const quickActions = [
   {
@@ -72,28 +55,94 @@ function StudentDashboard() {
   const [backendMessage, setBackendMessage] = useState("");
 
   const [attendance, setAttendance] = useState([]);
-  const [attendanceLoading, setAttendanceLoading] = useState(true);
-  const [attendanceError, setAttendanceError] = useState("");
+  const [summary, setSummary] = useState([]);
+  const [courses, setCourses] = useState([]);
+
+  const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
 
-    async function loadStudentAccess() {
+    async function loadStudentDashboard() {
       try {
-        const result = await getStudentDashboard();
+        setDataLoading(true);
+        setDataError("");
+
+        const [
+          dashboardResult,
+          attendanceResult,
+          summaryResult,
+          coursesResult,
+        ] = await Promise.all([
+          getStudentDashboard(),
+          getStudentAttendance(),
+          getStudentAttendanceSummary(),
+          getStudentCourses(),
+        ]);
 
         if (!isMounted) {
           return;
         }
 
-        if (result?.success && result?.data?.role === "STUDENT") {
+        /*
+         * Student dashboard access verification.
+         * The confirmed dashboard API only provides the student's role,
+         * so it is used only for portal access confirmation.
+         */
+        if (
+          dashboardResult?.success &&
+          dashboardResult?.data?.role === "STUDENT"
+        ) {
           setBackendStatus("connected");
           setBackendMessage("Student backend access confirmed.");
         } else {
           setBackendStatus("error");
           setBackendMessage(
-            result?.message ||
-              "Unable to verify student backend access."
+            dashboardResult?.message ||
+              "Unable to verify student backend access.",
+          );
+        }
+
+        /*
+         * Attendance records.
+         */
+        if (attendanceResult?.success) {
+          setAttendance(attendanceResult.data ?? []);
+        } else {
+          setAttendance([]);
+        }
+
+        /*
+         * Course-wise attendance summary.
+         */
+        if (summaryResult?.success) {
+          setSummary(summaryResult.data ?? []);
+        } else {
+          setSummary([]);
+        }
+
+        /*
+         * Enrolled courses.
+         */
+        if (coursesResult?.success) {
+          setCourses(coursesResult.data ?? []);
+        } else {
+          setCourses([]);
+        }
+
+        /*
+         * If one of the data endpoints fails while the dashboard
+         * access endpoint succeeds, keep the dashboard usable and
+         * show the appropriate N/A / empty states.
+         */
+        if (
+          !attendanceResult?.success ||
+          !summaryResult?.success ||
+          !coursesResult?.success
+        ) {
+          setDataError(
+            "Some student dashboard data is currently unavailable.",
           );
         }
       } catch (error) {
@@ -104,113 +153,109 @@ function StudentDashboard() {
         if (error?.response?.status === 401) {
           setBackendStatus("error");
           setBackendMessage(
-            "Your session has expired. Please log in again."
+            "Your session has expired. Please log in again.",
           );
         } else if (error?.response?.status === 403) {
           setBackendStatus("error");
           setBackendMessage(
-            "Student access is required for this portal."
+            "Student access is required for this portal.",
           );
         } else {
           setBackendStatus("error");
           setBackendMessage(
-            "Student backend service is currently unavailable."
+            "Student backend service is currently unavailable.",
           );
         }
-      }
-    }
-
-    async function loadAttendance() {
-      try {
-        setAttendanceLoading(true);
-        setAttendanceError("");
-
-        const response = await getStudentAttendance();
-        const records = response?.data;
-
-        if (!isMounted) {
-          return;
-        }
-
-        setAttendance(Array.isArray(records) ? records : []);
-      } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-
-        console.error("Student attendance error:", error);
-
-        setAttendanceError(
-          error?.response?.data?.message ||
-            "Unable to load attendance records."
-        );
 
         setAttendance([]);
+        setSummary([]);
+        setCourses([]);
+        setDataError(
+          "Unable to load student dashboard data.",
+        );
       } finally {
         if (isMounted) {
-          setAttendanceLoading(false);
+          setDataLoading(false);
         }
       }
     }
 
-    loadStudentAccess();
-    loadAttendance();
+    loadStudentDashboard();
 
     return () => {
       isMounted = false;
     };
   }, []);
 
-  const totalClasses = attendance.length;
+  const totalClasses = summary.reduce(
+    (total, course) =>
+      total + Number(course.total_sessions || 0),
+    0,
+  );
 
-  const classesAttended = attendance.filter(
-    (record) =>
-      record.status?.toUpperCase() === "PRESENT"
-  ).length;
+  const totalPresent = summary.reduce(
+    (total, course) =>
+      total + Number(course.present_sessions || 0),
+    0,
+  );
 
-  const classesMissed = attendance.filter(
-    (record) =>
-      record.status?.toUpperCase() === "ABSENT"
-  ).length;
+  const totalAbsent = summary.reduce(
+    (total, course) =>
+      total + Number(course.absent_sessions || 0),
+    0,
+  );
 
   const overallAttendance =
     totalClasses > 0
-      ? Math.round((classesAttended / totalClasses) * 100)
-      : 0;
+      ? (totalPresent / totalClasses) * 100
+      : null;
 
-  const classesLate = attendance.filter(
-    (record) =>
-      record.status?.toUpperCase() === "LATE"
-  ).length;
+  const currentSemester =
+    summary.length > 0
+      ? summary[0]?.semester || "N/A"
+      : courses.length > 0
+        ? courses[0]?.semester || "N/A"
+        : "N/A";
 
-  const recentAttendance = [...attendance]
-    .sort(
-      (a, b) =>
-        new Date(b.marked_at || 0) -
-        new Date(a.marked_at || 0)
-    )
-    .slice(0, 5);
+  const academicYear =
+    courses.length > 0
+      ? courses[0]?.academic_year || "N/A"
+      : "N/A";
 
-  const formatDate = (value) => {
-    if (!value) {
+  const formatPercentage = (value) => {
+    if (value === null || value === undefined) {
       return "N/A";
     }
 
-    const date = new Date(value);
+    const numericValue = Number(value);
+
+    if (Number.isNaN(numericValue)) {
+      return "N/A";
+    }
+
+    return `${numericValue.toFixed(1)}%`;
+  };
+
+  const formatDate = (dateValue) => {
+    if (!dateValue) {
+      return "N/A";
+    }
+
+    const date = new Date(dateValue);
 
     if (Number.isNaN(date.getTime())) {
-      return "N/A";
+      return dateValue;
     }
 
     return date.toLocaleDateString();
   };
 
-  const formatTime = (value) => {
-    if (!value) {
+  const formatTime = (dateValue) => {
+    if (!dateValue) {
       return "N/A";
     }
 
-    const date = new Date(value);
+    const date = new Date(dateValue);
 
     if (Number.isNaN(date.getTime())) {
       return "N/A";
@@ -222,63 +267,23 @@ function StudentDashboard() {
     });
   };
 
-  const getStatusClass = (status) => {
-    switch (status?.toUpperCase()) {
-      case "PRESENT":
-        return "present";
-
-      case "ABSENT":
-        return "absent";
-
-      case "LATE":
-        return "late";
-
-      default:
-        return "";
+  const formatStatus = (status) => {
+    if (!status) {
+      return "N/A";
     }
-  };
 
-  const getStatusText = (status) => {
-    switch (status?.toUpperCase()) {
-      case "PRESENT":
-        return "Present";
-
-      case "ABSENT":
-        return "Absent";
-
-      case "LATE":
-        return "Late";
-
-      default:
-        return status || "Unknown";
-    }
-  };
-
-  const handleRetryAttendance = async () => {
-    try {
-      setAttendanceLoading(true);
-      setAttendanceError("");
-
-      const response = await getStudentAttendance();
-      const records = response?.data;
-
-      setAttendance(Array.isArray(records) ? records : []);
-    } catch (error) {
-      console.error("Student attendance error:", error);
-
-      setAttendanceError(
-        error?.response?.data?.message ||
-          "Unable to load attendance records."
+    return String(status)
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (character) =>
+        character.toUpperCase(),
       );
-
-      setAttendance([]);
-    } finally {
-      setAttendanceLoading(false);
-    }
   };
+
+  const recentAttendance = attendance.slice(0, 5);
 
   return (
     <div className="student-dashboard">
+      {/* Header */}
       <section className="student-dashboard-header">
         <div>
           <p className="student-dashboard-eyebrow">
@@ -288,63 +293,94 @@ function StudentDashboard() {
           <h1>Student Dashboard</h1>
 
           <p className="student-dashboard-subtitle">
-            Welcome back, Student. Here&apos;s your
-            academic overview.
+            Welcome back, Student. Here&apos;s your academic
+            overview.
           </p>
         </div>
 
         <div className="student-semester-info">
           <span>Current Semester</span>
-          <strong>N/A</strong>
-          <small>Academic Year: N/A</small>
+
+          <strong>{currentSemester}</strong>
+
+          <small>
+            Academic Year: {academicYear}
+          </small>
         </div>
       </section>
 
+      {/* Summary */}
       <section className="student-summary-grid">
-        {summaryCards.map((card) => {
-          let value = card.value || "N/A";
+        <article className="student-summary-card">
+          <div className="student-summary-icon">
+            <FontAwesomeIcon icon={faCalendarCheck} />
+          </div>
 
-          if (card.label === "Overall Attendance") {
-            value = attendanceLoading
-              ? "..."
-              : `${overallAttendance}%`;
-          }
+          <div className="student-summary-content">
+            <span>Overall Attendance</span>
 
-          if (card.label === "Classes Attended") {
-            value = attendanceLoading
-              ? "..."
-              : classesAttended;
-          }
+            <strong>
+              {formatPercentage(overallAttendance)}
+            </strong>
+          </div>
+        </article>
 
-          if (card.label === "Classes Missed") {
-            value = attendanceLoading
-              ? "..."
-              : classesMissed;
-          }
+        <article className="student-summary-card">
+          <div className="student-summary-icon">
+            <FontAwesomeIcon icon={faCircleCheck} />
+          </div>
 
-          return (
-            <article
-              className="student-summary-card"
-              key={card.label}
-            >
-              <div className="student-summary-icon">
-                <FontAwesomeIcon icon={card.icon} />
-              </div>
+          <div className="student-summary-content">
+            <span>Classes Attended</span>
 
-              <div className="student-summary-content">
-                <span>{card.label}</span>
-                <strong>{value}</strong>
-              </div>
-            </article>
-          );
-        })}
+            <strong>
+              {summary.length > 0
+                ? totalPresent
+                : "N/A"}
+            </strong>
+          </div>
+        </article>
+
+        <article className="student-summary-card">
+          <div className="student-summary-icon">
+            <FontAwesomeIcon icon={faCircleXmark} />
+          </div>
+
+          <div className="student-summary-content">
+            <span>Classes Missed</span>
+
+            <strong>
+              {summary.length > 0
+                ? totalAbsent
+                : "N/A"}
+            </strong>
+          </div>
+        </article>
+
+        <article className="student-summary-card">
+          <div className="student-summary-icon">
+            <FontAwesomeIcon icon={faBookOpen} />
+          </div>
+
+          <div className="student-summary-content">
+            <span>Enrolled Courses</span>
+
+            <strong>
+              {courses.length > 0
+                ? courses.length
+                : "N/A"}
+            </strong>
+          </div>
+        </article>
       </section>
 
+      {/* Attendance + Schedule */}
       <section className="student-dashboard-grid">
         <article className="student-dashboard-card student-attendance-card">
           <div className="student-card-header">
             <div>
               <h2>Attendance Overview</h2>
+
               <p>Your attendance summary</p>
             </div>
 
@@ -356,9 +392,7 @@ function StudentDashboard() {
           <div className="student-attendance-main">
             <div className="student-attendance-circle">
               <span>
-                {attendanceLoading
-                  ? "..."
-                  : `${overallAttendance}%`}
+                {formatPercentage(overallAttendance)}
               </span>
             </div>
 
@@ -366,9 +400,9 @@ function StudentDashboard() {
               <strong>Overall Attendance</strong>
 
               <span>
-                {attendanceError
-                  ? attendanceError
-                  : "Based on attendance records currently available."}
+                {summary.length > 0
+                  ? "Based on recorded attendance sessions."
+                  : "Attendance data will appear here once connected."}
               </span>
             </div>
           </div>
@@ -379,8 +413,11 @@ function StudentDashboard() {
 
               <div>
                 <small>Present</small>
+
                 <strong>
-                  {attendanceLoading ? "..." : classesAttended}
+                  {summary.length > 0
+                    ? totalPresent
+                    : "N/A"}
                 </strong>
               </div>
             </div>
@@ -390,8 +427,11 @@ function StudentDashboard() {
 
               <div>
                 <small>Absent</small>
+
                 <strong>
-                  {attendanceLoading ? "..." : classesMissed}
+                  {summary.length > 0
+                    ? totalAbsent
+                    : "N/A"}
                 </strong>
               </div>
             </div>
@@ -401,9 +441,8 @@ function StudentDashboard() {
 
               <div>
                 <small>Late</small>
-                <strong>
-                  {attendanceLoading ? "..." : classesLate}
-                </strong>
+
+                <strong>N/A</strong>
               </div>
             </div>
           </div>
@@ -413,6 +452,7 @@ function StudentDashboard() {
           <div className="student-card-header">
             <div>
               <h2>Today&apos;s Schedule</h2>
+
               <p>Your classes for today</p>
             </div>
 
@@ -436,11 +476,13 @@ function StudentDashboard() {
         </article>
       </section>
 
+      {/* Courses + Recent Attendance */}
       <section className="student-dashboard-grid">
         <article className="student-dashboard-card">
           <div className="student-card-header">
             <div>
               <h2>My Courses</h2>
+
               <p>Your currently enrolled courses</p>
             </div>
 
@@ -450,71 +492,88 @@ function StudentDashboard() {
               onClick={() => navigate("/student/courses")}
             >
               View All
+
               <FontAwesomeIcon icon={faArrowRight} />
             </button>
           </div>
 
-          <div className="student-empty-state">
-            <div className="student-empty-icon">
-              <FontAwesomeIcon icon={faBookOpen} />
+          {dataLoading ? (
+            <div className="student-empty-state student-empty-state-compact">
+              <div className="student-empty-icon">
+                <FontAwesomeIcon icon={faClock} />
+              </div>
+
+              <h3>Loading course data</h3>
+
+              <p>
+                Fetching your enrolled courses.
+              </p>
             </div>
+          ) : courses.length === 0 ? (
+            <div className="student-empty-state student-empty-state-compact">
+              <div className="student-empty-icon">
+                <FontAwesomeIcon icon={faBookOpen} />
+              </div>
 
-            <h3>No course data available</h3>
+              <h3>No course data available</h3>
 
-            <p>
-              Your enrolled courses are available from
-              the My Courses section.
-            </p>
-          </div>
+              <p>
+                Your enrolled courses will appear here once
+                course information is available.
+              </p>
+            </div>
+          ) : (
+            <div className="student-empty-state student-empty-state-compact">
+              <div className="student-empty-icon">
+                <FontAwesomeIcon icon={faBookOpen} />
+              </div>
+
+              <h3>
+                {courses.length}{" "}
+                {courses.length === 1
+                  ? "course"
+                  : "courses"}{" "}
+                enrolled
+              </h3>
+
+              <p>
+                Open My Courses to view your complete
+                enrollment information.
+              </p>
+            </div>
+          )}
         </article>
 
         <article className="student-dashboard-card">
           <div className="student-card-header">
             <div>
               <h2>Recent Attendance</h2>
+
               <p>Your latest attendance records</p>
             </div>
 
             <button
               type="button"
               className="student-card-link"
-              onClick={() =>
-                navigate("/student/attendance")
-              }
+              onClick={() => navigate("/student/attendance")}
             >
               View All
+
               <FontAwesomeIcon icon={faArrowRight} />
             </button>
           </div>
 
-          {attendanceLoading ? (
+          {dataLoading ? (
             <div className="student-empty-state student-empty-state-compact">
               <div className="student-empty-icon">
                 <FontAwesomeIcon icon={faClock} />
               </div>
 
-              <h3>Loading attendance...</h3>
+              <h3>Loading attendance</h3>
 
               <p>
-                Retrieving your latest attendance records.
+                Fetching your recent attendance records.
               </p>
-            </div>
-          ) : attendanceError ? (
-            <div className="student-empty-state student-empty-state-compact">
-              <div className="student-empty-icon">
-                <FontAwesomeIcon icon={faCircleXmark} />
-              </div>
-
-              <h3>Unable to load attendance</h3>
-
-              <p>{attendanceError}</p>
-
-              <button
-                type="button"
-                onClick={handleRetryAttendance}
-              >
-                Retry
-              </button>
             </div>
           ) : recentAttendance.length === 0 ? (
             <div className="student-empty-state student-empty-state-compact">
@@ -530,53 +589,47 @@ function StudentDashboard() {
               </p>
             </div>
           ) : (
-            <div className="student-attendance-list">
-              {recentAttendance.map((record) => (
-                <div
-                  className="student-attendance-item"
-                  key={record.attendance_id}
-                >
-                  <div className="student-attendance-main">
-                    <div className="student-attendance-icon">
-                      <FontAwesomeIcon
-                        icon={faCalendarCheck}
-                      />
-                    </div>
+            <div className="student-empty-state student-empty-state-compact">
+              <div className="student-empty-icon">
+                <FontAwesomeIcon icon={faCalendarCheck} />
+              </div>
 
-                    <div>
-                      <strong>Attendance Record</strong>
+              <h3>
+                {recentAttendance.length} recent{" "}
+                {recentAttendance.length === 1
+                  ? "record"
+                  : "records"}
+              </h3>
 
-                      <span>
-                        Session {record.session_id || "N/A"}
-                      </span>
+              <p>
+                Latest record:{" "}
+                {formatDate(
+                  recentAttendance[0]?.session_date,
+                )}{" "}
+                at{" "}
+                {formatTime(
+                  recentAttendance[0]?.marked_at,
+                )}
+                . Open Attendance to view all records.
+              </p>
 
-                      <small>
-                        {formatDate(record.marked_at)} â€¢{" "}
-                        {formatTime(record.marked_at)}
-                      </small>
-                    </div>
-                  </div>
-
-                  <div className="student-attendance-status">
-                    <span
-                      className={`student-status-badge ${getStatusClass(
-                        record.status
-                      )}`}
-                    >
-                      {getStatusText(record.status)}
-                    </span>
-                  </div>
-                </div>
-              ))}
+              <small>
+                Status:{" "}
+                {formatStatus(
+                  recentAttendance[0]?.status,
+                )}
+              </small>
             </div>
           )}
         </article>
       </section>
 
+      {/* Academic Alerts */}
       <section className="student-dashboard-card student-alert-card">
         <div className="student-card-header">
           <div>
             <h2>Academic Alerts</h2>
+
             <p>Important updates and notifications</p>
           </div>
 
@@ -587,15 +640,20 @@ function StudentDashboard() {
 
         <div className="student-alert-empty">
           <FontAwesomeIcon icon={faBell} />
+
           <span>No new notifications</span>
         </div>
       </section>
 
+      {/* Quick Actions */}
       <section className="student-quick-actions">
         <div className="student-section-heading">
           <div>
             <h2>Quick Actions</h2>
-            <p>Access commonly used student features</p>
+
+            <p>
+              Access commonly used student features
+            </p>
           </div>
         </div>
 
@@ -613,6 +671,7 @@ function StudentDashboard() {
 
               <span className="student-action-content">
                 <strong>{action.label}</strong>
+
                 <small>{action.description}</small>
               </span>
 
@@ -625,10 +684,12 @@ function StudentDashboard() {
         </div>
       </section>
 
+      {/* Backend Connection */}
       <section className="student-dashboard-card">
         <div className="student-card-header">
           <div>
             <h2>Backend Connection</h2>
+
             <p>Student portal access status</p>
           </div>
 
@@ -653,6 +714,17 @@ function StudentDashboard() {
           </strong>
         </div>
       </section>
+
+      {/* Data Error */}
+      {!dataLoading && dataError && (
+        <section className="student-dashboard-card">
+          <div className="student-alert-empty">
+            <span>{dataError}</span>
+
+            <strong>Data unavailable</strong>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

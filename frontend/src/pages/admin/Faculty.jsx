@@ -1,4 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { getUsers } from "../../services/adminService";
 
 import "./Faculty.css";
 
@@ -9,10 +11,8 @@ const EMPTY_METRICS = {
   departments: null,
 };
 
-const faculty = [];
-
 function formatMetric(value) {
-  return value === null ? "N/A" : value;
+  return value === null || value === undefined ? "N/A" : value;
 }
 
 function getInitials(name) {
@@ -21,7 +21,8 @@ function getInitials(name) {
   }
 
   return name
-    .split(" ")
+    .trim()
+    .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0])
@@ -30,20 +31,74 @@ function getInitials(name) {
 }
 
 function Faculty() {
+  const [faculty, setFaculty] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
   const [searchTerm, setSearchTerm] = useState("");
   const [department, setDepartment] = useState("All");
   const [designation, setDesignation] = useState("All");
   const [status, setStatus] = useState("All");
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
-  // Backend integration is intentionally pending.
-  // Do not add fake faculty records here.
+  useEffect(() => {
+    let mounted = true;
+
+    const loadFaculty = async () => {
+      try {
+        setLoading(true);
+        setError("");
+
+        const response = await getUsers();
+
+        if (!mounted) {
+          return;
+        }
+
+        const users = response?.data ?? [];
+
+        const facultyUsers = users
+          .filter((user) => user.role === "FACULTY")
+          .map((user) => ({
+            facultyId: String(user.user_id),
+            name: user.name,
+            email: user.email,
+            department: null,
+            designation: null,
+            status: null,
+          }));
+
+        setFaculty(facultyUsers);
+      } catch (requestError) {
+        if (!mounted) {
+          return;
+        }
+
+        setFaculty([]);
+
+        setError(
+          requestError?.response?.data?.message ||
+            "Failed to load faculty."
+        );
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadFaculty();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const metrics = EMPTY_METRICS;
 
   const departments = ["All"];
-
   const designations = ["All"];
+  const statuses = ["All"];
 
   const filteredFaculty = useMemo(() => {
     const search = searchTerm.trim().toLowerCase();
@@ -74,40 +129,48 @@ function Faculty() {
         matchesStatus
       );
     });
-  }, [searchTerm, department, designation, status]);
+  }, [
+    faculty,
+    searchTerm,
+    department,
+    designation,
+    status,
+  ]);
 
   const hasActiveFilters =
-    searchTerm ||
+    Boolean(searchTerm) ||
     department !== "All" ||
     designation !== "All" ||
     status !== "All";
 
-  function clearFilters() {
+  const clearFilters = () => {
     setSearchTerm("");
     setDepartment("All");
     setDesignation("All");
     setStatus("All");
-  }
+  };
 
-  function handleAddFaculty(event) {
+  const handleAddFaculty = (event) => {
     event.preventDefault();
+  };
 
-    // Intentionally no API call until the Flask Faculty contract is available.
-  }
+  const handleCloseModal = () => {
+    setIsAddModalOpen(false);
+  };
 
   return (
     <section className="faculty-management-page">
-      {/* =========================
-          PAGE HEADER
-      ========================== */}
       <header className="faculty-page-header">
         <div>
-          <span className="faculty-eyebrow">Admin Portal</span>
+          <span className="faculty-eyebrow">
+            Admin Portal
+          </span>
 
           <h1>Faculty Management</h1>
 
           <p>
-            Manage faculty members, academic information and assignments.
+            Manage faculty members, academic information and
+            assignments.
           </p>
         </div>
 
@@ -115,18 +178,23 @@ function Faculty() {
           type="button"
           className="faculty-add-button"
           onClick={() => setIsAddModalOpen(true)}
+          disabled
+          title="Faculty creation API is not available yet"
         >
-          <i className="fa-solid fa-plus" />
+          <i
+            className="fa-solid fa-plus"
+            aria-hidden="true"
+          />
           Add Faculty
         </button>
       </header>
 
-      {/* =========================
-          SUMMARY CARDS
-      ========================== */}
       <div className="faculty-summary-grid">
         <article className="faculty-summary-card faculty-summary-blue">
-          <div className="faculty-summary-icon">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             <i className="fa-solid fa-users" />
           </div>
 
@@ -140,7 +208,10 @@ function Faculty() {
         </article>
 
         <article className="faculty-summary-card faculty-summary-green">
-          <div className="faculty-summary-icon">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             <i className="fa-solid fa-circle-check" />
           </div>
 
@@ -154,52 +225,64 @@ function Faculty() {
         </article>
 
         <article className="faculty-summary-card faculty-summary-red">
-          <div className="faculty-summary-icon">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             <i className="fa-solid fa-user-slash" />
           </div>
 
           <span>Inactive</span>
 
           <strong
-            className={metrics.inactive === null ? "is-empty" : ""}
+            className={
+              metrics.inactive === null ? "is-empty" : ""
+            }
           >
             {formatMetric(metrics.inactive)}
           </strong>
         </article>
 
         <article className="faculty-summary-card faculty-summary-purple">
-          <div className="faculty-summary-icon">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             <i className="fa-solid fa-building-columns" />
           </div>
 
           <span>Departments</span>
 
           <strong
-            className={metrics.departments === null ? "is-empty" : ""}
+            className={
+              metrics.departments === null ? "is-empty" : ""
+            }
           >
             {formatMetric(metrics.departments)}
           </strong>
         </article>
       </div>
 
-      {/* =========================
-          FILTERS
-      ========================== */}
       <section className="faculty-filter-panel">
         <div className="faculty-search-wrapper">
           <label htmlFor="faculty-search">
-            Search faculty
+            Search Faculty
           </label>
 
           <div className="faculty-search-box">
-            <i className="fa-solid fa-magnifying-glass" />
+            <i
+              className="fa-solid fa-magnifying-glass"
+              aria-hidden="true"
+            />
 
             <input
               id="faculty-search"
               type="search"
               placeholder="Search faculty by ID, name or email..."
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(event) =>
+                setSearchTerm(event.target.value)
+              }
             />
           </div>
         </div>
@@ -212,7 +295,9 @@ function Faculty() {
           <select
             id="faculty-department"
             value={department}
-            onChange={(event) => setDepartment(event.target.value)}
+            onChange={(event) =>
+              setDepartment(event.target.value)
+            }
           >
             {departments.map((item) => (
               <option key={item} value={item}>
@@ -230,7 +315,9 @@ function Faculty() {
           <select
             id="faculty-designation"
             value={designation}
-            onChange={(event) => setDesignation(event.target.value)}
+            onChange={(event) =>
+              setDesignation(event.target.value)
+            }
           >
             {designations.map((item) => (
               <option key={item} value={item}>
@@ -248,11 +335,15 @@ function Faculty() {
           <select
             id="faculty-status"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            onChange={(event) =>
+              setStatus(event.target.value)
+            }
           >
-            <option value="All">All</option>
-            <option value="Active">Active</option>
-            <option value="Inactive">Inactive</option>
+            {statuses.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
           </select>
         </div>
 
@@ -262,147 +353,202 @@ function Faculty() {
           onClick={clearFilters}
           disabled={!hasActiveFilters}
         >
-          <i className="fa-solid fa-rotate-right" />
+          <i
+            className="fa-solid fa-rotate-right"
+            aria-hidden="true"
+          />
           Clear Filters
         </button>
       </section>
 
-      {/* =========================
-          FACULTY TABLE
-      ========================== */}
       <section className="faculty-table-card">
         <div className="faculty-table-scroll">
-          <table className="faculty-table">
-            <thead>
-              <tr>
-                <th>Faculty ID</th>
-                <th>Faculty</th>
-                <th>Department</th>
-                <th>Designation</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-
-            <tbody>
-              {filteredFaculty.map((member) => (
-                <tr key={member.facultyId}>
-                  <td>{member.facultyId}</td>
-
-                  <td>
-                    <div className="faculty-member-cell">
-                      <div className="faculty-avatar">
-                        {getInitials(member.name)}
-                      </div>
-
-                      <div>
-                        <strong>{member.name}</strong>
-                        <span>{member.facultyId}</span>
-                      </div>
-                    </div>
-                  </td>
-
-                  <td>{member.department}</td>
-
-                  <td>{member.designation}</td>
-
-                  <td>{member.email}</td>
-
-                  <td>
-                    <span
-                      className={`faculty-status faculty-status-${member.status?.toLowerCase()}`}
-                    >
-                      <span />
-                      {member.status}
-                    </span>
-                  </td>
-
-                  <td>
-                    <button
-                      type="button"
-                      className="faculty-row-action"
-                      aria-label={`Actions for ${member.name}`}
-                    >
-                      <i className="fa-solid fa-ellipsis-vertical" />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {faculty.length === 0 && (
+          {loading ? (
             <div className="faculty-empty-state">
-              <div className="faculty-empty-icon">
-                <i className="fa-solid fa-users" />
+              <div
+                className="faculty-empty-icon"
+                aria-hidden="true"
+              >
+                <i className="fa-solid fa-spinner fa-spin" />
               </div>
 
-              <h2>No faculty available</h2>
+              <h2>Loading faculty</h2>
 
               <p>
-                Faculty records will be displayed here when they
-                are provided by the backend.
+                Fetching faculty accounts from the backend.
               </p>
             </div>
-          )}
-
-          {faculty.length > 0 &&
-            filteredFaculty.length === 0 && (
-              <div className="faculty-empty-state faculty-search-empty">
-                <div className="faculty-empty-icon">
-                  <i className="fa-solid fa-magnifying-glass" />
-                </div>
-
-                <h2>No matching faculty</h2>
-
-                <p>
-                  Try adjusting your search terms or filters.
-                </p>
-
-                <button
-                  type="button"
-                  onClick={clearFilters}
-                >
-                  Clear Filters
-                </button>
+          ) : error ? (
+            <div className="faculty-empty-state faculty-search-empty">
+              <div
+                className="faculty-empty-icon"
+                aria-hidden="true"
+              >
+                <i
+                  className="fa-solid fa-triangle-exclamation"
+                  aria-hidden="true"
+                />
               </div>
-            )}
+
+              <h2>Unable to load faculty</h2>
+
+              <p>{error}</p>
+            </div>
+          ) : (
+            <>
+              <table className="faculty-table">
+                <thead>
+                  <tr>
+                    <th>Faculty ID</th>
+                    <th>Faculty</th>
+                    <th>Department</th>
+                    <th>Designation</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+
+                <tbody>
+                  {filteredFaculty.map((member) => (
+                    <tr key={member.facultyId}>
+                      <td>{member.facultyId}</td>
+
+                      <td>
+                        <div className="faculty-member-cell">
+                          <div className="faculty-avatar">
+                            {getInitials(member.name)}
+                          </div>
+
+                          <div>
+                            <strong>{member.name}</strong>
+                            <span>{member.facultyId}</span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        {member.department || "N/A"}
+                      </td>
+
+                      <td>
+                        {member.designation || "N/A"}
+                      </td>
+
+                      <td>{member.email || "N/A"}</td>
+
+                      <td>
+                        {member.status ? (
+                          <span
+                            className={`faculty-status faculty-status-${member.status.toLowerCase()}`}
+                          >
+                            <span aria-hidden="true" />
+                            {member.status}
+                          </span>
+                        ) : (
+                          "N/A"
+                        )}
+                      </td>
+
+                      <td>
+                        <button
+                          type="button"
+                          className="faculty-row-action"
+                          aria-label={`Actions for ${member.name}`}
+                          disabled
+                          title="Faculty management API is not available yet"
+                        >
+                          <i
+                            className="fa-solid fa-ellipsis-vertical"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {faculty.length === 0 ? (
+                <div className="faculty-empty-state">
+                  <div
+                    className="faculty-empty-icon"
+                    aria-hidden="true"
+                  >
+                    <i className="fa-solid fa-users" />
+                  </div>
+
+                  <h2>No faculty available</h2>
+
+                  <p>
+                    No faculty accounts were returned by the
+                    current admin users API.
+                  </p>
+                </div>
+              ) : filteredFaculty.length === 0 ? (
+                <div className="faculty-empty-state faculty-search-empty">
+                  <div
+                    className="faculty-empty-icon"
+                    aria-hidden="true"
+                  >
+                    <i
+                      className="fa-solid fa-magnifying-glass"
+                      aria-hidden="true"
+                    />
+                  </div>
+
+                  <h2>No matching faculty</h2>
+
+                  <p>
+                    Try adjusting your search terms or filters.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={clearFilters}
+                  >
+                    Clear Filters
+                  </button>
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
 
-        {/* =========================
-            BACKEND NOTICE
-        ========================== */}
         <div className="faculty-integration-note">
-          <div className="faculty-integration-icon">
+          <div
+            className="faculty-integration-icon"
+            aria-hidden="true"
+          >
             <i className="fa-solid fa-circle-info" />
           </div>
 
           <div className="faculty-integration-content">
-            <strong>Backend integration pending</strong>
+            <strong>
+              Faculty account listing connected
+            </strong>
 
             <span>
-              Faculty records will be loaded from the Flask
-              backend when the Faculty API is available.
+              Faculty accounts are loaded from the admin users
+              API. Department, designation, status and faculty
+              profile management require additional backend
+              faculty APIs.
             </span>
           </div>
 
           <span className="faculty-integration-status">
-            Integration Pending
+            Partially Integrated
           </span>
         </div>
       </section>
 
-      {/* =========================
-          ADD FACULTY MODAL
-      ========================== */}
       {isAddModalOpen && (
         <div
           className="faculty-modal-backdrop"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setIsAddModalOpen(false);
+              handleCloseModal();
             }
           }}
         >
@@ -423,7 +569,8 @@ function Faculty() {
                 </h2>
 
                 <p>
-                  Add a faculty member to the SAMS-FR system.
+                  Faculty creation will be enabled when the
+                  required backend contract is available.
                 </p>
               </div>
 
@@ -431,9 +578,12 @@ function Faculty() {
                 type="button"
                 className="faculty-modal-close"
                 aria-label="Close add faculty dialog"
-                onClick={() => setIsAddModalOpen(false)}
+                onClick={handleCloseModal}
               >
-                <i className="fa-solid fa-xmark" />
+                <i
+                  className="fa-solid fa-xmark"
+                  aria-hidden="true"
+                />
               </button>
             </div>
 
@@ -445,8 +595,10 @@ function Faculty() {
                 <div className="faculty-form-section-heading">
                   <div>
                     <h3>Basic Information</h3>
+
                     <p>
-                      Enter the faculty member's basic details.
+                      Faculty account details will be connected
+                      to the backend.
                     </p>
                   </div>
                 </div>
@@ -461,6 +613,7 @@ function Faculty() {
                       id="new-faculty-id"
                       type="text"
                       placeholder="e.g. FAC001"
+                      disabled
                     />
                   </div>
 
@@ -473,6 +626,7 @@ function Faculty() {
                       id="new-faculty-name"
                       type="text"
                       placeholder="Enter full name"
+                      disabled
                     />
                   </div>
 
@@ -485,6 +639,7 @@ function Faculty() {
                       id="new-faculty-email"
                       type="email"
                       placeholder="faculty@college.edu"
+                      disabled
                     />
                   </div>
                 </div>
@@ -494,9 +649,10 @@ function Faculty() {
                 <div className="faculty-form-section-heading">
                   <div>
                     <h3>Academic Information</h3>
+
                     <p>
-                      Department and designation will be
-                      connected to backend data.
+                      Department and designation require
+                      faculty-profile backend support.
                     </p>
                   </div>
                 </div>
@@ -510,18 +666,11 @@ function Faculty() {
                     <select
                       id="new-faculty-department"
                       defaultValue=""
+                      disabled
                     >
-                      <option value="" disabled>
-                        Select department
+                      <option value="">
+                        Faculty API unavailable
                       </option>
-
-                      {departments
-                        .filter((item) => item !== "All")
-                        .map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))}
                     </select>
                   </div>
 
@@ -533,29 +682,26 @@ function Faculty() {
                     <select
                       id="new-faculty-designation"
                       defaultValue=""
+                      disabled
                     >
-                      <option value="" disabled>
-                        Select designation
+                      <option value="">
+                        Faculty API unavailable
                       </option>
-
-                      {designations
-                        .filter((item) => item !== "All")
-                        .map((item) => (
-                          <option key={item} value={item}>
-                            {item}
-                          </option>
-                        ))}
                     </select>
                   </div>
                 </div>
               </div>
 
               <div className="faculty-modal-backend-note">
-                <i className="fa-solid fa-circle-info" />
+                <i
+                  className="fa-solid fa-circle-info"
+                  aria-hidden="true"
+                />
 
                 <span>
                   Faculty creation is currently disabled until
-                  the Flask Faculty API contract is available.
+                  the required Flask Faculty API contract is
+                  available.
                 </span>
               </div>
 
@@ -563,7 +709,7 @@ function Faculty() {
                 <button
                   type="button"
                   className="faculty-secondary-button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={handleCloseModal}
                 >
                   Cancel
                 </button>
@@ -572,6 +718,7 @@ function Faculty() {
                   type="submit"
                   className="faculty-primary-button"
                   disabled
+                  title="Faculty management API is not available yet"
                 >
                   Add Faculty
                 </button>

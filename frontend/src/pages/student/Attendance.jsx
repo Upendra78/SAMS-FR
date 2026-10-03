@@ -1,122 +1,135 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  getStudentAttendance,
+  getStudentAttendanceSummary,
+} from "../../services/attendanceService";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCalendarCheck,
   faCircleCheck,
   faCircleXmark,
-  faChartPie,
-  faMagnifyingGlass,
-  faRotate,
   faClock,
-  faShieldHalved,
+  faBookOpen,
+  faCalendarDays,
+  faChartPie,
+  faArrowRight,
+  faRotate,
+  faMagnifyingGlass,
+  faFileLines,
 } from "@fortawesome/free-solid-svg-icons";
-
-import { getStudentAttendance } from "../../services/attendanceService";
 import "./Attendance.css";
 
 function Attendance() {
+  const navigate = useNavigate();
+
   const [attendance, setAttendance] = useState([]);
+  const [summary, setSummary] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
-
-  const loadAttendance = async () => {
-    try {
-      setLoading(true);
-      setError("");
-
-      const result = await getStudentAttendance();
-
-      if (!result?.success || !Array.isArray(result.data)) {
-        throw new Error(result?.message || "Unable to load attendance.");
-      }
-
-      setAttendance(result.data);
-    } catch (err) {
-      console.error("Student attendance error:", err);
-
-      const message =
-        err?.response?.data?.message ||
-        err?.message ||
-        "Unable to load attendance.";
-
-      setError(message);
-      setAttendance([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
+    async function loadAttendance() {
+      try {
+        setLoading(true);
+        setError("");
+
+        const [attendanceResult, summaryResult] = await Promise.all([
+          getStudentAttendance(),
+          getStudentAttendanceSummary(),
+        ]);
+
+        if (attendanceResult?.success) {
+          setAttendance(attendanceResult.data ?? []);
+        } else {
+          setAttendance([]);
+        }
+
+        if (summaryResult?.success) {
+          setSummary(summaryResult.data ?? []);
+        } else {
+          setSummary([]);
+        }
+      } catch (err) {
+        setAttendance([]);
+        setSummary([]);
+
+        setError(
+          err?.response?.data?.message ||
+            "Unable to load attendance data."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
     loadAttendance();
   }, []);
 
-  const summary = useMemo(() => {
-    const total = attendance.length;
+  const totalClasses = summary.reduce(
+    (total, course) => total + Number(course.total_sessions || 0),
+    0
+  );
 
-    const present = attendance.filter(
-      (record) => record.status?.toUpperCase() === "PRESENT"
-    ).length;
+  const totalPresent = summary.reduce(
+    (total, course) => total + Number(course.present_sessions || 0),
+    0
+  );
 
-    const absent = attendance.filter(
-      (record) => record.status?.toUpperCase() === "ABSENT"
-    ).length;
+  const totalAbsent = summary.reduce(
+    (total, course) => total + Number(course.absent_sessions || 0),
+    0
+  );
 
-    const percentage = total
-      ? Math.round((present / total) * 100)
-      : 0;
+  const overallAttendance =
+    totalClasses > 0
+      ? (totalPresent / totalClasses) * 100
+      : null;
 
-    return {
-      total,
-      present,
-      absent,
-      percentage,
-    };
-  }, [attendance]);
+  const currentSemester =
+    summary.length > 0
+      ? summary[0]?.semester || "N/A"
+      : "N/A";
 
-  const filteredAttendance = useMemo(() => {
-    return attendance.filter((record) => {
-      const status = record.status?.toUpperCase() || "";
+  const academicYear =
+    summary.length > 0
+      ? summary[0]?.academic_year || "N/A"
+      : "N/A";
 
-      const matchesStatus =
-        statusFilter === "all" || status === statusFilter;
+  const formatPercentage = (value) => {
+    if (value === null || value === undefined) {
+      return "N/A";
+    }
 
-      const searchableText = [
-        record.attendance_id,
-        record.session_id,
-        record.status,
-        record.recognition_method,
-        record.marked_at,
-      ]
-        .join(" ")
-        .toLowerCase();
+    const numericValue = Number(value);
 
-      const matchesSearch = searchableText.includes(
-        search.toLowerCase()
-      );
+    if (Number.isNaN(numericValue)) {
+      return "N/A";
+    }
 
-      return matchesStatus && matchesSearch;
-    });
-  }, [attendance, search, statusFilter]);
+    return `${numericValue.toFixed(1)}%`;
+  };
 
-  const formatDate = (value) => {
-    if (!value) return "N/A";
+  const formatDate = (dateValue) => {
+    if (!dateValue) {
+      return "N/A";
+    }
 
-    const date = new Date(value);
+    const date = new Date(dateValue);
 
     if (Number.isNaN(date.getTime())) {
-      return value;
+      return dateValue;
     }
 
     return date.toLocaleDateString();
   };
 
-  const formatTime = (value) => {
-    if (!value) return "N/A";
+  const formatTime = (dateValue) => {
+    if (!dateValue) {
+      return "N/A";
+    }
 
-    const date = new Date(value);
+    const date = new Date(dateValue);
 
     if (Number.isNaN(date.getTime())) {
       return "N/A";
@@ -128,28 +141,68 @@ function Attendance() {
     });
   };
 
-  const formatMethod = (value) => {
-    if (!value) return "N/A";
+  const getStatusLabel = (status) => {
+    if (!status) {
+      return "N/A";
+    }
 
-    return value
-      .toLowerCase()
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    return String(status).replace(/_/g, " ");
   };
 
   return (
     <section className="student-attendance">
+      {/* Loading State */}
+      {loading && (
+        <div className="student-attendance-note">
+          <div className="student-attendance-note-icon">
+            <FontAwesomeIcon icon={faClock} />
+          </div>
+
+          <div>
+            <strong>Loading attendance</strong>
+            <span>Fetching your attendance records...</span>
+          </div>
+        </div>
+      )}
+
+      {/* Error State */}
+      {!loading && error && (
+        <div className="student-attendance-note">
+          <div className="student-attendance-note-icon">
+            <FontAwesomeIcon icon={faCircleXmark} />
+          </div>
+
+          <div>
+            <strong>Unable to load attendance</strong>
+            <span>{error}</span>
+          </div>
+        </div>
+      )}
+
+      {/* Header */}
       <header className="student-attendance-header">
         <div>
           <p className="student-attendance-eyebrow">
-            ATTENDANCE
+            ATTENDANCE MONITORING
           </p>
 
-          <h1>My Attendance</h1>
+          <h1>Attendance</h1>
 
           <p className="student-attendance-subtitle">
-            View your attendance records and attendance percentage.
+            View your attendance records and course-wise attendance.
           </p>
+        </div>
+
+        <div className="student-attendance-semester">
+          <span>Current Semester</span>
+
+          <strong>{currentSemester}</strong>
+
+          <small>Academic Year: {academicYear}</small>
+
+          <div className="student-attendance-semester-icon">
+            <FontAwesomeIcon icon={faBookOpen} />
+          </div>
         </div>
       </header>
 
@@ -161,9 +214,13 @@ function Attendance() {
           </div>
 
           <div>
-            <span>Total Records</span>
-            <strong>{loading ? "..." : summary.total}</strong>
-            <small>Attendance records</small>
+            <span>Overall Attendance</span>
+
+            <strong>
+              {formatPercentage(overallAttendance)}
+            </strong>
+
+            <small>Attendance rate</small>
           </div>
         </article>
 
@@ -173,9 +230,13 @@ function Attendance() {
           </div>
 
           <div>
-            <span>Present</span>
-            <strong>{loading ? "..." : summary.present}</strong>
-            <small>Classes attended</small>
+            <span>Classes Attended</span>
+
+            <strong>
+              {summary.length > 0 ? totalPresent : "N/A"}
+            </strong>
+
+            <small>Present sessions</small>
           </div>
         </article>
 
@@ -185,195 +246,369 @@ function Attendance() {
           </div>
 
           <div>
-            <span>Absent</span>
-            <strong>{loading ? "..." : summary.absent}</strong>
-            <small>Classes missed</small>
+            <span>Classes Missed</span>
+
+            <strong>
+              {summary.length > 0 ? totalAbsent : "N/A"}
+            </strong>
+
+            <small>Absent sessions</small>
           </div>
         </article>
 
         <article className="student-attendance-summary-card">
-          <div className="student-attendance-summary-icon orange">
-            <FontAwesomeIcon icon={faChartPie} />
+          <div className="student-attendance-summary-icon purple">
+            <FontAwesomeIcon icon={faBookOpen} />
           </div>
 
           <div>
-            <span>Attendance</span>
+            <span>Total Classes</span>
+
             <strong>
-              {loading ? "..." : `${summary.percentage}%`}
+              {summary.length > 0 ? totalClasses : "N/A"}
             </strong>
-            <small>Overall attendance</small>
+
+            <small>Recorded sessions</small>
           </div>
         </article>
       </section>
 
-      {/* Filters */}
-      <section className="student-attendance-filter-card">
-        <div className="student-attendance-search">
-          <FontAwesomeIcon icon={faMagnifyingGlass} />
-
-          <input
-            type="search"
-            placeholder="Search attendance records..."
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            disabled={loading}
-            aria-label="Search attendance"
-          />
-        </div>
-
-        <label className="student-attendance-filter">
-          <span>Status</span>
-
-          <select
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value)}
-            disabled={loading}
-          >
-            <option value="all">All</option>
-            <option value="PRESENT">Present</option>
-            <option value="ABSENT">Absent</option>
-          </select>
-        </label>
-
-        <button
-          type="button"
-          className="student-attendance-clear"
-          onClick={() => {
-            setSearch("");
-            setStatusFilter("all");
-          }}
-          disabled={loading}
-        >
-          <FontAwesomeIcon icon={faRotate} />
-          Clear Filters
-        </button>
-      </section>
-
-      {/* Error */}
-      {error && (
-        <section className="student-attendance-error">
-          <div>
-            <strong>Unable to load attendance</strong>
-            <p>{error}</p>
-          </div>
-
-          <button type="button" onClick={loadAttendance}>
-            <FontAwesomeIcon icon={faRotate} />
-            Retry
-          </button>
-        </section>
-      )}
-
-      {/* Loading */}
-      {loading ? (
-        <section className="student-attendance-state">
-          <FontAwesomeIcon icon={faClock} spin />
-          <h3>Loading attendance...</h3>
-          <p>Please wait while your attendance records are retrieved.</p>
-        </section>
-      ) : !error && filteredAttendance.length === 0 ? (
-        /* Empty */
-        <section className="student-attendance-state">
-          <FontAwesomeIcon icon={faCalendarCheck} />
-          <h3>No attendance records found</h3>
-          <p>
-            Attendance records will appear here once attendance
-            has been recorded.
-          </p>
-        </section>
-      ) : (
-        /* Table */
-        <section className="student-attendance-table-card">
-          <div className="student-attendance-table-header">
+      {/* Overview + Schedule */}
+      <section className="student-attendance-main-grid">
+        <article className="student-attendance-card">
+          <div className="student-attendance-card-header">
             <div>
-              <p>ATTENDANCE RECORDS</p>
-              <h2>Attendance History</h2>
+              <h2>Attendance Overview</h2>
+
+              <p>Your attendance summary</p>
             </div>
 
-            <span>
-              {filteredAttendance.length} Records
-            </span>
+            <div className="student-attendance-card-icon">
+              <FontAwesomeIcon icon={faChartPie} />
+            </div>
           </div>
 
-          <div className="student-attendance-table-wrapper">
-            <table>
-              <thead>
+          <div className="student-attendance-overview">
+            <div className="student-attendance-circle">
+              <span>
+                {formatPercentage(overallAttendance)}
+              </span>
+            </div>
+
+            <div className="student-attendance-overview-text">
+              <strong>Overall Attendance</strong>
+
+              <span>
+                {summary.length > 0
+                  ? "Your attendance summary is based on the recorded sessions provided by the backend."
+                  : "Attendance data will appear here once attendance records are available."}
+              </span>
+            </div>
+          </div>
+
+          <div className="student-attendance-breakdown">
+            <div>
+              <span className="attendance-dot present" />
+
+              <div>
+                <small>Present</small>
+
+                <strong>
+                  {summary.length > 0 ? totalPresent : "N/A"}
+                </strong>
+              </div>
+            </div>
+
+            <div>
+              <span className="attendance-dot absent" />
+
+              <div>
+                <small>Absent</small>
+
+                <strong>
+                  {summary.length > 0 ? totalAbsent : "N/A"}
+                </strong>
+              </div>
+            </div>
+
+            <div>
+              <span className="attendance-dot late" />
+
+              <div>
+                <small>Late</small>
+
+                <strong>N/A</strong>
+              </div>
+            </div>
+
+            <div>
+              <span className="attendance-dot total" />
+
+              <div>
+                <small>Total Classes</small>
+
+                <strong>
+                  {summary.length > 0 ? totalClasses : "N/A"}
+                </strong>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <article className="student-attendance-card">
+          <div className="student-attendance-card-header">
+            <div>
+              <h2>Today's Schedule</h2>
+
+              <p>Your classes for today</p>
+            </div>
+
+            <div className="student-attendance-card-icon">
+              <FontAwesomeIcon icon={faClock} />
+            </div>
+          </div>
+
+          <div className="student-attendance-empty">
+            <div className="student-attendance-empty-icon">
+              <FontAwesomeIcon icon={faCalendarDays} />
+            </div>
+
+            <h3>No schedule available</h3>
+
+            <p>
+              Your class schedule will appear here once timetable data is
+              available.
+            </p>
+          </div>
+        </article>
+      </section>
+
+      {/* Course-wise Attendance */}
+      <section className="student-attendance-card student-course-attendance">
+        <div className="student-attendance-card-header course-header">
+          <div>
+            <h2>Course-wise Attendance</h2>
+
+            <p>Your attendance by course</p>
+          </div>
+        </div>
+
+        <div className="student-attendance-filters">
+          <div className="student-attendance-search">
+            <FontAwesomeIcon icon={faMagnifyingGlass} />
+
+            <input
+              type="search"
+              placeholder="Search course..."
+              aria-label="Search course"
+              disabled
+            />
+          </div>
+
+          <label className="student-attendance-filter">
+            <span>Semester</span>
+
+            <select defaultValue="all" disabled>
+              <option value="all">All</option>
+            </select>
+          </label>
+
+          <label className="student-attendance-filter">
+            <span>Attendance Status</span>
+
+            <select defaultValue="all" disabled>
+              <option value="all">All</option>
+            </select>
+          </label>
+
+          <button
+            type="button"
+            className="student-attendance-clear"
+            disabled
+          >
+            <FontAwesomeIcon icon={faRotate} />
+            Clear Filters
+          </button>
+        </div>
+
+        <div className="student-attendance-table-wrapper">
+          <table className="student-attendance-table">
+            <thead>
+              <tr>
+                <th>Course Code</th>
+                <th>Course Name</th>
+                <th>Semester</th>
+                <th>Total Classes</th>
+                <th>Present</th>
+                <th>Absent</th>
+                <th>Late</th>
+                <th>Attendance</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {summary.length > 0 ? (
+                summary.map((course) => (
+                  <tr
+                    key={`${course.offering_id}-${course.course_code}`}
+                  >
+                    <td>{course.course_code || "N/A"}</td>
+
+                    <td>{course.course_name || "N/A"}</td>
+
+                    <td>{course.semester || "N/A"}</td>
+
+                    <td>
+                      {course.total_sessions ?? "N/A"}
+                    </td>
+
+                    <td>
+                      {course.present_sessions ?? "N/A"}
+                    </td>
+
+                    <td>
+                      {course.absent_sessions ?? "N/A"}
+                    </td>
+
+                    <td>N/A</td>
+
+                    <td>
+                      {formatPercentage(
+                        course.attendance_percentage
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
                 <tr>
-                  <th>Attendance ID</th>
-                  <th>Session</th>
-                  <th>Date</th>
-                  <th>Time</th>
-                  <th>Status</th>
-                  <th>Method</th>
-                  <th>Confidence</th>
+                  <td colSpan="8">
+                    <div className="student-table-empty">
+                      <div className="student-attendance-empty-icon">
+                        <FontAwesomeIcon icon={faFileLines} />
+                      </div>
+
+                      <h3>No course data available</h3>
+
+                      <p>
+                        Course-wise attendance will appear here once
+                        attendance records are available.
+                      </p>
+                    </div>
+                  </td>
                 </tr>
-              </thead>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-              <tbody>
-                {filteredAttendance.map((record) => {
-                  const status =
-                    record.status?.toUpperCase() || "UNKNOWN";
+      {/* Recent Attendance */}
+      <section className="student-attendance-card student-recent-attendance">
+        <div className="student-attendance-card-header course-header">
+          <div>
+            <h2>Recent Attendance</h2>
 
-                  return (
-                    <tr key={record.attendance_id}>
-                      <td>#{record.attendance_id}</td>
-
-                      <td>
-                        #{record.session_id}
-                      </td>
-
-                      <td>
-                        {formatDate(record.marked_at)}
-                      </td>
-
-                      <td>
-                        {formatTime(record.marked_at)}
-                      </td>
-
-                      <td>
-                        <span
-                          className={`student-attendance-status ${status.toLowerCase()}`}
-                        >
-                          {status}
-                        </span>
-                      </td>
-
-                      <td>
-                        {formatMethod(record.recognition_method)}
-                      </td>
-
-                      <td>
-                        {record.confidence_score != null
-                          ? `${(
-                              Number(record.confidence_score) * 100
-                            ).toFixed(1)}%`
-                          : "N/A"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <p>Your latest attendance records</p>
           </div>
-        </section>
-      )}
 
-      {/* Information */}
-      <section className="student-attendance-info">
-        <div className="student-attendance-info-icon">
-          <FontAwesomeIcon icon={faShieldHalved} />
+          <button
+            type="button"
+            className="student-attendance-view-all"
+            onClick={() =>
+              navigate("/student/attendance-history")
+            }
+          >
+            View All
+
+            <FontAwesomeIcon icon={faArrowRight} />
+          </button>
+        </div>
+
+        <div className="student-attendance-table-wrapper">
+          <table className="student-attendance-table recent-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Course</th>
+                <th>Session</th>
+                <th>Time</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {attendance.length > 0 ? (
+                attendance.slice(0, 5).map((record) => (
+                  <tr key={record.attendance_id}>
+                    <td>
+                      {formatDate(record.session_date)}
+                    </td>
+
+                    <td>
+                      <div>
+                        <strong>
+                          {record.course_code || "N/A"}
+                        </strong>
+
+                        <small>
+                          {record.course_name || "N/A"}
+                        </small>
+                      </div>
+                    </td>
+
+                    <td>
+                      {record.section || "N/A"}
+                    </td>
+
+                    <td>
+                      {formatTime(record.marked_at)}
+                    </td>
+
+                    <td>
+                      {getStatusLabel(record.status)}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan="5">
+                    <div className="student-table-empty">
+                      <div className="student-attendance-empty-icon">
+                        <FontAwesomeIcon icon={faCalendarCheck} />
+                      </div>
+
+                      <h3>No attendance records available</h3>
+
+                      <p>
+                        Recent attendance records will appear here once
+                        attendance data is available.
+                      </p>
+                    </div>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {/* Integration Note */}
+      <div className="student-attendance-note">
+        <div className="student-attendance-note-icon">
+          <FontAwesomeIcon icon={faChartPie} />
         </div>
 
         <div>
-          <strong>Attendance information</strong>
+          <strong>Attendance data</strong>
 
           <span>
-            Attendance records are retrieved from the backend
-            for the authenticated student. Recognition confidence
-            is displayed when provided by the attendance system.
+            Attendance records are provided by the backend for the
+            authenticated student. The frontend displays the returned
+            attendance information and does not store attendance results
+            locally.
           </span>
         </div>
-      </section>
+      </div>
     </section>
   );
 }

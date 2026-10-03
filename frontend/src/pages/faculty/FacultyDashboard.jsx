@@ -36,7 +36,7 @@ function FacultyDashboard() {
         } else {
           setBackendStatus("error");
           setBackendMessage(
-            result?.message || "Unable to verify faculty backend access."
+            result?.message || "Unable to verify faculty backend access.",
           );
         }
       } catch (error) {
@@ -53,7 +53,7 @@ function FacultyDashboard() {
         } else {
           setBackendStatus("error");
           setBackendMessage(
-            "Faculty backend service is currently unavailable."
+            "Faculty backend service is currently unavailable.",
           );
         }
       }

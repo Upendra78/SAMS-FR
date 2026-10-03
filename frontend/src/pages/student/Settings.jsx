@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faBell,
@@ -13,11 +14,12 @@ import {
   faSun,
   faUser,
 } from "@fortawesome/free-solid-svg-icons";
+import useAppearance from "../../hooks/useAppearance";
+import { getCurrentUser } from "../../services/authService";
+import { getStudentFaceProfile } from "../../services/faceProfileService";
 import "./Settings.css";
 
 const DEFAULT_SETTINGS = {
-  theme: "light",
-  sidebar: "expanded",
   attendanceView: "course",
   attendanceAlerts: true,
   lowAttendanceWarning: true,
@@ -27,6 +29,13 @@ const DEFAULT_SETTINGS = {
 };
 
 function Settings() {
+  const {
+    theme,
+    setTheme,
+    sidebarMode,
+    setSidebarMode,
+  } = useAppearance();
+
   const [settings, setSettings] = useState(() => {
     const storedSettings = localStorage.getItem("studentPortalSettings");
 
@@ -45,7 +54,94 @@ function Settings() {
     }
   });
 
+  const [currentUser, setCurrentUser] = useState(null);
+  const [userLoading, setUserLoading] = useState(true);
+  const [userError, setUserError] = useState("");
+  const [faceProfileStatus, setFaceProfileStatus] = useState("Checking...");
+
   const [savedMessage, setSavedMessage] = useState("");
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCurrentUser() {
+      try {
+        setUserLoading(true);
+        setUserError("");
+
+        const result = await getCurrentUser();
+
+        if (!result?.success || !result?.data) {
+          throw new Error(
+            result?.message || "Unable to load account information.",
+          );
+        }
+
+        if (result.data.role !== "STUDENT") {
+          throw new Error("This account is not a student account.");
+        }
+
+        if (isMounted) {
+          setCurrentUser(result.data);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setCurrentUser(null);
+          setUserError(
+            error?.response?.data?.message ||
+              error?.message ||
+              "Unable to load account information.",
+          );
+        }
+      } finally {
+        if (isMounted) {
+          setUserLoading(false);
+        }
+      }
+    }
+
+    loadCurrentUser();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadFaceProfile() {
+      try {
+        const result = await getStudentFaceProfile();
+
+        if (!result?.success || !result?.data) {
+          throw new Error(
+            result?.message || "Face profile not found.",
+          );
+        }
+
+        if (isMounted) {
+          setFaceProfileStatus(
+            result.data.is_active ? "Registered" : "Inactive",
+          );
+        }
+      } catch (error) {
+        if (isMounted) {
+          if (error?.response?.status === 404) {
+            setFaceProfileStatus("Not Registered");
+          } else {
+            setFaceProfileStatus("Unavailable");
+          }
+        }
+      }
+    }
+
+    loadFaceProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const showSavedMessage = (message) => {
     setSavedMessage(message);
@@ -74,6 +170,9 @@ function Settings() {
   const resetSettings = () => {
     setSettings(DEFAULT_SETTINGS);
 
+    setTheme("light");
+    setSidebarMode("expanded");
+
     localStorage.setItem(
       "studentPortalSettings",
       JSON.stringify(DEFAULT_SETTINGS),
@@ -81,6 +180,21 @@ function Settings() {
 
     showSavedMessage("Settings restored to defaults");
   };
+
+  const handleThemeChange = (event) => {
+    setTheme(event.target.value);
+    showSavedMessage("Theme saved");
+  };
+
+  const handleSidebarChange = (event) => {
+    setSidebarMode(event.target.value);
+    showSavedMessage("Sidebar preference saved");
+  };
+
+  const roleLabel =
+    currentUser?.role === "STUDENT"
+      ? "Student"
+      : currentUser?.role || "N/A";
 
   return (
     <section className="student-settings">
@@ -135,10 +249,8 @@ function Settings() {
             </div>
 
             <select
-              value={settings.theme}
-              onChange={(event) =>
-                updateSetting("theme", event.target.value)
-              }
+              value={theme}
+              onChange={handleThemeChange}
               aria-label="Theme"
             >
               <option value="light">Light</option>
@@ -158,10 +270,8 @@ function Settings() {
             </div>
 
             <select
-              value={settings.sidebar}
-              onChange={(event) =>
-                updateSetting("sidebar", event.target.value)
-              }
+              value={sidebarMode}
+              onChange={handleSidebarChange}
               aria-label="Sidebar layout"
             >
               <option value="expanded">Expanded</option>
@@ -310,7 +420,7 @@ function Settings() {
           </div>
 
           <div>
-            <h2>Privacy & Recognition</h2>
+            <h2>Privacy &amp; Recognition</h2>
             <p>
               Information about facial recognition and attendance identity.
             </p>
@@ -320,7 +430,7 @@ function Settings() {
         <div className="student-settings-info-grid">
           <InfoItem
             label="Face Recognition"
-            value="Registered"
+            value={faceProfileStatus}
           />
 
           <InfoItem
@@ -357,32 +467,55 @@ function Settings() {
           </div>
 
           <div>
-            <h2>Account & Security</h2>
+            <h2>Account &amp; Security</h2>
             <p>
               View your account status and security information.
             </p>
           </div>
         </div>
 
-        <div className="student-settings-account-grid">
-          <InfoItem
-            label="Account Status"
-            value="Active"
-          />
+        {userLoading ? (
+          <div className="student-settings-info-grid">
+            <InfoItem
+              label="Account Status"
+              value="Loading..."
+            />
 
-          <InfoItem
-            label="Role"
-            value="Student"
-          />
-        </div>
+            <InfoItem
+              label="Role"
+              value="Loading..."
+            />
+          </div>
+        ) : userError ? (
+          <div
+            className="student-settings-privacy-note"
+            role="alert"
+          >
+            <FontAwesomeIcon icon={faCircleInfo} />
 
-        <a
+            <span>{userError}</span>
+          </div>
+        ) : (
+          <div className="student-settings-account-grid">
+            <InfoItem
+              label="Account Status"
+              value="Authenticated"
+            />
+
+            <InfoItem
+              label="Role"
+              value={roleLabel}
+            />
+          </div>
+        )}
+
+        <Link
           className="student-settings-profile-link"
-          href="/student/profile"
+          to="/student/profile"
         >
           <FontAwesomeIcon icon={faUser} />
           Go to Profile
-        </a>
+        </Link>
       </section>
 
       {/* System Information */}

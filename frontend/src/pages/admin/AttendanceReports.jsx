@@ -12,7 +12,9 @@ const EMPTY_METRICS = {
 };
 
 function formatMetric(value) {
-  return value === null ? "N/A" : value;
+  return value === null || value === undefined
+    ? "N/A"
+    : value;
 }
 
 function getInitials(name) {
@@ -21,7 +23,8 @@ function getInitials(name) {
   }
 
   return name
-    .split(" ")
+    .trim()
+    .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((part) => part[0])
@@ -37,8 +40,10 @@ function AttendanceReports() {
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [status, setStatus] = useState("All");
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [showExportModal, setShowExportModal] =
+    useState(false);
+  const [selectedRecord, setSelectedRecord] =
+    useState(null);
 
   const metrics = EMPTY_METRICS;
 
@@ -53,17 +58,24 @@ function AttendanceReports() {
     return attendanceRecords.filter((record) => {
       const matchesSearch =
         !search ||
-        record.studentId?.toLowerCase().includes(search) ||
-        record.studentName?.toLowerCase().includes(search);
+        record.studentId
+          ?.toLowerCase()
+          .includes(search) ||
+        record.studentName
+          ?.toLowerCase()
+          .includes(search);
 
       const matchesDepartment =
-        department === "All" || record.department === department;
+        department === "All" ||
+        record.department === department;
 
       const matchesCourse =
-        course === "All" || record.course === course;
+        course === "All" ||
+        record.course === course;
 
       const matchesFaculty =
-        faculty === "All" || record.faculty === faculty;
+        faculty === "All" ||
+        record.faculty === faculty;
 
       const matchesFromDate =
         !fromDate || record.date >= fromDate;
@@ -72,7 +84,8 @@ function AttendanceReports() {
         !toDate || record.date <= toDate;
 
       const matchesStatus =
-        status === "All" || record.status === status;
+        status === "All" ||
+        record.status === status;
 
       return (
         matchesSearch &&
@@ -94,6 +107,15 @@ function AttendanceReports() {
     status,
   ]);
 
+  const hasActiveFilters =
+    Boolean(searchTerm) ||
+    department !== "All" ||
+    course !== "All" ||
+    faculty !== "All" ||
+    Boolean(fromDate) ||
+    Boolean(toDate) ||
+    status !== "All";
+
   const handleClearFilters = () => {
     setSearchTerm("");
     setDepartment("All");
@@ -108,13 +130,15 @@ function AttendanceReports() {
     <section className="attendance-reports-page">
       <header className="attendance-page-header">
         <div>
-          <span className="attendance-eyebrow">Admin Portal</span>
+          <span className="attendance-eyebrow">
+            Admin Portal
+          </span>
 
           <h1>Attendance Reports</h1>
 
           <p>
-            Monitor attendance records, session activity and student
-            attendance performance.
+            Monitor attendance records, session activity and
+            student attendance performance.
           </p>
         </div>
 
@@ -130,43 +154,63 @@ function AttendanceReports() {
 
       <div className="attendance-summary-grid">
         <article className="attendance-summary-card attendance-summary-blue">
-          <div className="attendance-summary-icon" aria-hidden="true">
+          <div
+            className="attendance-summary-icon"
+            aria-hidden="true"
+          >
             %
           </div>
 
           <span>Overall Attendance</span>
 
-          <strong>{formatMetric(metrics.overallAttendance)}</strong>
+          <strong>
+            {formatMetric(metrics.overallAttendance)}
+          </strong>
         </article>
 
         <article className="attendance-summary-card attendance-summary-green">
-          <div className="attendance-summary-icon" aria-hidden="true">
+          <div
+            className="attendance-summary-icon"
+            aria-hidden="true"
+          >
             ✓
           </div>
 
           <span>Present</span>
 
-          <strong>{formatMetric(metrics.present)}</strong>
+          <strong>
+            {formatMetric(metrics.present)}
+          </strong>
         </article>
 
         <article className="attendance-summary-card attendance-summary-red">
-          <div className="attendance-summary-icon" aria-hidden="true">
+          <div
+            className="attendance-summary-icon"
+            aria-hidden="true"
+          >
             −
           </div>
 
           <span>Absent</span>
 
-          <strong>{formatMetric(metrics.absent)}</strong>
+          <strong>
+            {formatMetric(metrics.absent)}
+          </strong>
         </article>
 
         <article className="attendance-summary-card attendance-summary-purple">
-          <div className="attendance-summary-icon" aria-hidden="true">
-            ▦
+          <div
+            className="attendance-summary-icon"
+            aria-hidden="true"
+          >
+            ▪
           </div>
 
           <span>Total Sessions</span>
 
-          <strong>{formatMetric(metrics.totalSessions)}</strong>
+          <strong>
+            {formatMetric(metrics.totalSessions)}
+          </strong>
         </article>
       </div>
 
@@ -184,7 +228,9 @@ function AttendanceReports() {
               type="search"
               placeholder="Search by Student ID or name..."
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(event) =>
+                setSearchTerm(event.target.value)
+              }
             />
           </div>
         </div>
@@ -197,7 +243,9 @@ function AttendanceReports() {
           <select
             id="attendance-department"
             value={department}
-            onChange={(event) => setDepartment(event.target.value)}
+            onChange={(event) =>
+              setDepartment(event.target.value)
+            }
           >
             {departments.map((item) => (
               <option key={item} value={item}>
@@ -215,7 +263,9 @@ function AttendanceReports() {
           <select
             id="attendance-course"
             value={course}
-            onChange={(event) => setCourse(event.target.value)}
+            onChange={(event) =>
+              setCourse(event.target.value)
+            }
           >
             {courses.map((item) => (
               <option key={item} value={item}>
@@ -233,7 +283,9 @@ function AttendanceReports() {
           <select
             id="attendance-faculty"
             value={faculty}
-            onChange={(event) => setFaculty(event.target.value)}
+            onChange={(event) =>
+              setFaculty(event.target.value)
+            }
           >
             {facultyMembers.map((item) => (
               <option key={item} value={item}>
@@ -252,7 +304,9 @@ function AttendanceReports() {
             id="attendance-from-date"
             type="date"
             value={fromDate}
-            onChange={(event) => setFromDate(event.target.value)}
+            onChange={(event) =>
+              setFromDate(event.target.value)
+            }
           />
         </div>
 
@@ -265,7 +319,9 @@ function AttendanceReports() {
             id="attendance-to-date"
             type="date"
             value={toDate}
-            onChange={(event) => setToDate(event.target.value)}
+            onChange={(event) =>
+              setToDate(event.target.value)
+            }
           />
         </div>
 
@@ -277,7 +333,9 @@ function AttendanceReports() {
           <select
             id="attendance-status"
             value={status}
-            onChange={(event) => setStatus(event.target.value)}
+            onChange={(event) =>
+              setStatus(event.target.value)
+            }
           >
             {statuses.map((item) => (
               <option key={item} value={item}>
@@ -291,6 +349,7 @@ function AttendanceReports() {
           type="button"
           className="attendance-clear-button"
           onClick={handleClearFilters}
+          disabled={!hasActiveFilters}
         >
           ↻ Clear Filters
         </button>
@@ -310,21 +369,31 @@ function AttendanceReports() {
         <div className="attendance-overview-grid">
           <div className="attendance-overview-item">
             <span>Overall Attendance</span>
-            <strong>{formatMetric(metrics.overallAttendance)}</strong>
+
+            <strong>
+              {formatMetric(metrics.overallAttendance)}
+            </strong>
           </div>
 
           <div className="attendance-overview-item">
             <span>Present</span>
-            <strong>{formatMetric(metrics.present)}</strong>
+
+            <strong>
+              {formatMetric(metrics.present)}
+            </strong>
           </div>
 
           <div className="attendance-overview-item">
             <span>Absent</span>
-            <strong>{formatMetric(metrics.absent)}</strong>
+
+            <strong>
+              {formatMetric(metrics.absent)}
+            </strong>
           </div>
 
           <div className="attendance-overview-item">
             <span>Late</span>
+
             <strong>N/A</strong>
           </div>
         </div>
@@ -366,12 +435,19 @@ function AttendanceReports() {
                   <td>
                     <div className="attendance-student-identity">
                       <div className="attendance-avatar">
-                        {getInitials(record.studentName)}
+                        {getInitials(
+                          record.studentName,
+                        )}
                       </div>
 
                       <div>
-                        <strong>{record.studentName}</strong>
-                        <span>{record.department}</span>
+                        <strong>
+                          {record.studentName}
+                        </strong>
+
+                        <span>
+                          {record.department}
+                        </span>
                       </div>
                     </div>
                   </td>
@@ -380,8 +456,13 @@ function AttendanceReports() {
 
                   <td>
                     <div className="attendance-course-cell">
-                      <strong>{record.course}</strong>
-                      <span>{record.courseOffering}</span>
+                      <strong>
+                        {record.course}
+                      </strong>
+
+                      <span>
+                        {record.courseOffering}
+                      </span>
                     </div>
                   </td>
 
@@ -395,7 +476,7 @@ function AttendanceReports() {
                     <span
                       className={`attendance-status attendance-status-${record.status?.toLowerCase()}`}
                     >
-                      ● {record.status}
+                      ● {record.status || "N/A"}
                     </span>
                   </td>
 
@@ -403,8 +484,12 @@ function AttendanceReports() {
                     <button
                       type="button"
                       className="attendance-action-button"
-                      onClick={() => setSelectedRecord(record)}
+                      onClick={() =>
+                        setSelectedRecord(record)
+                      }
                       aria-label={`View attendance details for ${record.studentName}`}
+                      disabled
+                      title="Attendance reporting API is not available yet"
                     >
                       ⋮
                     </button>
@@ -423,11 +508,13 @@ function AttendanceReports() {
                 ✓
               </div>
 
-              <h3>No attendance records available</h3>
+              <h3>
+                No attendance records available
+              </h3>
 
               <p>
-                Attendance records will be displayed here when they
-                are provided by the backend.
+                Admin attendance records will appear here when
+                the required backend reporting API is available.
               </p>
             </div>
           ) : filteredRecords.length === 0 ? (
@@ -439,7 +526,9 @@ function AttendanceReports() {
                 ⌕
               </div>
 
-              <h3>No matching attendance records</h3>
+              <h3>
+                No matching attendance records
+              </h3>
 
               <p>
                 Try adjusting your search terms or filters.
@@ -483,12 +572,14 @@ function AttendanceReports() {
         </div>
 
         <div>
-          <strong>Backend integration pending</strong>
+          <strong>
+            Admin attendance reporting integration pending
+          </strong>
 
           <span>
-            Attendance records, metrics, filters and report exports
-            will be loaded from the backend reporting API when the
-            required endpoints are available.
+            The current Flask backend provides student attendance
+            endpoints, but does not expose the Admin attendance
+            reporting, summary or export APIs required by this page.
           </span>
         </div>
 
@@ -527,7 +618,9 @@ function AttendanceReports() {
               <button
                 type="button"
                 className="attendance-modal-close"
-                onClick={() => setSelectedRecord(null)}
+                onClick={() =>
+                  setSelectedRecord(null)
+                }
                 aria-label="Close attendance details"
               >
                 ×
@@ -537,42 +630,58 @@ function AttendanceReports() {
             <div className="attendance-details-grid">
               <div>
                 <span>Student</span>
-                <strong>{selectedRecord.studentName}</strong>
+                <strong>
+                  {selectedRecord.studentName}
+                </strong>
               </div>
 
               <div>
                 <span>Student ID</span>
-                <strong>{selectedRecord.studentId}</strong>
+                <strong>
+                  {selectedRecord.studentId}
+                </strong>
               </div>
 
               <div>
                 <span>Course</span>
-                <strong>{selectedRecord.course}</strong>
+                <strong>
+                  {selectedRecord.course}
+                </strong>
               </div>
 
               <div>
                 <span>Course Offering</span>
-                <strong>{selectedRecord.courseOffering}</strong>
+                <strong>
+                  {selectedRecord.courseOffering}
+                </strong>
               </div>
 
               <div>
                 <span>Faculty</span>
-                <strong>{selectedRecord.faculty}</strong>
+                <strong>
+                  {selectedRecord.faculty}
+                </strong>
               </div>
 
               <div>
                 <span>Date</span>
-                <strong>{selectedRecord.date}</strong>
+                <strong>
+                  {selectedRecord.date}
+                </strong>
               </div>
 
               <div>
                 <span>Recorded Time</span>
-                <strong>{selectedRecord.time}</strong>
+                <strong>
+                  {selectedRecord.time}
+                </strong>
               </div>
 
               <div>
                 <span>Status</span>
-                <strong>{selectedRecord.status}</strong>
+                <strong>
+                  {selectedRecord.status}
+                </strong>
               </div>
             </div>
           </div>
@@ -606,15 +715,17 @@ function AttendanceReports() {
                 </h2>
 
                 <p>
-                  Choose a report format. Export functionality will
-                  be enabled after backend reporting integration.
+                  Report export will be enabled after the Admin
+                  reporting API is available.
                 </p>
               </div>
 
               <button
                 type="button"
                 className="attendance-modal-close"
-                onClick={() => setShowExportModal(false)}
+                onClick={() =>
+                  setShowExportModal(false)
+                }
                 aria-label="Close export report dialog"
               >
                 ×
@@ -624,17 +735,23 @@ function AttendanceReports() {
             <div className="attendance-export-options">
               <button type="button" disabled>
                 <strong>CSV</strong>
-                <span>Coming with backend integration</span>
+                <span>
+                  Backend integration pending
+                </span>
               </button>
 
               <button type="button" disabled>
                 <strong>Excel</strong>
-                <span>Coming with backend integration</span>
+                <span>
+                  Backend integration pending
+                </span>
               </button>
 
               <button type="button" disabled>
                 <strong>PDF</strong>
-                <span>Coming with backend integration</span>
+                <span>
+                  Backend integration pending
+                </span>
               </button>
             </div>
 
@@ -642,7 +759,9 @@ function AttendanceReports() {
               <button
                 type="button"
                 className="attendance-secondary-button"
-                onClick={() => setShowExportModal(false)}
+                onClick={() =>
+                  setShowExportModal(false)
+                }
               >
                 Close
               </button>

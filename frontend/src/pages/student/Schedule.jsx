@@ -95,7 +95,7 @@ function Schedule() {
         <div className="student-schedule-today-empty">
           <PageState
             title="No classes available"
-            message="Today’s classes will appear here when timetable data is available."
+            message="Today's classes will appear here when timetable data is available."
           />
         </div>
       </section>

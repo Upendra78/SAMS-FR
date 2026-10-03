@@ -22,6 +22,14 @@ const formatMetric = (value) => {
   return value;
 };
 
+const formatPercentage = (value) => {
+  if (value === null || value === undefined) {
+    return "N/A";
+  }
+
+  return `${value}%`;
+};
+
 const getInitials = (name = "") => {
   const words = name.trim().split(/\s+/).filter(Boolean);
 
@@ -82,19 +90,16 @@ function Reports() {
   };
 
   const hasFilters =
-    searchTerm ||
+    Boolean(searchTerm) ||
     selectedClass !== "All Classes" ||
-    dateFrom ||
-    dateTo ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo) ||
     status !== "All";
 
   const metrics = [
     {
       label: "Overall Attendance",
-      value:
-        EMPTY_METRICS.overallAttendance === null
-          ? "N/A"
-          : `${EMPTY_METRICS.overallAttendance}%`,
+      value: formatPercentage(EMPTY_METRICS.overallAttendance),
       tone: "blue",
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -203,7 +208,9 @@ function Reports() {
       <section className="reports-page-header">
         <div>
           <span className="reports-eyebrow">FACULTY PORTAL</span>
+
           <h1>Reports</h1>
+
           <p>
             Analyze attendance performance for your assigned classes and
             generate attendance reports.
@@ -225,6 +232,7 @@ function Reports() {
               strokeLinejoin="round"
             />
           </svg>
+
           Export Report
         </button>
       </section>
@@ -248,7 +256,9 @@ function Reports() {
         <div className="reports-section-heading">
           <div>
             <h2>Report Filters</h2>
-            <p>Filter attendance information by student, class and date.</p>
+            <p>
+              Filter attendance information by student, class, and date.
+            </p>
           </div>
         </div>
 
@@ -266,6 +276,7 @@ function Reports() {
                   stroke="currentColor"
                   strokeWidth="1.8"
                 />
+
                 <path
                   d="m20 20-4-4"
                   fill="none"
@@ -287,6 +298,7 @@ function Reports() {
 
           <div className="reports-filter">
             <label htmlFor="report-class">Class</label>
+
             <select
               id="report-class"
               value={selectedClass}
@@ -302,6 +314,7 @@ function Reports() {
 
           <div className="reports-filter">
             <label htmlFor="report-date-from">Date From</label>
+
             <input
               id="report-date-from"
               type="date"
@@ -312,6 +325,7 @@ function Reports() {
 
           <div className="reports-filter">
             <label htmlFor="report-date-to">Date To</label>
+
             <input
               id="report-date-to"
               type="date"
@@ -322,6 +336,7 @@ function Reports() {
 
           <div className="reports-filter">
             <label htmlFor="report-status">Status</label>
+
             <select
               id="report-status"
               value={status}
@@ -341,7 +356,7 @@ function Reports() {
             onClick={clearFilters}
             disabled={!hasFilters}
           >
-            <span>↻</span>
+            <span aria-hidden="true">↻</span>
             Clear Filters
           </button>
         </div>
@@ -351,7 +366,9 @@ function Reports() {
         <div className="reports-overview-header">
           <div>
             <h2>Attendance Overview</h2>
-            <p>Attendance distribution across your assigned classes.</p>
+            <p>
+              Attendance distribution across your assigned classes.
+            </p>
           </div>
 
           <span className="reports-data-badge">Backend Data</span>
@@ -360,10 +377,9 @@ function Reports() {
         <div className="reports-overview-grid">
           <div className="reports-overview-main">
             <span>Overall Attendance</span>
+
             <strong>
-              {EMPTY_METRICS.overallAttendance === null
-                ? "N/A"
-                : `${EMPTY_METRICS.overallAttendance}%`}
+              {formatPercentage(EMPTY_METRICS.overallAttendance)}
             </strong>
 
             <div className="reports-progress-track">
@@ -373,6 +389,7 @@ function Reports() {
 
           <div className="reports-overview-stat">
             <span className="reports-stat-dot present" />
+
             <div>
               <small>Present</small>
               <strong>N/A</strong>
@@ -381,6 +398,7 @@ function Reports() {
 
           <div className="reports-overview-stat">
             <span className="reports-stat-dot absent" />
+
             <div>
               <small>Absent</small>
               <strong>N/A</strong>
@@ -389,6 +407,7 @@ function Reports() {
 
           <div className="reports-overview-stat">
             <span className="reports-stat-dot late" />
+
             <div>
               <small>Late</small>
               <strong>N/A</strong>
@@ -401,7 +420,10 @@ function Reports() {
         <div className="reports-section-heading">
           <div>
             <h2>Student Attendance</h2>
-            <p>Attendance summary for students in your assigned classes.</p>
+
+            <p>
+              Attendance summary for students in your assigned classes.
+            </p>
           </div>
         </div>
 
@@ -417,6 +439,7 @@ function Reports() {
                     strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
+
                   <path
                     d="M8 8h8M8 12h8M8 16h5"
                     fill="none"
@@ -428,6 +451,7 @@ function Reports() {
               </div>
 
               <h3>No attendance reports available</h3>
+
               <p>
                 Student attendance reports will appear here when attendance
                 data is provided by the backend.
@@ -445,6 +469,7 @@ function Reports() {
                     stroke="currentColor"
                     strokeWidth="1.8"
                   />
+
                   <path
                     d="m20 20-4-4"
                     fill="none"
@@ -456,6 +481,7 @@ function Reports() {
               </div>
 
               <h3>No matching reports</h3>
+
               <p>Try changing your search or filters.</p>
             </div>
           ) : (
@@ -489,17 +515,18 @@ function Reports() {
                       </td>
 
                       <td>{student.studentId || "N/A"}</td>
+
                       <td>{student.className || "N/A"}</td>
+
                       <td>{student.sessions ?? "N/A"}</td>
+
                       <td>{student.present ?? "N/A"}</td>
+
                       <td>{student.absent ?? "N/A"}</td>
+
                       <td>{student.late ?? "N/A"}</td>
-                      <td>
-                        {student.attendanceRate === null ||
-                        student.attendanceRate === undefined
-                          ? "N/A"
-                          : `${student.attendanceRate}%`}
-                      </td>
+
+                      <td>{formatPercentage(student.attendanceRate)}</td>
 
                       <td>
                         <button
@@ -528,9 +555,11 @@ function Reports() {
             <button type="button" disabled>
               ‹ Previous
             </button>
+
             <button type="button" className="active" disabled>
               1
             </button>
+
             <button type="button" disabled>
               Next ›
             </button>
@@ -542,7 +571,10 @@ function Reports() {
         <div className="reports-section-heading">
           <div>
             <h2>Class-wise Attendance</h2>
-            <p>Attendance summary across your assigned classes.</p>
+
+            <p>
+              Attendance summary across your assigned classes.
+            </p>
           </div>
         </div>
 
@@ -558,6 +590,7 @@ function Reports() {
                     strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
+
                   <path
                     d="M8 9h8M8 13h5"
                     fill="none"
@@ -569,6 +602,7 @@ function Reports() {
               </div>
 
               <h3>No class reports available</h3>
+
               <p>
                 Class attendance summaries will appear here when reporting
                 data is available from the backend.
@@ -591,14 +625,13 @@ function Reports() {
                   {classReports.map((report) => (
                     <tr key={report.id}>
                       <td>{report.className || "N/A"}</td>
+
                       <td>{report.students ?? "N/A"}</td>
+
                       <td>{report.sessions ?? "N/A"}</td>
-                      <td>
-                        {report.attendanceRate === null ||
-                        report.attendanceRate === undefined
-                          ? "N/A"
-                          : `${report.attendanceRate}%`}
-                      </td>
+
+                      <td>{formatPercentage(report.attendanceRate)}</td>
+
                       <td>
                         <button
                           type="button"
@@ -621,9 +654,10 @@ function Reports() {
 
         <div>
           <strong>Reporting service integration pending</strong>
+
           <p>
-            Attendance analytics and report data will be loaded from the Flask
-            backend once the reporting API is available.
+            Attendance analytics and report data will be loaded from the
+            Flask backend once the reporting API is available.
           </p>
         </div>
       </section>
@@ -640,6 +674,7 @@ function Reports() {
             <div className="reports-modal-header">
               <div>
                 <span className="reports-eyebrow">REPORTS</span>
+
                 <h2>Export Report</h2>
               </div>
 
@@ -663,9 +698,11 @@ function Reports() {
                 <button type="button" disabled>
                   CSV
                 </button>
+
                 <button type="button" disabled>
                   Excel
                 </button>
+
                 <button type="button" disabled>
                   PDF
                 </button>
@@ -704,6 +741,7 @@ function Reports() {
                 <span className="reports-eyebrow">
                   STUDENT REPORT
                 </span>
+
                 <h2>Attendance Report</h2>
               </div>
 
@@ -727,6 +765,7 @@ function Reports() {
                   <strong>
                     {selectedStudent.studentName || "N/A"}
                   </strong>
+
                   <span>
                     {selectedStudent.studentId || "N/A"}
                   </span>
@@ -736,36 +775,45 @@ function Reports() {
               <div className="reports-detail-grid">
                 <div>
                   <span>Class</span>
-                  <strong>{selectedStudent.className || "N/A"}</strong>
+                  <strong>
+                    {selectedStudent.className || "N/A"}
+                  </strong>
                 </div>
 
                 <div>
                   <span>Total Sessions</span>
-                  <strong>{selectedStudent.sessions ?? "N/A"}</strong>
+                  <strong>
+                    {selectedStudent.sessions ?? "N/A"}
+                  </strong>
                 </div>
 
                 <div>
                   <span>Present</span>
-                  <strong>{selectedStudent.present ?? "N/A"}</strong>
+                  <strong>
+                    {selectedStudent.present ?? "N/A"}
+                  </strong>
                 </div>
 
                 <div>
                   <span>Absent</span>
-                  <strong>{selectedStudent.absent ?? "N/A"}</strong>
+                  <strong>
+                    {selectedStudent.absent ?? "N/A"}
+                  </strong>
                 </div>
 
                 <div>
                   <span>Late</span>
-                  <strong>{selectedStudent.late ?? "N/A"}</strong>
+                  <strong>
+                    {selectedStudent.late ?? "N/A"}
+                  </strong>
                 </div>
 
                 <div>
                   <span>Attendance</span>
                   <strong>
-                    {selectedStudent.attendanceRate === null ||
-                    selectedStudent.attendanceRate === undefined
-                      ? "N/A"
-                      : `${selectedStudent.attendanceRate}%`}
+                    {formatPercentage(
+                      selectedStudent.attendanceRate,
+                    )}
                   </strong>
                 </div>
               </div>
@@ -773,6 +821,7 @@ function Reports() {
 
             <div className="reports-history-placeholder">
               <strong>Attendance History</strong>
+
               <p>
                 Detailed attendance history will be displayed here when
                 attendance records are available from the backend.
