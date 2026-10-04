@@ -1,19 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  faBookOpen,
+  faCircleExclamation,
+  faCircleInfo,
+  faMagnifyingGlass,
+  faRotateRight,
+  faSpinner,
+  faUserGraduate,
+  faUsers,
+} from "@fortawesome/free-solid-svg-icons";
+
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+
 import { getUsers } from "../../services/adminService";
 
 import "./Student.css";
-
-const EMPTY_METRICS = {
-  total: null,
-  active: null,
-  inactive: null,
-  departments: null,
-};
-
-function formatMetric(value) {
-  return value === null || value === undefined ? "N/A" : value;
-}
 
 function getInitials(name) {
   if (!name) {
@@ -40,42 +42,39 @@ function Student() {
   const [program, setProgram] = useState("All");
   const [yearSemester, setYearSemester] = useState("All");
   const [status, setStatus] = useState("All");
-  const [showAddModal, setShowAddModal] = useState(false);
 
-  const [formData, setFormData] = useState({
-    studentId: "",
-    fullName: "",
-    email: "",
-    department: "",
-    program: "",
-    yearSemester: "",
-  });
+  const [selectedStudent, setSelectedStudent] =
+    useState(null);
 
   useEffect(() => {
     let mounted = true;
 
-    const loadStudents = async () => {
+    async function loadStudents() {
       try {
-        setLoading(true);
-        setError("");
-
         const response = await getUsers();
 
         if (!mounted) {
           return;
         }
 
-        const users = response?.data ?? [];
+        const users = Array.isArray(response?.data)
+          ? response.data
+          : [];
 
         const studentUsers = users
-          .filter((user) => user.role === "STUDENT")
+          .filter(
+            (user) =>
+              String(user?.role || "").toUpperCase() ===
+              "STUDENT",
+          )
           .map((user) => ({
-            studentId: String(user.user_id),
-            name: user.name,
-            email: user.email,
-
-            // These fields are not provided by the current
-            // /api/admin/users backend contract.
+            studentId:
+              user?.user_id !== undefined &&
+              user?.user_id !== null
+                ? String(user.user_id)
+                : "N/A",
+            name: user?.name || "N/A",
+            email: user?.email || "N/A",
             department: null,
             program: null,
             yearSemester: null,
@@ -83,6 +82,7 @@ function Student() {
           }));
 
         setStudents(studentUsers);
+        setError("");
       } catch (requestError) {
         if (!mounted) {
           return;
@@ -92,14 +92,14 @@ function Student() {
 
         setError(
           requestError?.response?.data?.message ||
-            "Failed to load students."
+            "Failed to load students.",
         );
       } finally {
         if (mounted) {
           setLoading(false);
         }
       }
-    };
+    }
 
     loadStudents();
 
@@ -108,17 +108,16 @@ function Student() {
     };
   }, []);
 
-  /*
-   * The current backend only provides basic user information.
-   * Therefore these academic/status metrics remain unavailable
-   * until the backend exposes student profile data.
-   */
-  const metrics = EMPTY_METRICS;
+  const metrics = useMemo(
+    () => ({
+      total: students.length,
+      active: null,
+      inactive: null,
+      departments: null,
+    }),
+    [students],
+  );
 
-  /*
-   * The current backend does not provide these academic fields,
-   * so only "All" is currently a valid filter option.
-   */
   const departments = ["All"];
   const programs = ["All"];
   const yearSemesters = ["All"];
@@ -130,9 +129,11 @@ function Student() {
     return students.filter((student) => {
       const matchesSearch =
         !search ||
-        student.studentId?.toLowerCase().includes(search) ||
-        student.name?.toLowerCase().includes(search) ||
-        student.email?.toLowerCase().includes(search);
+        student.studentId
+          .toLowerCase()
+          .includes(search) ||
+        student.name.toLowerCase().includes(search) ||
+        student.email.toLowerCase().includes(search);
 
       const matchesDepartment =
         department === "All" ||
@@ -174,42 +175,26 @@ function Student() {
     yearSemester !== "All" ||
     status !== "All";
 
-  const handleClearFilters = () => {
+  function handleClearFilters() {
     setSearchTerm("");
     setDepartment("All");
     setProgram("All");
     setYearSemester("All");
     setStatus("All");
-  };
+  }
 
-  const handleFormChange = (event) => {
-    const { name, value } = event.target;
+  function handleViewStudent(student) {
+    setSelectedStudent(student);
+  }
 
-    setFormData((current) => ({
-      ...current,
-      [name]: value,
-    }));
-  };
-
-  const handleAddStudent = (event) => {
-    event.preventDefault();
-  };
-
-  const handleCloseAddModal = () => {
-    setShowAddModal(false);
-
-    setFormData({
-      studentId: "",
-      fullName: "",
-      email: "",
-      department: "",
-      program: "",
-      yearSemester: "",
-    });
-  };
+  function handleCloseStudent() {
+    setSelectedStudent(null);
+  }
 
   return (
     <section className="student-management-page">
+      {/* ---------- Header ---------- */}
+
       <header className="student-page-header">
         <div>
           <span className="student-eyebrow">
@@ -219,78 +204,71 @@ function Student() {
           <h1>Student Management</h1>
 
           <p>
-            Manage student profiles, academic information,
-            enrollment and attendance access.
+            View student accounts and available
+            academic information.
           </p>
         </div>
-
-        <button
-          type="button"
-          className="student-primary-button"
-          onClick={() => setShowAddModal(true)}
-          disabled
-          title="Student management API is not available yet"
-        >
-          <span aria-hidden="true">+</span>
-          Add Student
-        </button>
       </header>
+
+      {/* ---------- Summary ---------- */}
 
       <div className="student-summary-grid">
         <article className="student-summary-card student-summary-blue">
-          <div
-            className="student-summary-icon"
-            aria-hidden="true"
-          >
-            <span>♟</span>
+          <div className="student-summary-icon">
+            <FontAwesomeIcon
+              icon={faUserGraduate}
+            />
           </div>
 
           <span>Total Students</span>
 
-          <strong>{formatMetric(metrics.total)}</strong>
+          <strong>
+            {loading ? "..." : metrics.total}
+          </strong>
         </article>
 
         <article className="student-summary-card student-summary-green">
-          <div
-            className="student-summary-icon"
-            aria-hidden="true"
-          >
-            <span>✓</span>
+          <div className="student-summary-icon">
+            <FontAwesomeIcon icon={faUsers} />
           </div>
 
           <span>Active</span>
 
-          <strong>{formatMetric(metrics.active)}</strong>
+          <strong>N/A</strong>
+
+          <small>API integration pending</small>
         </article>
 
         <article className="student-summary-card student-summary-red">
-          <div
-            className="student-summary-icon"
-            aria-hidden="true"
-          >
-            <span>−</span>
+          <div className="student-summary-icon">
+            <FontAwesomeIcon
+              icon={faCircleExclamation}
+            />
           </div>
 
           <span>Inactive</span>
 
-          <strong>{formatMetric(metrics.inactive)}</strong>
+          <strong>N/A</strong>
+
+          <small>API integration pending</small>
         </article>
 
         <article className="student-summary-card student-summary-purple">
-          <div
-            className="student-summary-icon"
-            aria-hidden="true"
-          >
-            <span>▪</span>
+          <div className="student-summary-icon">
+            <FontAwesomeIcon
+              icon={faBookOpen}
+            />
           </div>
 
           <span>Departments</span>
 
-          <strong>
-            {formatMetric(metrics.departments)}
-          </strong>
+          <strong>N/A</strong>
+
+          <small>API integration pending</small>
         </article>
       </div>
+
+      {/* ---------- Filters ---------- */}
 
       <div className="student-filter-panel">
         <div className="student-search-field">
@@ -299,12 +277,15 @@ function Student() {
           </label>
 
           <div className="student-input-with-icon">
-            <span aria-hidden="true">⌕</span>
+            <FontAwesomeIcon
+              icon={faMagnifyingGlass}
+              aria-hidden="true"
+            />
 
             <input
               id="student-search"
               type="search"
-              placeholder="Search by Student ID, name or email..."
+              placeholder="Search by student ID, name or email..."
               value={searchTerm}
               onChange={(event) =>
                 setSearchTerm(event.target.value)
@@ -399,39 +380,60 @@ function Student() {
           onClick={handleClearFilters}
           disabled={!hasActiveFilters}
         >
-          ↻ Clear Filters
+          <FontAwesomeIcon
+            icon={faRotateRight}
+          />
+
+          Clear Filters
         </button>
       </div>
+
+      {/* ---------- Student Table ---------- */}
 
       <div className="student-table-card">
         <div className="student-table-wrapper">
           {loading ? (
             <div className="student-empty-state">
-              <div
-                className="student-empty-icon"
-                aria-hidden="true"
-              >
-                ⟳
+              <div className="student-empty-icon">
+                <FontAwesomeIcon
+                  icon={faSpinner}
+                  spin
+                />
               </div>
 
               <h2>Loading students</h2>
 
               <p>
-                Fetching student accounts from the backend.
+                Fetching student accounts from
+                the confirmed admin users API.
               </p>
             </div>
           ) : error ? (
-            <div className="student-empty-state student-search-empty">
-              <div
-                className="student-empty-icon"
-                aria-hidden="true"
-              >
-                !
+            <div className="student-empty-state">
+              <div className="student-empty-icon student-error-icon">
+                <FontAwesomeIcon
+                  icon={faCircleExclamation}
+                />
               </div>
 
               <h2>Unable to load students</h2>
 
               <p>{error}</p>
+            </div>
+          ) : students.length === 0 ? (
+            <div className="student-empty-state">
+              <div className="student-empty-icon">
+                <FontAwesomeIcon
+                  icon={faUserGraduate}
+                />
+              </div>
+
+              <h2>No students available</h2>
+
+              <p>
+                No student accounts were returned
+                by the current admin users API.
+              </p>
             </div>
           ) : (
             <>
@@ -439,143 +441,171 @@ function Student() {
                 <thead>
                   <tr>
                     <th>Student</th>
+                    <th>Email</th>
                     <th>Department</th>
                     <th>Program</th>
-                    <th>Email</th>
+                    <th>Year / Semester</th>
                     <th>Status</th>
-                    <th>Actions</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {filteredStudents.map((student) => (
-                    <tr key={student.studentId}>
-                      <td>
-                        <div className="student-identity">
-                          <div className="student-avatar">
-                            {getInitials(student.name)}
+                  {filteredStudents.map(
+                    (student) => (
+                      <tr
+                        key={student.studentId}
+                      >
+                        <td>
+                          <div className="student-identity">
+                            <div className="student-avatar">
+                              {getInitials(
+                                student.name,
+                              )}
+                            </div>
+
+                            <div>
+                              <strong>
+                                {student.name}
+                              </strong>
+
+                              <span>
+                                ID:{" "}
+                                {
+                                  student.studentId
+                                }
+                              </span>
+                            </div>
                           </div>
+                        </td>
 
-                          <div>
-                            <strong>{student.name}</strong>
-                            <span>{student.studentId}</span>
-                          </div>
-                        </div>
-                      </td>
+                        <td>
+                          {student.email}
+                        </td>
 
-                      <td>
-                        {student.department || "N/A"}
-                      </td>
-
-                      <td>
-                        {student.program || "N/A"}
-                      </td>
-
-                      <td>{student.email || "N/A"}</td>
-
-                      <td>
-                        {student.status ? (
-                          <span
-                            className={`student-status student-status-${student.status.toLowerCase()}`}
-                          >
-                            ● {student.status}
+                        <td>
+                          <span className="student-pending-text">
+                            API integration pending
                           </span>
-                        ) : (
-                          "N/A"
-                        )}
-                      </td>
+                        </td>
 
-                      <td>
-                        <button
-                          type="button"
-                          className="student-action-button"
-                          aria-label={`Actions for ${student.name}`}
-                          disabled
-                          title="Student management API is not available yet"
-                        >
-                          ⋮
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        <td>
+                          <span className="student-pending-text">
+                            API integration pending
+                          </span>
+                        </td>
+
+                        <td>
+                          <span className="student-pending-text">
+                            API integration pending
+                          </span>
+                        </td>
+
+                        <td>
+                          <span className="student-pending-badge">
+                            <FontAwesomeIcon
+                              icon={faCircleInfo}
+                            />
+
+                            API pending
+                          </span>
+                        </td>
+
+                        <td>
+                          <button
+                            type="button"
+                            className="student-view-button"
+                            onClick={() =>
+                              handleViewStudent(
+                                student,
+                              )
+                            }
+                          >
+                            View
+                          </button>
+                        </td>
+                      </tr>
+                    ),
+                  )}
                 </tbody>
               </table>
 
-              {students.length === 0 ? (
-                <div className="student-empty-state">
-                  <div
-                    className="student-empty-icon"
-                    aria-hidden="true"
-                  >
-                    ♟
-                  </div>
-
-                  <h2>No students available</h2>
-
-                  <p>
-                    No student accounts were returned by the
-                    current admin users API.
-                  </p>
-                </div>
-              ) : filteredStudents.length === 0 ? (
+              {filteredStudents.length === 0 && (
                 <div className="student-empty-state student-search-empty">
-                  <div
-                    className="student-empty-icon"
-                    aria-hidden="true"
-                  >
-                    ⌕
+                  <div className="student-empty-icon">
+                    <FontAwesomeIcon
+                      icon={
+                        faMagnifyingGlass
+                      }
+                    />
                   </div>
 
-                  <h2>No matching students</h2>
+                  <h2>
+                    No matching students
+                  </h2>
 
                   <p>
-                    Try adjusting your search terms or filters.
+                    Try adjusting your search
+                    terms or filters.
                   </p>
 
                   <button
                     type="button"
-                    onClick={handleClearFilters}
+                    className="student-secondary-button"
+                    onClick={
+                      handleClearFilters
+                    }
                   >
                     Clear Filters
                   </button>
                 </div>
-              ) : null}
+              )}
             </>
           )}
         </div>
 
-        <div className="student-pagination">
-          <span>
-            Showing {filteredStudents.length} of{" "}
-            {students.length} students
-          </span>
+        {!loading && !error && students.length > 0 && (
+          <div className="student-pagination">
+            <span>
+              Showing{" "}
+              {filteredStudents.length} of{" "}
+              {students.length} students
+            </span>
 
-          <div className="student-pagination-controls">
-            <button type="button" disabled>
-              ‹ Previous
-            </button>
+            <div className="student-pagination-controls">
+              <button
+                type="button"
+                disabled
+              >
+                Previous
+              </button>
 
-            <button
-              type="button"
-              className="student-page-number"
-              disabled
-            >
-              1
-            </button>
+              <button
+                type="button"
+                className="student-page-number"
+                disabled
+              >
+                1
+              </button>
 
-            <button type="button" disabled>
-              Next ›
-            </button>
+              <button
+                type="button"
+                disabled
+              >
+                Next
+              </button>
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
+      {/* ---------- Integration Notice ---------- */}
+
       <div className="student-integration-notice">
-        <div
-          className="student-integration-icon"
-          aria-hidden="true"
-        >
-          i
+        <div className="student-integration-icon">
+          <FontAwesomeIcon
+            icon={faCircleInfo}
+          />
         </div>
 
         <div>
@@ -584,10 +614,12 @@ function Student() {
           </strong>
 
           <span>
-            Student accounts are loaded from the admin users
-            API. Department, program, year/semester, status and
-            student profile management require additional
-            backend APIs.
+            Name, email, role and user ID are
+            loaded from the confirmed admin
+            users API. Department, program,
+            year/semester, status, student
+            profile and face-profile mapping
+            require additional backend APIs.
           </span>
         </div>
 
@@ -596,182 +628,120 @@ function Student() {
         </span>
       </div>
 
-      {showAddModal && (
+      {/* ---------- Student Details Modal ---------- */}
+
+      {selectedStudent && (
         <div
           className="student-modal-overlay"
           role="presentation"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) {
-              handleCloseAddModal();
-            }
-          }}
+          onClick={handleCloseStudent}
         >
           <div
             className="student-modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="add-student-title"
+            aria-labelledby="student-modal-title"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
           >
             <div className="student-modal-header">
-              <div>
-                <span className="student-eyebrow">
-                  Student Management
-                </span>
+              <div className="student-modal-profile">
+                <div className="student-modal-avatar">
+                  {getInitials(
+                    selectedStudent.name,
+                  )}
+                </div>
 
-                <h2 id="add-student-title">
-                  Add Student
-                </h2>
+                <div>
+                  <span>
+                    Student Account
+                  </span>
 
-                <p>
-                  Student creation will be enabled when the
-                  required backend API is available.
-                </p>
+                  <h2 id="student-modal-title">
+                    {selectedStudent.name}
+                  </h2>
+                </div>
               </div>
 
               <button
                 type="button"
                 className="student-modal-close"
-                onClick={handleCloseAddModal}
-                aria-label="Close add student dialog"
+                onClick={handleCloseStudent}
+                aria-label="Close student details"
               >
                 ×
               </button>
             </div>
 
-            <form onSubmit={handleAddStudent}>
-              <div className="student-form-section">
-                <h3>Student Information</h3>
+            <div className="student-details-grid">
+              <article className="student-detail-card">
+                <span>Student ID</span>
 
-                <div className="student-form-grid">
-                  <div className="student-form-field">
-                    <label htmlFor="student-id">
-                      Student ID
-                    </label>
+                <strong>
+                  {selectedStudent.studentId}
+                </strong>
+              </article>
 
-                    <input
-                      id="student-id"
-                      name="studentId"
-                      type="text"
-                      value={formData.studentId}
-                      onChange={handleFormChange}
-                      placeholder="Enter student ID"
-                      disabled
-                    />
-                  </div>
+              <article className="student-detail-card">
+                <span>Name</span>
 
-                  <div className="student-form-field">
-                    <label htmlFor="student-full-name">
-                      Full Name
-                    </label>
+                <strong>
+                  {selectedStudent.name}
+                </strong>
+              </article>
 
-                    <input
-                      id="student-full-name"
-                      name="fullName"
-                      type="text"
-                      value={formData.fullName}
-                      onChange={handleFormChange}
-                      placeholder="Enter full name"
-                      disabled
-                    />
-                  </div>
+              <article className="student-detail-card">
+                <span>Email</span>
 
-                  <div className="student-form-field student-form-full">
-                    <label htmlFor="student-email">
-                      Email
-                    </label>
+                <strong>
+                  {selectedStudent.email}
+                </strong>
+              </article>
 
-                    <input
-                      id="student-email"
-                      name="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={handleFormChange}
-                      placeholder="Enter email address"
-                      disabled
-                    />
-                  </div>
-                </div>
+              <article className="student-detail-card">
+                <span>Role</span>
+
+                <strong>STUDENT</strong>
+              </article>
+            </div>
+
+            <div className="student-pending-section">
+              <div className="student-pending-section-icon">
+                <FontAwesomeIcon
+                  icon={faCircleInfo}
+                />
               </div>
 
-              <div className="student-form-section">
-                <h3>Academic Information</h3>
+              <div>
+                <strong>
+                  Additional student information
+                </strong>
 
-                <div className="student-form-grid">
-                  <div className="student-form-field">
-                    <label htmlFor="student-department-modal">
-                      Department
-                    </label>
+                <p>
+                  Department, program,
+                  year/semester, student status,
+                  attendance summary and face
+                  registration details are not
+                  available from the currently
+                  confirmed Admin Student API.
+                </p>
 
-                    <select
-                      id="student-department-modal"
-                      name="department"
-                      value={formData.department}
-                      onChange={handleFormChange}
-                      disabled
-                    >
-                      <option value="">
-                        Student API unavailable
-                      </option>
-                    </select>
-                  </div>
-
-                  <div className="student-form-field">
-                    <label htmlFor="student-program-modal">
-                      Program
-                    </label>
-
-                    <select
-                      id="student-program-modal"
-                      name="program"
-                      value={formData.program}
-                      onChange={handleFormChange}
-                      disabled
-                    >
-                      <option value="">
-                        Student API unavailable
-                      </option>
-                    </select>
-                  </div>
-
-                  <div className="student-form-field">
-                    <label htmlFor="student-year-modal">
-                      Year / Semester
-                    </label>
-
-                    <select
-                      id="student-year-modal"
-                      name="yearSemester"
-                      value={formData.yearSemester}
-                      onChange={handleFormChange}
-                      disabled
-                    >
-                      <option value="">
-                        Student API unavailable
-                      </option>
-                    </select>
-                  </div>
-                </div>
+                <span>
+                  API integration pending
+                </span>
               </div>
+            </div>
 
-              <div className="student-modal-footer">
-                <button
-                  type="button"
-                  className="student-secondary-button"
-                  onClick={handleCloseAddModal}
-                >
-                  Cancel
-                </button>
-
-                <button
-                  type="submit"
-                  className="student-primary-button"
-                  disabled
-                  title="Student management API is not available yet"
-                >
-                  Add Student
-                </button>
-              </div>
-            </form>
+            <div className="student-modal-footer">
+              <button
+                type="button"
+                className="student-secondary-button"
+                onClick={handleCloseStudent}
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

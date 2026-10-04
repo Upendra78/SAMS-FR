@@ -11,11 +11,13 @@ const EMPTY_METRICS = {
 };
 
 function formatMetric(value) {
-  return value === null ? "N/A" : value;
+  return value === null || value === undefined ? "N/A" : value;
 }
 
 function FacultyDashboard() {
-  const [showAttendanceNotice, setShowAttendanceNotice] = useState(false);
+  const [showAttendanceNotice, setShowAttendanceNotice] =
+    useState(false);
+
   const [backendStatus, setBackendStatus] = useState("loading");
   const [backendMessage, setBackendMessage] = useState("");
 
@@ -30,13 +32,19 @@ function FacultyDashboard() {
           return;
         }
 
-        if (result?.success && result?.data?.role === "FACULTY") {
+        if (
+          result?.success &&
+          result?.data?.role === "FACULTY"
+        ) {
           setBackendStatus("connected");
-          setBackendMessage("Faculty backend access confirmed.");
+          setBackendMessage(
+            "Faculty backend access confirmed.",
+          );
         } else {
           setBackendStatus("error");
           setBackendMessage(
-            result?.message || "Unable to verify faculty backend access.",
+            result?.message ||
+              "Unable to verify faculty backend access.",
           );
         }
       } catch (error) {
@@ -46,10 +54,14 @@ function FacultyDashboard() {
 
         if (error?.response?.status === 401) {
           setBackendStatus("error");
-          setBackendMessage("Your session has expired. Please log in again.");
+          setBackendMessage(
+            "Your session has expired. Please log in again.",
+          );
         } else if (error?.response?.status === 403) {
           setBackendStatus("error");
-          setBackendMessage("Faculty access is required for this portal.");
+          setBackendMessage(
+            "Faculty access is required for this portal.",
+          );
         } else {
           setBackendStatus("error");
           setBackendMessage(
@@ -98,43 +110,63 @@ function FacultyDashboard() {
       {/* Summary Cards */}
       <div className="faculty-summary-grid">
         <article className="faculty-summary-card faculty-summary-blue">
-          <div className="faculty-summary-icon" aria-hidden="true">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             ▦
           </div>
 
           <span>Assigned Courses</span>
 
-          <strong>{formatMetric(metrics.assignedCourses)}</strong>
+          <strong>
+            {formatMetric(metrics.assignedCourses)}
+          </strong>
         </article>
 
         <article className="faculty-summary-card faculty-summary-purple">
-          <div className="faculty-summary-icon" aria-hidden="true">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             ◷
           </div>
 
           <span>Today's Classes</span>
 
-          <strong>{formatMetric(metrics.todaysClasses)}</strong>
+          <strong>
+            {formatMetric(metrics.todaysClasses)}
+          </strong>
         </article>
 
         <article className="faculty-summary-card faculty-summary-green">
-          <div className="faculty-summary-icon" aria-hidden="true">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             ●
           </div>
 
           <span>Active Sessions</span>
 
-          <strong>{formatMetric(metrics.activeSessions)}</strong>
+          <strong>
+            {formatMetric(metrics.activeSessions)}
+          </strong>
         </article>
 
         <article className="faculty-summary-card faculty-summary-orange">
-          <div className="faculty-summary-icon" aria-hidden="true">
+          <div
+            className="faculty-summary-icon"
+            aria-hidden="true"
+          >
             %
           </div>
 
           <span>Average Attendance</span>
 
-          <strong>{formatMetric(metrics.averageAttendance)}</strong>
+          <strong>
+            {formatMetric(metrics.averageAttendance)}
+          </strong>
         </article>
       </div>
 
@@ -200,7 +232,9 @@ function FacultyDashboard() {
 
               <span>
                 <strong>Start Attendance</strong>
-                <small>Start a new attendance session</small>
+                <small>
+                  Start a new attendance session
+                </small>
               </span>
 
               <span aria-hidden="true">›</span>
@@ -220,7 +254,9 @@ function FacultyDashboard() {
 
               <span>
                 <strong>Attendance</strong>
-                <small>View attendance activity</small>
+                <small>
+                  View attendance activity
+                </small>
               </span>
 
               <span aria-hidden="true">›</span>
@@ -240,7 +276,9 @@ function FacultyDashboard() {
 
               <span>
                 <strong>My Courses</strong>
-                <small>View assigned courses</small>
+                <small>
+                  View assigned courses
+                </small>
               </span>
 
               <span aria-hidden="true">›</span>
@@ -260,7 +298,9 @@ function FacultyDashboard() {
 
               <span>
                 <strong>Students</strong>
-                <small>View enrolled students</small>
+                <small>
+                  View enrolled students
+                </small>
               </span>
 
               <span aria-hidden="true">›</span>
@@ -370,7 +410,8 @@ function FacultyDashboard() {
             <h3>No recent attendance activity</h3>
 
             <p>
-              Attendance sessions completed by you will appear here.
+              Attendance sessions completed by you will appear
+              here.
             </p>
           </div>
         </section>
@@ -398,8 +439,8 @@ function FacultyDashboard() {
             <h3>No assigned courses available</h3>
 
             <p>
-              Your assigned courses will appear here when provided
-              by the backend.
+              Your assigned courses will appear here when
+              provided by the backend.
             </p>
           </div>
         </section>
@@ -439,7 +480,7 @@ function FacultyDashboard() {
         </span>
       </div>
 
-      {/* Temporary Attendance Notice */}
+      {/* Attendance Notice */}
       {showAttendanceNotice && (
         <div
           className="faculty-modal-overlay"
@@ -482,12 +523,13 @@ function FacultyDashboard() {
                 i
               </div>
 
-              <h3>Attendance backend integration pending</h3>
+              <h3>
+                Attendance session integration coming next
+              </h3>
 
               <p>
-                The attendance session workflow will be connected
-                after the faculty attendance API and facial
-                recognition session contract are available.
+                The faculty attendance APIs are available and
+                will be connected in the next integration step.
               </p>
             </div>
 
