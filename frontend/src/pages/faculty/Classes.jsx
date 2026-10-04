@@ -1,8 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import {
+  getFacultyCourses,
+  getFacultyCourseDetails,
+} from "../../services/facultyService";
 
 import "./Classes.css";
-
-const classes = [];
 
 const EMPTY_METRICS = {
   assignedCourses: null,
@@ -32,16 +35,83 @@ function getInitials(name) {
 }
 
 function Classes() {
+  const [classes, setClasses] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
+
   const [searchTerm, setSearchTerm] = useState("");
   const [department, setDepartment] = useState("All");
   const [semester, setSemester] = useState("All");
   const [status, setStatus] = useState("All");
   const [selectedClass, setSelectedClass] = useState(null);
 
+  const [detailsLoading, setDetailsLoading] = useState(false);
+  const [detailsError, setDetailsError] = useState("");
+
   const metrics = EMPTY_METRICS;
 
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadCourses() {
+      setLoading(true);
+      setErrorMessage("");
+
+      try {
+        const result = await getFacultyCourses();
+
+        if (!result?.success || !Array.isArray(result?.data)) {
+          throw new Error(
+            result?.message || "Unable to load your assigned courses.",
+          );
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        setClasses(result.data);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setClasses([]);
+        setErrorMessage(
+          error?.message || "Unable to load your assigned courses.",
+        );
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadCourses();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   const departments = ["All"];
-  const semesters = ["All"];
+
+  const semesters = useMemo(() => {
+    const uniqueSemesters = [
+      ...new Set(
+        classes
+          .map((item) => item.semester)
+          .filter(
+            (semesterValue) =>
+              semesterValue !== null &&
+              semesterValue !== undefined &&
+              semesterValue !== "",
+          ),
+      ),
+    ];
+
+    return ["All", ...uniqueSemesters];
+  }, [classes]);
 
   const filteredClasses = useMemo(() => {
     const search = searchTerm.trim().toLowerCase();
@@ -49,17 +119,18 @@ function Classes() {
     return classes.filter((item) => {
       const matchesSearch =
         !search ||
-        item.courseId?.toLowerCase().includes(search) ||
-        item.courseName?.toLowerCase().includes(search);
+        String(item.course_id ?? "")
+          .toLowerCase()
+          .includes(search) ||
+        item.course_code?.toLowerCase().includes(search) ||
+        item.course_name?.toLowerCase().includes(search);
 
-      const matchesDepartment =
-        department === "All" || item.department === department;
+      const matchesDepartment = department === "All";
 
       const matchesSemester =
         semester === "All" || item.semester === semester;
 
-      const matchesStatus =
-        status === "All" || item.status === status;
+      const matchesStatus = status === "All";
 
       return (
         matchesSearch &&
@@ -68,7 +139,13 @@ function Classes() {
         matchesStatus
       );
     });
-  }, [searchTerm, department, semester, status]);
+  }, [
+    classes,
+    searchTerm,
+    department,
+    semester,
+    status,
+  ]);
 
   const handleClearFilters = () => {
     setSearchTerm("");
@@ -77,9 +154,38 @@ function Classes() {
     setStatus("All");
   };
 
+  const handleViewClass = async (courseId) => {
+    setDetailsLoading(true);
+    setDetailsError("");
+    setSelectedClass(null);
+
+    try {
+      const result = await getFacultyCourseDetails(courseId);
+
+      if (!result?.success || !result?.data) {
+        throw new Error(
+          result?.message || "Unable to load course details.",
+        );
+      }
+
+      setSelectedClass(result.data);
+    } catch (error) {
+      setDetailsError(
+        error?.message || "Unable to load course details.",
+      );
+    } finally {
+      setDetailsLoading(false);
+    }
+  };
+
+  const handleCloseClassDetails = () => {
+    setSelectedClass(null);
+    setDetailsError("");
+  };
+
   const handleStartAttendance = () => {
-    // Attendance workflow will be connected when the backend
-    // session API and attendance route are finalized.
+    // Attendance workflow will be connected when the
+    // faculty attendance session API is wired into this page.
   };
 
   return (
@@ -126,7 +232,9 @@ function Classes() {
 
           <div>
             <span>Assigned Courses</span>
-            <strong>{formatMetric(metrics.assignedCourses)}</strong>
+            <strong>
+              {formatMetric(metrics.assignedCourses)}
+            </strong>
           </div>
         </article>
 
@@ -136,14 +244,22 @@ function Classes() {
             aria-hidden="true"
           >
             <svg viewBox="0 0 24 24">
-              <rect x="4" y="5" width="16" height="15" rx="2" />
+              <rect
+                x="4"
+                y="5"
+                width="16"
+                height="15"
+                rx="2"
+              />
               <path d="M8 3v4M16 3v4M4 10h16" />
             </svg>
           </div>
 
           <div>
             <span>Today's Classes</span>
-            <strong>{formatMetric(metrics.todaysClasses)}</strong>
+            <strong>
+              {formatMetric(metrics.todaysClasses)}
+            </strong>
           </div>
         </article>
 
@@ -160,7 +276,9 @@ function Classes() {
 
           <div>
             <span>Active Classes</span>
-            <strong>{formatMetric(metrics.activeClasses)}</strong>
+            <strong>
+              {formatMetric(metrics.activeClasses)}
+            </strong>
           </div>
         </article>
 
@@ -178,7 +296,9 @@ function Classes() {
 
           <div>
             <span>Total Students</span>
-            <strong>{formatMetric(metrics.totalStudents)}</strong>
+            <strong>
+              {formatMetric(metrics.totalStudents)}
+            </strong>
           </div>
         </article>
       </div>
@@ -290,7 +410,38 @@ function Classes() {
           </div>
         </div>
 
-        {classes.length === 0 ? (
+        {loading ? (
+          <div className="faculty-classes-empty-card">
+            <div
+              className="faculty-classes-empty-icon"
+              aria-hidden="true"
+            >
+              <svg viewBox="0 0 24 24">
+                <path d="M5 4.5h14v15H5z" />
+                <path d="M8 8h8M8 12h8M8 16h5" />
+              </svg>
+            </div>
+
+            <h3>Loading classes...</h3>
+
+            <p>
+              Your assigned courses are being loaded.
+            </p>
+          </div>
+        ) : errorMessage ? (
+          <div className="faculty-classes-empty-card">
+            <div
+              className="faculty-classes-empty-icon"
+              aria-hidden="true"
+            >
+              !
+            </div>
+
+            <h3>Unable to load classes</h3>
+
+            <p>{errorMessage}</p>
+          </div>
+        ) : classes.length === 0 ? (
           <div className="faculty-classes-empty-card">
             <div
               className="faculty-classes-empty-icon"
@@ -305,8 +456,8 @@ function Classes() {
             <h3>No classes available</h3>
 
             <p>
-              Your assigned classes will appear here when course
-              assignment data is provided by the backend.
+              No courses are currently assigned to your faculty
+              account.
             </p>
           </div>
         ) : filteredClasses.length === 0 ? (
@@ -332,48 +483,52 @@ function Classes() {
             {filteredClasses.map((item) => (
               <article
                 className="faculty-class-card"
-                key={item.courseId}
+                key={item.course_id}
               >
                 <div className="faculty-class-card-header">
                   <div className="faculty-class-identity">
                     <div className="faculty-class-avatar">
-                      {getInitials(item.courseName)}
+                      {getInitials(item.course_name)}
                     </div>
 
                     <div>
-                      <strong>{item.courseId}</strong>
-                      <span>{item.courseName}</span>
+                      <strong>{item.course_code}</strong>
+                      <span>{item.course_name}</span>
                     </div>
                   </div>
 
-                  <span
-                    className={`faculty-class-status faculty-class-status-${item.status?.toLowerCase()}`}
-                  >
-                    ● {item.status}
+                  <span className="faculty-class-status">
+                    ● Assigned
                   </span>
                 </div>
 
                 <div className="faculty-class-details">
                   <div>
-                    <span>Department</span>
-                    <strong>{item.department}</strong>
+                    <span>Course ID</span>
+                    <strong>{item.course_id}</strong>
                   </div>
 
                   <div>
                     <span>Credits</span>
-                    <strong>{item.credits ?? "N/A"}</strong>
+                    <strong>
+                      {item.credits ?? "N/A"}
+                    </strong>
                   </div>
                 </div>
 
                 <div className="faculty-class-meta">
                   <div>
-                    <span>Students</span>
-                    <strong>{item.students ?? "N/A"}</strong>
+                    <span>Semester</span>
+                    <strong>
+                      {item.semester ?? "N/A"}
+                    </strong>
                   </div>
 
                   <div>
-                    <span>Schedule</span>
-                    <strong>{item.schedule ?? "N/A"}</strong>
+                    <span>Section</span>
+                    <strong>
+                      {item.section ?? "N/A"}
+                    </strong>
                   </div>
                 </div>
 
@@ -381,9 +536,10 @@ function Classes() {
                   <button
                     type="button"
                     className="faculty-class-secondary-button"
-                    onClick={() => setSelectedClass(item)}
+                    onClick={() => handleViewClass(item.course_id)}
+                    disabled={detailsLoading}
                   >
-                    View Class
+                    {detailsLoading ? "Loading..." : "View Class"}
                   </button>
 
                   <button
@@ -432,18 +588,39 @@ function Classes() {
         <div className="faculty-integration-icon">i</div>
 
         <div>
-          <strong>Backend integration pending</strong>
+          <strong>Backend integration active</strong>
 
           <span>
-            Assigned classes will be loaded from the backend when
-            the required faculty course-assignment API is available.
+            Assigned courses are now loaded from the faculty
+            course API. Department, student-count, schedule and
+            attendance metrics require additional backend data.
           </span>
         </div>
 
         <span className="faculty-integration-badge">
-          Integration Pending
+          Courses Connected
         </span>
       </div>
+
+      {/* Course Details Loading */}
+      {detailsLoading && (
+        <div className="faculty-classes-empty-card">
+          <h3>Loading class details...</h3>
+
+          <p>
+            The selected course details are being loaded.
+          </p>
+        </div>
+      )}
+
+      {/* Course Details Error */}
+      {detailsError && !detailsLoading && (
+        <div className="faculty-classes-empty-card">
+          <h3>Unable to load class details</h3>
+
+          <p>{detailsError}</p>
+        </div>
+      )}
 
       {/* View Class Modal */}
       {selectedClass && (
@@ -452,7 +629,7 @@ function Classes() {
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setSelectedClass(null);
+              handleCloseClassDetails();
             }
           }}
         >
@@ -469,16 +646,18 @@ function Classes() {
                 </span>
 
                 <h2 id="faculty-class-title">
-                  {selectedClass.courseName}
+                  {selectedClass.course_name ?? "Course"}
                 </h2>
 
-                <p>{selectedClass.courseId}</p>
+                <p>
+                  {selectedClass.course_code ?? "N/A"}
+                </p>
               </div>
 
               <button
                 type="button"
                 className="faculty-class-modal-close"
-                onClick={() => setSelectedClass(null)}
+                onClick={handleCloseClassDetails}
                 aria-label="Close class details"
               >
                 ×
@@ -487,40 +666,72 @@ function Classes() {
 
             <div className="faculty-class-modal-content">
               <div className="faculty-class-modal-info">
-                <span>Department</span>
+                <span>Course ID</span>
+
                 <strong>
-                  {selectedClass.department ?? "N/A"}
+                  {selectedClass.course_id ?? "N/A"}
+                </strong>
+              </div>
+
+              <div className="faculty-class-modal-info">
+                <span>Course Code</span>
+
+                <strong>
+                  {selectedClass.course_code ?? "N/A"}
                 </strong>
               </div>
 
               <div className="faculty-class-modal-info">
                 <span>Credits</span>
+
                 <strong>
                   {selectedClass.credits ?? "N/A"}
                 </strong>
               </div>
 
-              <div className="faculty-class-modal-info">
-                <span>Students</span>
-                <strong>
-                  {selectedClass.students ?? "N/A"}
-                </strong>
-              </div>
+              {selectedClass.offerings?.length > 0 ? (
+                selectedClass.offerings.map((offering) => (
+                  <div
+                    className="faculty-class-modal-info"
+                    key={offering.offering_id}
+                  >
+                    <span>
+                      Offering {offering.offering_id ?? "N/A"}
+                    </span>
 
-              <div className="faculty-class-modal-info">
-                <span>Schedule</span>
-                <strong>
-                  {selectedClass.schedule ?? "N/A"}
-                </strong>
-              </div>
+                    <strong>
+                      {[
+                        offering.semester,
+                        offering.section
+                          ? `Section ${offering.section}`
+                          : null,
+                        offering.academic_year,
+                        offering.room
+                          ? `Room ${offering.room}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join(" • ") || "N/A"}
+                    </strong>
+                  </div>
+                ))
+              ) : (
+                <div className="faculty-class-modal-info">
+                  <span>Offerings</span>
+
+                  <strong>
+                    No offering details available
+                  </strong>
+                </div>
+              )}
             </div>
 
             <div className="faculty-class-modal-section">
               <h3>Students</h3>
 
               <div className="faculty-class-modal-empty">
-                Student information will be available when the
-                backend enrollment data is connected.
+                Student information is not included in the faculty
+                course API response.
               </div>
             </div>
 
@@ -528,8 +739,8 @@ function Classes() {
               <h3>Schedule</h3>
 
               <div className="faculty-class-modal-empty">
-                Class schedule information will be displayed here
-                when provided by the backend.
+                Detailed class schedule information is not included
+                in the faculty course API response.
               </div>
             </div>
 
@@ -537,7 +748,7 @@ function Classes() {
               <button
                 type="button"
                 className="faculty-class-secondary-button"
-                onClick={() => setSelectedClass(null)}
+                onClick={handleCloseClassDetails}
               >
                 Close
               </button>
