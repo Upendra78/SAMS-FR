@@ -1,7 +1,8 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
-from app.models import Faculty
+from app.extensions import db
+from app.models import Faculty, AttendanceSession
 from app.services.cv.attendance_service import mark_face_attendance
 from app.utils.auth import faculty_required
 
@@ -49,6 +50,25 @@ def process_recognition_attendance():
             "success": False,
             "message": "confidence_score is required",
         }), 400
+
+    # Verify that the attendance session belongs
+    # to the authenticated faculty member.
+    session = db.session.get(
+        AttendanceSession,
+        session_id,
+    )
+
+    if not session:
+        return jsonify({
+            "success": False,
+            "message": "Attendance session not found",
+        }), 404
+
+    if session.faculty_id != faculty.faculty_id:
+        return jsonify({
+            "success": False,
+            "message": "Access forbidden",
+        }), 403
 
     record, message = mark_face_attendance(
         session_id=session_id,
