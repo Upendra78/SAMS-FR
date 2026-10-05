@@ -11,6 +11,7 @@ from flask_jwt_extended import (
 )
 
 from app.services.auth_service import authenticate_user
+from flask_jwt_extended import verify_jwt_in_request
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -96,8 +97,8 @@ def me():
             "role": user.role,
         },
     }), 200
-    
-    
+
+
 @auth_bp.get("/admin-test")
 @admin_required
 def admin_test():
@@ -105,8 +106,8 @@ def admin_test():
         "success": True,
         "message": "Admin access granted",
     }), 200
-    
-    
+
+
 @auth_bp.get("/protected-test")
 @jwt_required()
 def protected_test():
@@ -114,3 +115,4 @@ def protected_test():
         "success": True,
         "message": "Authenticated access granted",
     }), 200
+
