@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+
 import "./Students.css";
 
 import {
@@ -879,7 +882,7 @@ function Students() {
                 onClick={closeStudentModal}
                 aria-label="Close student profile"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 

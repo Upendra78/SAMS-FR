@@ -1,39 +1,17 @@
-@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap");
+* {
+  box-sizing: border-box;
+  font-family: "Times New Roman", Times, serif;
+}
 
 :root {
-  font-family: "DM Sans", sans-serif;
+  font-family: "Times New Roman", Times, serif;
   color: #10233f;
   background: #f0f9ff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-}
 
-* {
-  box-sizing: border-box;
-}
-
-html,
-body,
-#root {
-  width: 100%;
-  min-width: 320px;
-  min-height: 100vh;
-  margin: 0;
-}
-
-body {
-  min-height: 100vh;
-}
-
-button,
-input,
-select {
-  font: inherit;
-}
-
-:root {
   --admin-page-bg: #f4f8fc;
   --admin-surface: #ffffff;
   --admin-surface-soft: #fafcff;
@@ -53,4 +31,27 @@ select {
   --admin-text: #edf3fb;
   --admin-text-secondary: #aab8ca;
   --admin-text-muted: #8392a7;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  background: #f5f6fa;
+  font-family: "Times New Roman", Times, serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }

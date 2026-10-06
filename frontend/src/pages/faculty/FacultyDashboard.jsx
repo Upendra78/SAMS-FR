@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+
 import "./FacultyDashboard.css";
 import { getFacultyDashboard } from "../../services/portalService";
 
@@ -514,7 +517,7 @@ function FacultyDashboard() {
                 onClick={() => setShowAttendanceNotice(false)}
                 aria-label="Close attendance session notice"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 

@@ -1,4 +1,8 @@
 import { useMemo, useState } from "react";
+
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+
 import "./Reports.css";
 
 const reportStudents = [];
@@ -684,7 +688,7 @@ function Reports() {
                 onClick={() => setShowExportModal(false)}
                 aria-label="Close"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
@@ -751,7 +755,7 @@ function Reports() {
                 onClick={() => setSelectedStudent(null)}
                 aria-label="Close"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 

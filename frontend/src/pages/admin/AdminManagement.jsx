@@ -85,6 +85,14 @@ function getInitials(name) {
     .join("");
 }
 
+function getApiErrorMessage(error, fallback) {
+  return (
+    error?.response?.data?.message ||
+    error?.response?.data?.error ||
+    fallback
+  );
+}
+
 function AdminManagement() {
   const { user: currentUser } = useContext(AuthContext);
 
@@ -99,12 +107,12 @@ function AdminManagement() {
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [faceRegistrationUser, setFaceRegistrationUser] = useState(null);
+  const [faceRegistrationUser, setFaceRegistrationUser] =
+    useState(null);
 
   const [formData, setFormData] = useState(initialFormData);
-  const [editFormData, setEditFormData] = useState(
-    initialEditFormData
-  );
+  const [editFormData, setEditFormData] =
+    useState(initialEditFormData);
 
   const [status, setStatus] = useState({
     type: "",
@@ -124,19 +132,25 @@ function AdminManagement() {
       if (!result?.success) {
         setStatus({
           type: "error",
-          message: result?.message || "Unable to load users.",
+          message:
+            result?.message || "Unable to load users.",
         });
 
         return;
       }
 
-      setUsers(Array.isArray(result.data) ? result.data : []);
+      setUsers(
+        Array.isArray(result.data) ? result.data : []
+      );
+
+      setCurrentPage(1);
     } catch (error) {
       setStatus({
         type: "error",
-        message:
-          error?.response?.data?.message ||
-          "Unable to load users. Please try again.",
+        message: getApiErrorMessage(
+          error,
+          "Unable to load users. Please try again."
+        ),
       });
     } finally {
       setLoadingUsers(false);
@@ -144,13 +158,13 @@ function AdminManagement() {
   }
 
   useEffect(() => {
-    let active = true;
+    let cancelled = false;
 
-    async function initializeUsers() {
+    async function fetchUsers() {
       try {
         const result = await getUsers();
 
-        if (!active) {
+        if (cancelled) {
           return;
         }
 
@@ -165,32 +179,29 @@ function AdminManagement() {
         }
 
         setUsers(
-          Array.isArray(result.data)
-            ? result.data
-            : []
+          Array.isArray(result.data) ? result.data : []
         );
+
+        setCurrentPage(1);
       } catch (error) {
-        if (!active) {
+        if (cancelled) {
           return;
         }
 
         setStatus({
           type: "error",
-          message:
-            error?.response?.data?.message ||
-            "Unable to load users. Please try again.",
+          message: getApiErrorMessage(
+            error,
+            "Unable to load users. Please try again."
+          ),
         });
-      } finally {
-        if (active) {
-          setLoadingUsers(false);
-        }
       }
     }
 
-    initializeUsers();
+    fetchUsers();
 
     return () => {
-      active = false;
+      cancelled = true;
     };
   }, []);
 
@@ -313,21 +324,26 @@ function AdminManagement() {
         return;
       }
 
-      setStatus({
-        type: "success",
-        message: "User created successfully.",
-      });
+      const createdUserId = result?.data?.user_id;
 
       setShowCreateModal(false);
       setFormData(initialFormData);
+
+      setStatus({
+        type: "success",
+        message: createdUserId
+          ? `User account created successfully. User ID: ${createdUserId}`
+          : "User account created successfully.",
+      });
 
       await loadUsers();
     } catch (error) {
       setStatus({
         type: "error",
-        message:
-          error?.response?.data?.message ||
-          "Unable to create user. Please try again.",
+        message: getApiErrorMessage(
+          error,
+          "Unable to create user. Please try again."
+        ),
       });
     } finally {
       setSubmitting(false);
@@ -481,9 +497,10 @@ function AdminManagement() {
     } catch (error) {
       setStatus({
         type: "error",
-        message:
-          error?.response?.data?.message ||
-          "Unable to update user. Please try again.",
+        message: getApiErrorMessage(
+          error,
+          "Unable to update user. Please try again."
+        ),
       });
     } finally {
       setUpdatingUserId(null);
@@ -549,9 +566,10 @@ function AdminManagement() {
     } catch (error) {
       setStatus({
         type: "error",
-        message:
-          error?.response?.data?.message ||
-          "Unable to delete user. Please try again.",
+        message: getApiErrorMessage(
+          error,
+          "Unable to delete user. Please try again."
+        ),
       });
     } finally {
       setDeletingUserId(null);
@@ -605,8 +623,9 @@ function AdminManagement() {
         user.role === roleFilter;
 
       /*
-       * Face Profile integration is intentionally pending.
-       * /api/admin/users does not currently provide face status.
+       * Face status is not currently returned by
+       * /api/admin/users, so this filter remains
+       * intentionally inactive.
        */
       const matchesFaceStatus =
         faceStatusFilter === "ALL";
@@ -660,7 +679,7 @@ function AdminManagement() {
           <h1>Users Management</h1>
 
           <p>
-            Manage all system users and their account access.
+            Manage system login accounts and user access.
           </p>
         </div>
       </div>
@@ -703,7 +722,7 @@ function AdminManagement() {
           <div>
             <span>Students</span>
             <strong>{userCounts.students}</strong>
-            <small>Registered students</small>
+            <small>Student accounts</small>
           </div>
         </article>
 
@@ -715,7 +734,7 @@ function AdminManagement() {
           <div>
             <span>Faculty</span>
             <strong>{userCounts.faculty}</strong>
-            <small>Registered faculty members</small>
+            <small>Faculty accounts</small>
           </div>
         </article>
 
@@ -727,7 +746,7 @@ function AdminManagement() {
           <div>
             <span>Admins</span>
             <strong>{userCounts.admins}</strong>
-            <small>System administrators</small>
+            <small>Administrator accounts</small>
           </div>
         </article>
       </section>
@@ -773,13 +792,18 @@ function AdminManagement() {
               value={faceStatusFilter}
               onChange={handleFaceStatusFilterChange}
             >
-              <option value="ALL">All Face Status</option>
+              <option value="ALL">
+                All Face Status
+              </option>
 
               <option value="REGISTERED" disabled>
                 Registered
               </option>
 
-              <option value="NOT_REGISTERED" disabled>
+              <option
+                value="NOT_REGISTERED"
+                disabled
+              >
                 Not Registered
               </option>
             </select>
@@ -859,7 +883,9 @@ function AdminManagement() {
                             </div>
 
                             <div>
-                              <strong>{user.name}</strong>
+                              <strong>
+                                {user.name}
+                              </strong>
 
                               {isCurrentUser && (
                                 <small>
@@ -883,7 +909,9 @@ function AdminManagement() {
                             className={`admin-role-badge admin-role-${user.role?.toLowerCase()}`}
                           >
                             <FontAwesomeIcon
-                              icon={getRoleIcon(user.role)}
+                              icon={getRoleIcon(
+                                user.role
+                              )}
                             />
 
                             {getRoleLabel(user.role)}
@@ -987,7 +1015,9 @@ function AdminManagement() {
                   aria-label="Previous page"
                   title="Previous page"
                 >
-                  <FontAwesomeIcon icon={faChevronLeft} />
+                  <FontAwesomeIcon
+                    icon={faChevronLeft}
+                  />
                 </button>
 
                 {Array.from(
@@ -1028,7 +1058,9 @@ function AdminManagement() {
                   aria-label="Next page"
                   title="Next page"
                 >
-                  <FontAwesomeIcon icon={faChevronRight} />
+                  <FontAwesomeIcon
+                    icon={faChevronRight}
+                  />
                 </button>
               </div>
             </div>
@@ -1046,8 +1078,8 @@ function AdminManagement() {
             <h2>Face Registration</h2>
 
             <p>
-              Register a user's face when the Face Profile
-              backend integration is available.
+              Face registration remains pending until
+              the confirmed Face Profile API is available.
             </p>
           </div>
         </div>
@@ -1062,8 +1094,7 @@ function AdminManagement() {
               </strong>
 
               <p>
-                The registration window is prepared, but
-                camera capture and face-profile submission
+                Camera capture and face-profile submission
                 must use the confirmed Face Profile API.
               </p>
             </div>
@@ -1086,7 +1117,7 @@ function AdminManagement() {
                 </h2>
 
                 <p>
-                  Create a new system user account.
+                  Create a new system login account.
                 </p>
               </div>
 
@@ -1107,7 +1138,7 @@ function AdminManagement() {
             >
               <div className="admin-form-field">
                 <label htmlFor="admin-user-name">
-                  Name
+                  Full Name
                 </label>
 
                 <input
@@ -1135,31 +1166,6 @@ function AdminManagement() {
                   placeholder="Enter email address"
                   required
                 />
-              </div>
-
-              <div className="admin-form-field">
-                <label htmlFor="admin-user-role">
-                  Role
-                </label>
-
-                <select
-                  id="admin-user-role"
-                  name="role"
-                  value={formData.role}
-                  onChange={handleCreateChange}
-                >
-                  <option value="STUDENT">
-                    Student
-                  </option>
-
-                  <option value="FACULTY">
-                    Faculty
-                  </option>
-
-                  <option value="ADMIN">
-                    Admin
-                  </option>
-                </select>
               </div>
 
               <div className="admin-form-field">
@@ -1194,6 +1200,31 @@ function AdminManagement() {
                   minLength={8}
                   required
                 />
+              </div>
+
+              <div className="admin-form-field">
+                <label htmlFor="admin-user-role">
+                  Role
+                </label>
+
+                <select
+                  id="admin-user-role"
+                  name="role"
+                  value={formData.role}
+                  onChange={handleCreateChange}
+                >
+                  <option value="STUDENT">
+                    Student
+                  </option>
+
+                  <option value="FACULTY">
+                    Faculty
+                  </option>
+
+                  <option value="ADMIN">
+                    Admin
+                  </option>
+                </select>
               </div>
 
               <div className="admin-modal-actions">
@@ -1268,7 +1299,7 @@ function AdminManagement() {
             >
               <div className="admin-form-field">
                 <label htmlFor="edit-user-name">
-                  Name
+                  Full Name
                 </label>
 
                 <input
@@ -1354,9 +1385,7 @@ function AdminManagement() {
                   id="edit-user-confirm-password"
                   name="confirmPassword"
                   type="password"
-                  value={
-                    editFormData.confirmPassword
-                  }
+                  value={editFormData.confirmPassword}
                   onChange={handleEditChange}
                   placeholder="Re-enter new password"
                   minLength={8}
@@ -1457,8 +1486,8 @@ function AdminManagement() {
 
                   <span>
                     Camera capture will be enabled after
-                    the Face Profile backend integration
-                    is confirmed.
+                    the confirmed Face Profile API is
+                    available.
                   </span>
                 </div>
               </div>
