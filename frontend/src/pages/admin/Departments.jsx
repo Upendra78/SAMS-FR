@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 import "./Departments.css";
 
@@ -418,7 +420,7 @@ function Departments() {
                 onClick={handleCloseModal}
                 aria-label="Close add department dialog"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 

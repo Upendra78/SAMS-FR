@@ -749,6 +749,101 @@
 }
 
 /* =========================================
+   LOADING STATE
+========================================= */
+
+.admin-dashboard-loading {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  border: 1px solid #e0e7f0;
+  border-radius: 12px;
+  background: #fff;
+  text-align: center;
+  box-shadow: 0 2px 10px rgba(32, 51, 78, 0.025);
+}
+
+.admin-loading-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 12px;
+  border-radius: 11px;
+  background: #eaf2ff;
+  color: #2874e8;
+  font-size: 15px;
+}
+
+.admin-dashboard-loading h2 {
+  margin: 0;
+  color: #263852;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 17px;
+}
+
+.admin-dashboard-loading p {
+  max-width: 420px;
+  margin: 7px 0 0;
+  color: #8996aa;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* =========================================
+   ERROR STATE
+========================================= */
+
+.admin-dashboard-error {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  border: 1px solid #f0d6d6;
+  border-radius: 12px;
+  background: #fffafa;
+  text-align: center;
+}
+
+.admin-error-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 12px;
+  border-radius: 11px;
+  background: #fdeaea;
+  color: #d85b5b;
+  font-size: 15px;
+}
+
+.admin-dashboard-error h2 {
+  margin: 0;
+  color: #6d3030;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 17px;
+}
+
+.admin-dashboard-error p {
+  max-width: 500px;
+  margin: 7px 0 0;
+  color: #8a6262;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.admin-dashboard-error span {
+  margin-top: 8px;
+  color: #a07a7a;
+  font-size: 10px;
+}
+
+/* =========================================
    RESPONSIVE
 ========================================= */
 

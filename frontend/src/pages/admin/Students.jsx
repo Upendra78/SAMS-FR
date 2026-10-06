@@ -9,12 +9,17 @@ import {
   faSpinner,
   faUserGraduate,
   faUsers,
+  faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
-import { getUsers } from "../../services/adminService";
-
+import {
+  createAdminStudent,
+  getAdminFaceProfiles,
+  getAdminStudents,
+  getUsers,
+} from "../../services/adminService";
 import "./Student.css";
 
 function getInitials(name) {
@@ -34,6 +39,9 @@ function getInitials(name) {
 
 function Student() {
   const [students, setStudents] = useState([]);
+  const [faceProfiles, setFaceProfiles] = useState([]);
+  const [studentUsers, setStudentUsers] = useState([]);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -46,110 +54,266 @@ function Student() {
   const [selectedStudent, setSelectedStudent] =
     useState(null);
 
+  const [showCreateStudent, setShowCreateStudent] =
+    useState(false);
+
+  const [createStudentLoading, setCreateStudentLoading] =
+    useState(false);
+
+  const [createStudentError, setCreateStudentError] =
+    useState("");
+
+  const [createStudentForm, setCreateStudentForm] =
+    useState({
+      user_id: "",
+      enrollment_no: "",
+      semester: "",
+      section: "",
+      academic_year: "",
+      department_id: "",
+    });
+
+  const fetchStudentData = async () => {
+    setLoading(true);
+    setError("");
+
+    try {
+      const [
+        studentsResponse,
+        faceProfilesResponse,
+        usersResponse,
+      ] = await Promise.all([
+        getAdminStudents(),
+        getAdminFaceProfiles(),
+        getUsers(),
+      ]);
+
+      if (!studentsResponse?.success) {
+        throw new Error(
+          studentsResponse?.message ||
+            "Failed to load students.",
+        );
+      }
+
+      if (!faceProfilesResponse?.success) {
+        throw new Error(
+          faceProfilesResponse?.message ||
+            "Failed to load face profiles.",
+        );
+      }
+
+      if (!usersResponse?.success) {
+        throw new Error(
+          usersResponse?.message ||
+            "Failed to load users.",
+        );
+      }
+
+      const studentData = Array.isArray(
+        studentsResponse.data,
+      )
+        ? studentsResponse.data
+        : [];
+
+      const faceProfileData = Array.isArray(
+        faceProfilesResponse.data,
+      )
+        ? faceProfilesResponse.data
+        : [];
+
+      const usersData = Array.isArray(
+        usersResponse.data,
+      )
+        ? usersResponse.data
+        : [];
+
+      const existingStudentUserIds = new Set(
+        studentData
+          .map((student) => student?.user_id)
+          .filter(
+            (userId) =>
+              userId !== undefined &&
+              userId !== null,
+          )
+          .map((userId) => String(userId)),
+      );
+
+      const availableStudentUsers = usersData
+        .filter(
+          (user) =>
+            String(user?.role || "").toUpperCase() ===
+            "STUDENT",
+        )
+        .filter(
+          (user) =>
+            !existingStudentUserIds.has(
+              String(user?.user_id),
+            ),
+        );
+
+      setStudents(studentData);
+      setFaceProfiles(faceProfileData);
+      setStudentUsers(availableStudentUsers);
+    } catch (requestError) {
+      setStudents([]);
+      setFaceProfiles([]);
+      setStudentUsers([]);
+
+      setError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Failed to load student data.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     let mounted = true;
 
-    async function loadStudents() {
-      try {
-        const response = await getUsers();
-
-        if (!mounted) {
-          return;
-        }
-
-        const users = Array.isArray(response?.data)
-          ? response.data
-          : [];
-
-        const studentUsers = users
-          .filter(
-            (user) =>
-              String(user?.role || "").toUpperCase() ===
-              "STUDENT",
-          )
-          .map((user) => ({
-            studentId:
-              user?.user_id !== undefined &&
-              user?.user_id !== null
-                ? String(user.user_id)
-                : "N/A",
-            name: user?.name || "N/A",
-            email: user?.email || "N/A",
-            department: null,
-            program: null,
-            yearSemester: null,
-            status: null,
-          }));
-
-        setStudents(studentUsers);
-        setError("");
-      } catch (requestError) {
-        if (!mounted) {
-          return;
-        }
-
-        setStudents([]);
-
-        setError(
-          requestError?.response?.data?.message ||
-            "Failed to load students.",
-        );
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+    async function loadInitialData() {
+      if (!mounted) {
+        return;
       }
+
+      await fetchStudentData();
     }
 
-    loadStudents();
+    loadInitialData();
 
     return () => {
       mounted = false;
     };
   }, []);
 
+  const faceProfilesByStudentId = useMemo(() => {
+    const profileMap = new Map();
+
+    faceProfiles.forEach((profile) => {
+      if (
+        profile?.student_id !== undefined &&
+        profile?.student_id !== null
+      ) {
+        profileMap.set(
+          String(profile.student_id),
+          profile,
+        );
+      }
+    });
+
+    return profileMap;
+  }, [faceProfiles]);
+
+  function getFaceProfileStatus(studentId) {
+    const profile = faceProfilesByStudentId.get(
+      String(studentId),
+    );
+
+    return profile?.is_active === true
+      ? "Registered"
+      : "Not Registered";
+  }
+
   const metrics = useMemo(
     () => ({
       total: students.length,
       active: null,
       inactive: null,
-      departments: null,
+      departments: new Set(
+        students
+          .map(
+            (student) =>
+              student?.department_id,
+          )
+          .filter(
+            (departmentId) =>
+              departmentId !== undefined &&
+              departmentId !== null,
+          ),
+      ).size,
     }),
     [students],
   );
 
-  const departments = ["All"];
+  const departments = useMemo(() => {
+    const values = students
+      .map(
+        (student) =>
+          student?.department_name,
+      )
+      .filter(Boolean);
+
+    return ["All", ...new Set(values)];
+  }, [students]);
+
   const programs = ["All"];
-  const yearSemesters = ["All"];
+
+  const yearSemesters = useMemo(() => {
+    const values = students
+      .map((student) =>
+        student?.semester !== undefined &&
+        student?.semester !== null
+          ? String(student.semester)
+          : null,
+      )
+      .filter(Boolean);
+
+    return ["All", ...new Set(values)];
+  }, [students]);
+
   const statuses = ["All"];
 
   const filteredStudents = useMemo(() => {
-    const search = searchTerm.trim().toLowerCase();
+    const search = searchTerm
+      .trim()
+      .toLowerCase();
 
     return students.filter((student) => {
+      const studentId =
+        student?.student_id !== undefined &&
+        student?.student_id !== null
+          ? String(student.student_id)
+          : "";
+
+      const name = String(
+        student?.name || "",
+      );
+
+      const email = String(
+        student?.email || "",
+      );
+
+      const enrollmentNo = String(
+        student?.enrollment_no || "",
+      );
+
       const matchesSearch =
         !search ||
-        student.studentId
+        studentId
           .toLowerCase()
           .includes(search) ||
-        student.name.toLowerCase().includes(search) ||
-        student.email.toLowerCase().includes(search);
+        name.toLowerCase().includes(search) ||
+        email.toLowerCase().includes(search) ||
+        enrollmentNo
+          .toLowerCase()
+          .includes(search);
 
       const matchesDepartment =
         department === "All" ||
-        student.department === department;
+        student?.department_name ===
+          department;
 
       const matchesProgram =
-        program === "All" ||
-        student.program === program;
+        program === "All";
 
       const matchesYearSemester =
         yearSemester === "All" ||
-        student.yearSemester === yearSemester;
+        String(student?.semester) ===
+          yearSemester;
 
       const matchesStatus =
-        status === "All" ||
-        student.status === status;
+        status === "All";
 
       return (
         matchesSearch &&
@@ -183,6 +347,162 @@ function Student() {
     setStatus("All");
   }
 
+  function handleCreateStudentChange(event) {
+    const { name, value } = event.target;
+
+    setCreateStudentForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  function handleOpenCreateStudent() {
+    setCreateStudentError("");
+
+    setCreateStudentForm({
+      user_id: "",
+      enrollment_no: "",
+      semester: "",
+      section: "",
+      academic_year: "",
+      department_id: "",
+    });
+
+    setShowCreateStudent(true);
+  }
+
+  function handleCloseCreateStudent() {
+    if (createStudentLoading) {
+      return;
+    }
+
+    setShowCreateStudent(false);
+    setCreateStudentError("");
+  }
+
+  async function handleCreateStudent(event) {
+    event.preventDefault();
+
+    setCreateStudentError("");
+
+    const requiredFields = [
+      "user_id",
+      "enrollment_no",
+      "semester",
+      "section",
+      "academic_year",
+      "department_id",
+    ];
+
+    const hasMissingField = requiredFields.some(
+      (field) =>
+        String(createStudentForm[field]).trim() === "",
+    );
+
+    if (hasMissingField) {
+      setCreateStudentError(
+        "Please fill in all required fields.",
+      );
+      return;
+    }
+
+    const userId = Number(
+      createStudentForm.user_id,
+    );
+
+    const departmentId = Number(
+      createStudentForm.department_id,
+    );
+
+    const semester = Number(
+      createStudentForm.semester,
+    );
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      setCreateStudentError(
+        "Please select a valid Student User.",
+      );
+      return;
+    }
+
+    if (
+      !Number.isInteger(departmentId) ||
+      departmentId <= 0
+    ) {
+      setCreateStudentError(
+        "Department ID must be a valid positive number.",
+      );
+      return;
+    }
+
+    if (!Number.isInteger(semester) || semester <= 0) {
+      setCreateStudentError(
+        "Semester must be a valid positive number.",
+      );
+      return;
+    }
+
+    const selectedUser = studentUsers.find(
+      (user) =>
+        Number(user?.user_id) === userId,
+    );
+
+    if (!selectedUser) {
+      setCreateStudentError(
+        "Please select an available Student User.",
+      );
+      return;
+    }
+
+    const payload = {
+      user_id: userId,
+      enrollment_no:
+        createStudentForm.enrollment_no.trim(),
+      semester,
+      section:
+        createStudentForm.section.trim(),
+      academic_year:
+        createStudentForm.academic_year.trim(),
+      department_id: departmentId,
+    };
+
+    try {
+      setCreateStudentLoading(true);
+
+      const response = await createAdminStudent(
+        payload,
+      );
+
+      if (!response?.success) {
+        throw new Error(
+          response?.message ||
+            "Failed to create student profile.",
+        );
+      }
+
+      await fetchStudentData();
+
+      setShowCreateStudent(false);
+
+      setCreateStudentForm({
+        user_id: "",
+        enrollment_no: "",
+        semester: "",
+        section: "",
+        academic_year: "",
+        department_id: "",
+      });
+    } catch (requestError) {
+      setCreateStudentError(
+        requestError?.response?.data?.message ||
+          requestError?.message ||
+          "Failed to create student profile.",
+      );
+    } finally {
+      setCreateStudentLoading(false);
+    }
+  }
+
   function handleViewStudent(student) {
     setSelectedStudent(student);
   }
@@ -204,10 +524,19 @@ function Student() {
           <h1>Student Management</h1>
 
           <p>
-            View student accounts and available
-            academic information.
+            View and manage student academic
+            information.
           </p>
         </div>
+
+        <button
+          type="button"
+          className="student-primary-button"
+          onClick={handleOpenCreateStudent}
+        >
+          <FontAwesomeIcon icon={faUserGraduate} />
+          Add Student
+        </button>
       </header>
 
       {/* ---------- Summary ---------- */}
@@ -262,9 +591,13 @@ function Student() {
 
           <span>Departments</span>
 
-          <strong>N/A</strong>
+          <strong>
+            {loading ? "..." : metrics.departments}
+          </strong>
 
-          <small>API integration pending</small>
+          <small>
+            Based on student records
+          </small>
         </article>
       </div>
 
@@ -285,10 +618,12 @@ function Student() {
             <input
               id="student-search"
               type="search"
-              placeholder="Search by student ID, name or email..."
+              placeholder="Search by student ID, name, email or enrollment number..."
               value={searchTerm}
               onChange={(event) =>
-                setSearchTerm(event.target.value)
+                setSearchTerm(
+                  event.target.value,
+                )
               }
             />
           </div>
@@ -303,7 +638,9 @@ function Student() {
             id="student-department"
             value={department}
             onChange={(event) =>
-              setDepartment(event.target.value)
+              setDepartment(
+                event.target.value,
+              )
             }
           >
             {departments.map((item) => (
@@ -323,7 +660,9 @@ function Student() {
             id="student-program"
             value={program}
             onChange={(event) =>
-              setProgram(event.target.value)
+              setProgram(
+                event.target.value,
+              )
             }
           >
             {programs.map((item) => (
@@ -332,6 +671,10 @@ function Student() {
               </option>
             ))}
           </select>
+
+          <small>
+            API integration pending
+          </small>
         </div>
 
         <div className="student-filter-field">
@@ -343,12 +686,16 @@ function Student() {
             id="student-year"
             value={yearSemester}
             onChange={(event) =>
-              setYearSemester(event.target.value)
+              setYearSemester(
+                event.target.value,
+              )
             }
           >
             {yearSemesters.map((item) => (
               <option key={item} value={item}>
-                {item}
+                {item === "All"
+                  ? item
+                  : `Semester ${item}`}
               </option>
             ))}
           </select>
@@ -363,7 +710,9 @@ function Student() {
             id="student-status"
             value={status}
             onChange={(event) =>
-              setStatus(event.target.value)
+              setStatus(
+                event.target.value,
+              )
             }
           >
             {statuses.map((item) => (
@@ -372,6 +721,10 @@ function Student() {
               </option>
             ))}
           </select>
+
+          <small>
+            API integration pending
+          </small>
         </div>
 
         <button
@@ -404,8 +757,8 @@ function Student() {
               <h2>Loading students</h2>
 
               <p>
-                Fetching student accounts from
-                the confirmed admin users API.
+                Fetching student records from
+                the Admin Students API.
               </p>
             </div>
           ) : error ? (
@@ -416,7 +769,9 @@ function Student() {
                 />
               </div>
 
-              <h2>Unable to load students</h2>
+              <h2>
+                Unable to load students
+              </h2>
 
               <p>{error}</p>
             </div>
@@ -431,8 +786,8 @@ function Student() {
               <h2>No students available</h2>
 
               <p>
-                No student accounts were returned
-                by the current admin users API.
+                No student records were returned
+                by the Admin Students API.
               </p>
             </div>
           ) : (
@@ -442,10 +797,12 @@ function Student() {
                   <tr>
                     <th>Student</th>
                     <th>Email</th>
+                    <th>Enrollment No.</th>
                     <th>Department</th>
-                    <th>Program</th>
-                    <th>Year / Semester</th>
-                    <th>Status</th>
+                    <th>Semester</th>
+                    <th>Section</th>
+                    <th>Academic Year</th>
+                    <th>Face Profile</th>
                     <th>Action</th>
                   </tr>
                 </thead>
@@ -454,7 +811,9 @@ function Student() {
                   {filteredStudents.map(
                     (student) => (
                       <tr
-                        key={student.studentId}
+                        key={
+                          student.student_id
+                        }
                       >
                         <td>
                           <div className="student-identity">
@@ -466,48 +825,73 @@ function Student() {
 
                             <div>
                               <strong>
-                                {student.name}
+                                {student.name ||
+                                  "N/A"}
                               </strong>
 
                               <span>
                                 ID:{" "}
-                                {
-                                  student.studentId
-                                }
+                                {student.student_id ??
+                                  "N/A"}
                               </span>
                             </div>
                           </div>
                         </td>
 
                         <td>
-                          {student.email}
+                          {student.email || "N/A"}
                         </td>
 
                         <td>
-                          <span className="student-pending-text">
-                            API integration pending
-                          </span>
+                          {student.enrollment_no ||
+                            "N/A"}
                         </td>
 
                         <td>
-                          <span className="student-pending-text">
-                            API integration pending
-                          </span>
+                          <strong>
+                            {student.department_name ||
+                              "N/A"}
+                          </strong>
+
+                          {student.department_code && (
+                            <span className="student-table-subtext">
+                              {
+                                student.department_code
+                              }
+                            </span>
+                          )}
                         </td>
 
                         <td>
-                          <span className="student-pending-text">
-                            API integration pending
-                          </span>
+                          {student.semester !==
+                          undefined
+                            ? `Semester ${student.semester}`
+                            : "N/A"}
                         </td>
 
                         <td>
-                          <span className="student-pending-badge">
-                            <FontAwesomeIcon
-                              icon={faCircleInfo}
-                            />
+                          {student.section ||
+                            "N/A"}
+                        </td>
 
-                            API pending
+                        <td>
+                          {student.academic_year ||
+                            "N/A"}
+                        </td>
+
+                        <td>
+                          <span
+                            className={`student-face-status ${
+                              getFaceProfileStatus(
+                                student.student_id,
+                              ) === "Registered"
+                                ? "student-face-status-registered"
+                                : "student-face-status-not-registered"
+                            }`}
+                          >
+                            {getFaceProfileStatus(
+                              student.student_id,
+                            )}
                           </span>
                         </td>
 
@@ -564,39 +948,41 @@ function Student() {
           )}
         </div>
 
-        {!loading && !error && students.length > 0 && (
-          <div className="student-pagination">
-            <span>
-              Showing{" "}
-              {filteredStudents.length} of{" "}
-              {students.length} students
-            </span>
+        {!loading &&
+          !error &&
+          students.length > 0 && (
+            <div className="student-pagination">
+              <span>
+                Showing{" "}
+                {filteredStudents.length} of{" "}
+                {students.length} students
+              </span>
 
-            <div className="student-pagination-controls">
-              <button
-                type="button"
-                disabled
-              >
-                Previous
-              </button>
+              <div className="student-pagination-controls">
+                <button
+                  type="button"
+                  disabled
+                >
+                  Previous
+                </button>
 
-              <button
-                type="button"
-                className="student-page-number"
-                disabled
-              >
-                1
-              </button>
+                <button
+                  type="button"
+                  className="student-page-number"
+                  disabled
+                >
+                  1
+                </button>
 
-              <button
-                type="button"
-                disabled
-              >
-                Next
-              </button>
+                <button
+                  type="button"
+                  disabled
+                >
+                  Next
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
       </div>
 
       {/* ---------- Integration Notice ---------- */}
@@ -610,23 +996,306 @@ function Student() {
 
         <div>
           <strong>
-            Student account listing connected
+            Student records connected
           </strong>
 
           <span>
-            Name, email, role and user ID are
-            loaded from the confirmed admin
-            users API. Department, program,
-            year/semester, status, student
-            profile and face-profile mapping
-            require additional backend APIs.
+            Student records and available Student
+            User accounts are loaded from the
+            confirmed Admin APIs. Program, status
+            and department listing require
+            additional backend data.
           </span>
         </div>
 
         <span className="student-integration-badge">
-          Partially Integrated
+          Integrated
         </span>
       </div>
+
+      {/* ---------- Create Student Modal ---------- */}
+
+      {showCreateStudent && (
+        <div
+          className="student-modal-overlay"
+          role="presentation"
+          onClick={handleCloseCreateStudent}
+        >
+          <div
+            className="student-modal student-create-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="create-student-modal-title"
+            onClick={(event) =>
+              event.stopPropagation()
+            }
+          >
+            <div className="student-modal-header">
+              <div className="student-modal-profile">
+                <div className="student-modal-avatar">
+                  <FontAwesomeIcon
+                    icon={faUserGraduate}
+                  />
+                </div>
+
+                <div>
+                  <span>Admin Portal</span>
+
+                  <h2 id="create-student-modal-title">
+                    Add Student
+                  </h2>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="student-modal-close"
+                onClick={handleCloseCreateStudent}
+                disabled={createStudentLoading}
+                aria-label="Close create student form"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <div className="student-form-info">
+              <FontAwesomeIcon
+                icon={faCircleInfo}
+              />
+
+              <span>
+                Select an existing User account with
+                the STUDENT role. Creating the User
+                account is handled separately in Users
+                Management.
+              </span>
+            </div>
+
+            <form
+              className="student-create-form"
+              onSubmit={handleCreateStudent}
+            >
+              <div className="student-form-grid">
+                <div className="student-form-field">
+                  <label htmlFor="create-student-user">
+                    Student User *
+                  </label>
+
+                  <select
+                    id="create-student-user"
+                    name="user_id"
+                    value={
+                      createStudentForm.user_id
+                    }
+                    onChange={
+                      handleCreateStudentChange
+                    }
+                    disabled={
+                      createStudentLoading
+                    }
+                    required
+                  >
+                    <option value="">
+                      Select a Student User
+                    </option>
+
+                    {studentUsers.map((user) => (
+                      <option
+                        key={user.user_id}
+                        value={user.user_id}
+                      >
+                        {user.name} — {user.email}{" "}
+                        (User ID: {user.user_id})
+                      </option>
+                    ))}
+                  </select>
+
+                  {studentUsers.length === 0 && (
+                    <small>
+                      No available STUDENT users.
+                      Create a STUDENT account first
+                      in Users Management.
+                    </small>
+                  )}
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="create-student-enrollment">
+                    Enrollment Number *
+                  </label>
+
+                  <input
+                    id="create-student-enrollment"
+                    name="enrollment_no"
+                    type="text"
+                    value={
+                      createStudentForm.enrollment_no
+                    }
+                    onChange={
+                      handleCreateStudentChange
+                    }
+                    disabled={
+                      createStudentLoading
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="create-student-semester">
+                    Semester *
+                  </label>
+
+                  <input
+                    id="create-student-semester"
+                    name="semester"
+                    type="number"
+                    min="1"
+                    value={
+                      createStudentForm.semester
+                    }
+                    onChange={
+                      handleCreateStudentChange
+                    }
+                    disabled={
+                      createStudentLoading
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="create-student-section">
+                    Section *
+                  </label>
+
+                  <input
+                    id="create-student-section"
+                    name="section"
+                    type="text"
+                    value={
+                      createStudentForm.section
+                    }
+                    onChange={
+                      handleCreateStudentChange
+                    }
+                    disabled={
+                      createStudentLoading
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="create-student-academic-year">
+                    Academic Year *
+                  </label>
+
+                  <input
+                    id="create-student-academic-year"
+                    name="academic_year"
+                    type="text"
+                    placeholder="e.g. 2026-27"
+                    value={
+                      createStudentForm.academic_year
+                    }
+                    onChange={
+                      handleCreateStudentChange
+                    }
+                    disabled={
+                      createStudentLoading
+                    }
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="create-student-department">
+                    Department ID *
+                  </label>
+
+                  <input
+                    id="create-student-department"
+                    name="department_id"
+                    type="number"
+                    min="1"
+                    value={
+                      createStudentForm.department_id
+                    }
+                    onChange={
+                      handleCreateStudentChange
+                    }
+                    disabled={
+                      createStudentLoading
+                    }
+                    required
+                  />
+
+                  <small>
+                    Department listing API is not
+                    currently available. Enter the
+                    confirmed Department ID.
+                  </small>
+                </div>
+              </div>
+
+              {createStudentError && (
+                <div
+                  className="student-form-error"
+                  role="alert"
+                >
+                  <FontAwesomeIcon
+                    icon={faCircleExclamation}
+                  />
+
+                  <span>
+                    {createStudentError}
+                  </span>
+                </div>
+              )}
+
+              <div className="student-modal-footer">
+                <button
+                  type="button"
+                  className="student-secondary-button"
+                  onClick={
+                    handleCloseCreateStudent
+                  }
+                  disabled={
+                    createStudentLoading
+                  }
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="student-primary-button"
+                  disabled={
+                    createStudentLoading ||
+                    studentUsers.length === 0
+                  }
+                >
+                  <FontAwesomeIcon
+                    icon={
+                      createStudentLoading
+                        ? faSpinner
+                        : faUserGraduate
+                    }
+                    spin={
+                      createStudentLoading
+                    }
+                  />
+
+                  {createStudentLoading
+                    ? "Creating..."
+                    : "Create Student"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* ---------- Student Details Modal ---------- */}
 
@@ -670,7 +1339,7 @@ function Student() {
                 onClick={handleCloseStudent}
                 aria-label="Close student details"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
@@ -679,7 +1348,17 @@ function Student() {
                 <span>Student ID</span>
 
                 <strong>
-                  {selectedStudent.studentId}
+                  {selectedStudent.student_id ??
+                    "N/A"}
+                </strong>
+              </article>
+
+              <article className="student-detail-card">
+                <span>User ID</span>
+
+                <strong>
+                  {selectedStudent.user_id ??
+                    "N/A"}
                 </strong>
               </article>
 
@@ -687,7 +1366,8 @@ function Student() {
                 <span>Name</span>
 
                 <strong>
-                  {selectedStudent.name}
+                  {selectedStudent.name ||
+                    "N/A"}
                 </strong>
               </article>
 
@@ -695,14 +1375,75 @@ function Student() {
                 <span>Email</span>
 
                 <strong>
-                  {selectedStudent.email}
+                  {selectedStudent.email ||
+                    "N/A"}
                 </strong>
               </article>
 
               <article className="student-detail-card">
-                <span>Role</span>
+                <span>Enrollment Number</span>
 
-                <strong>STUDENT</strong>
+                <strong>
+                  {selectedStudent.enrollment_no ||
+                    "N/A"}
+                </strong>
+              </article>
+
+              <article className="student-detail-card">
+                <span>Department</span>
+
+                <strong>
+                  {selectedStudent.department_name ||
+                    "N/A"}
+                </strong>
+              </article>
+
+              <article className="student-detail-card">
+                <span>Department Code</span>
+
+                <strong>
+                  {selectedStudent.department_code ||
+                    "N/A"}
+                </strong>
+              </article>
+
+              <article className="student-detail-card">
+                <span>Semester</span>
+
+                <strong>
+                  {selectedStudent.semester !==
+                  undefined
+                    ? `Semester ${selectedStudent.semester}`
+                    : "N/A"}
+                </strong>
+              </article>
+
+              <article className="student-detail-card">
+                <span>Section</span>
+
+                <strong>
+                  {selectedStudent.section ||
+                    "N/A"}
+                </strong>
+              </article>
+
+              <article className="student-detail-card">
+                <span>Academic Year</span>
+
+                <strong>
+                  {selectedStudent.academic_year ||
+                    "N/A"}
+                </strong>
+              </article>
+
+              <article className="student-detail-card">
+                <span>Face Profile</span>
+
+                <strong>
+                  {getFaceProfileStatus(
+                    selectedStudent.student_id,
+                  )}
+                </strong>
               </article>
             </div>
 
@@ -719,17 +1460,11 @@ function Student() {
                 </strong>
 
                 <p>
-                  Department, program,
-                  year/semester, student status,
-                  attendance summary and face
-                  registration details are not
-                  available from the currently
-                  confirmed Admin Student API.
+                  Program, account status and
+                  attendance summary are not
+                  provided by the confirmed
+                  Admin Students API.
                 </p>
-
-                <span>
-                  API integration pending
-                </span>
               </div>
             </div>
 

@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 import "./AttendanceReports.css";
 
@@ -623,7 +625,7 @@ function AttendanceReports() {
                 }
                 aria-label="Close attendance details"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
@@ -728,7 +730,7 @@ function AttendanceReports() {
                 }
                 aria-label="Close export report dialog"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 

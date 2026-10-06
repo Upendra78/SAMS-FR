@@ -14,7 +14,6 @@ import {
   faRightFromBracket,
   faSchool,
   faUser,
-  faUserShield,
   faUsers,
 } from "@fortawesome/free-solid-svg-icons";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
@@ -28,11 +27,6 @@ const managementItems = [
     label: "Users",
     path: "/admin/management",
     icon: faUsers,
-  },
-  {
-    label: "Admins",
-    path: "/admin/management",
-    icon: faUserShield,
   },
   {
     label: "Faculty",
