@@ -1,32 +1,123 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+
+import { getAdminDashboard } from "../../services/adminService";
 
 import "./AdminDashboard.css";
 
 function AdminDashboard() {
-  /*
-   * Backend integration point.
-   *
-   * Do not add mock business data here.
-   * These values will be populated from approved backend APIs.
-   */
-  const dashboardData = {
-    students: null,
-    faculty: null,
-    departments: null,
-    attendance: null,
-    activeCourses: null,
-    courseOfferings: null,
-    attendanceRecords: null,
-    pendingApprovals: null,
-  };
+  const [dashboardData, setDashboardData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [errorMessage, setErrorMessage] = useState("");
 
-  const hasAttendanceData = dashboardData.attendance !== null;
-  const hasTrendData = false;
-  const hasRecentActivity = false;
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadDashboard() {
+      try {
+        const result = await getAdminDashboard();
+
+        if (!result?.success) {
+          throw new Error(
+            result?.message || "Failed to load admin dashboard."
+          );
+        }
+
+        if (!isMounted) {
+          return;
+        }
+
+        setDashboardData(result.data || null);
+        setErrorMessage("");
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setDashboardData(null);
+        setErrorMessage(
+          error?.response?.data?.message ||
+            error?.message ||
+            "Unable to load dashboard data."
+        );
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadDashboard();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const formatMetric = (value) => {
     return value === null || value === undefined ? "N/A" : value;
   };
+
+  const totalStudents = dashboardData?.total_students;
+  const totalFaculty = dashboardData?.total_faculty;
+  const totalCourses = dashboardData?.total_courses;
+
+  const attendanceSummary = dashboardData?.attendance_summary;
+
+  const totalAttendanceRecords = attendanceSummary?.total_records;
+  const presentAttendance = attendanceSummary?.present;
+  const absentAttendance = attendanceSummary?.absent;
+
+  const hasAttendanceData =
+    attendanceSummary &&
+    typeof totalAttendanceRecords === "number" &&
+    totalAttendanceRecords > 0;
+
+  const attendancePercentage = hasAttendanceData
+    ? Math.round(
+        (presentAttendance / totalAttendanceRecords) * 100
+      )
+    : null;
+
+  const hasTrendData = false;
+  const hasRecentActivity = false;
+
+  if (loading) {
+    return (
+      <section className="admin-dashboard">
+        <div className="admin-dashboard-loading">
+          <div className="admin-loading-icon">
+            <i className="fa-solid fa-spinner fa-spin" />
+          </div>
+
+          <h2>Loading dashboard</h2>
+
+          <p>
+            Fetching the latest administration statistics from the
+            backend.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  if (errorMessage) {
+    return (
+      <section className="admin-dashboard">
+        <div className="admin-dashboard-error">
+          <div className="admin-error-icon">
+            <i className="fa-solid fa-triangle-exclamation" />
+          </div>
+
+          <h2>Unable to load dashboard</h2>
+
+          <p>{errorMessage}</p>
+
+          <span>API integration is currently unavailable.</span>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="admin-dashboard">
@@ -40,13 +131,12 @@ function AdminDashboard() {
             <span className="admin-dashboard-eyebrow">
               Administration
             </span>
-
           </div>
 
           <h1>Welcome back, Admin!</h1>
 
           <p>
-            Monitor students, faculty, departments, and attendance from one
+            Monitor students, faculty, courses, and attendance from one
             centralized dashboard.
           </p>
         </div>
@@ -73,10 +163,13 @@ function AdminDashboard() {
 
           <strong
             className={`admin-stat-value ${
-              dashboardData.students === null ? "is-empty" : ""
+              totalStudents === null ||
+              totalStudents === undefined
+                ? "is-empty"
+                : ""
             }`}
           >
-            {formatMetric(dashboardData.students)}
+            {formatMetric(totalStudents)}
           </strong>
 
           <span className="admin-stat-description">
@@ -100,10 +193,13 @@ function AdminDashboard() {
 
           <strong
             className={`admin-stat-value ${
-              dashboardData.faculty === null ? "is-empty" : ""
+              totalFaculty === null ||
+              totalFaculty === undefined
+                ? "is-empty"
+                : ""
             }`}
           >
-            {formatMetric(dashboardData.faculty)}
+            {formatMetric(totalFaculty)}
           </strong>
 
           <span className="admin-stat-description">
@@ -112,29 +208,32 @@ function AdminDashboard() {
         </Link>
 
         <Link
-          to="/admin/departments"
+          to="/admin/academic-management"
           className="admin-stat-card admin-stat-green"
         >
           <div className="admin-stat-card-top">
             <div className="admin-stat-icon">
-              <i className="fa-solid fa-building-columns" />
+              <i className="fa-solid fa-book-open" />
             </div>
 
             <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
           </div>
 
-          <span className="admin-stat-label">Total Departments</span>
+          <span className="admin-stat-label">Total Courses</span>
 
           <strong
             className={`admin-stat-value ${
-              dashboardData.departments === null ? "is-empty" : ""
+              totalCourses === null ||
+              totalCourses === undefined
+                ? "is-empty"
+                : ""
             }`}
           >
-            {formatMetric(dashboardData.departments)}
+            {formatMetric(totalCourses)}
           </strong>
 
           <span className="admin-stat-description">
-            Active academic departments
+            Courses in the system
           </span>
         </Link>
 
@@ -154,16 +253,16 @@ function AdminDashboard() {
 
           <strong
             className={`admin-stat-value ${
-              dashboardData.attendance === null ? "is-empty" : ""
+              attendancePercentage === null ? "is-empty" : ""
             }`}
           >
-            {hasAttendanceData
-              ? `${dashboardData.attendance}%`
-              : "N/A"}
+            {attendancePercentage === null
+              ? "N/A"
+              : `${attendancePercentage}%`}
           </strong>
 
           <span className="admin-stat-description">
-            Current attendance rate
+            Based on verified attendance records
           </span>
         </Link>
       </div>
@@ -188,7 +287,7 @@ function AdminDashboard() {
                 <h2>Attendance Trend</h2>
 
                 <p>
-                  Attendance analytics from verified system records
+                  Attendance trend analytics require a dedicated trend API.
                 </p>
               </div>
             </div>
@@ -212,8 +311,8 @@ function AdminDashboard() {
                 <h3>No attendance trend data</h3>
 
                 <p>
-                  Attendance analytics will appear here when verified
-                  attendance records are available from the backend.
+                  API integration is pending for historical attendance
+                  trend data.
                 </p>
 
                 <Link
@@ -226,7 +325,7 @@ function AdminDashboard() {
               </div>
             ) : (
               <div>
-                {/* Backend attendance trend chart */}
+                {/* Attendance trend API integration */}
               </div>
             )}
           </div>
@@ -263,15 +362,25 @@ function AdminDashboard() {
               className={`admin-attendance-ring ${
                 !hasAttendanceData ? "is-empty" : ""
               }`}
+              style={
+                hasAttendanceData
+                  ? {
+                      background: `conic-gradient(
+                        #e98a19 0deg ${attendancePercentage * 3.6}deg,
+                        #e2e8f0 ${attendancePercentage * 3.6}deg 360deg
+                      )`,
+                    }
+                  : undefined
+              }
             >
               <div className="admin-attendance-ring-inner">
                 <strong>
-                  {hasAttendanceData
-                    ? `${dashboardData.attendance}%`
-                    : "N/A"}
+                  {attendancePercentage === null
+                    ? "N/A"
+                    : `${attendancePercentage}%`}
                 </strong>
 
-                {!hasAttendanceData && (
+                {attendancePercentage === null && (
                   <span>No data</span>
                 )}
               </div>
@@ -280,12 +389,13 @@ function AdminDashboard() {
             <h3>
               {hasAttendanceData
                 ? "Attendance available"
-                : "Attendance unavailable"}
+                : "No attendance records"}
             </h3>
 
             <p>
-              Attendance statistics will be displayed when the backend
-              provides verified attendance records.
+              {hasAttendanceData
+                ? `${presentAttendance} present and ${absentAttendance} absent attendance records.`
+                : "Verified attendance records are not available yet."}
             </p>
           </div>
 
@@ -343,20 +453,20 @@ function AdminDashboard() {
 
             <div>
               <strong>Faculty</strong>
-              <span>View registered faculty members</span>
+              <span>View and manage faculty members</span>
             </div>
 
             <i className="fa-solid fa-chevron-right" />
           </Link>
 
-          <Link to="/admin/departments" className="admin-quick-action">
+          <Link to="/admin/academic-management" className="admin-quick-action">
             <div className="admin-quick-action-icon admin-icon-green">
-              <i className="fa-solid fa-building-columns" />
+              <i className="fa-solid fa-book-open" />
             </div>
 
             <div>
-              <strong>Departments</strong>
-              <span>View academic departments</span>
+              <strong>Academic Management</strong>
+              <span>View courses and academic structure</span>
             </div>
 
             <i className="fa-solid fa-chevron-right" />
@@ -373,22 +483,6 @@ function AdminDashboard() {
             <div>
               <strong>Attendance Reports</strong>
               <span>Review attendance records</span>
-            </div>
-
-            <i className="fa-solid fa-chevron-right" />
-          </Link>
-
-          <Link
-            to="/admin/academic-management"
-            className="admin-quick-action"
-          >
-            <div className="admin-quick-action-icon admin-icon-cyan">
-              <i className="fa-solid fa-book-open" />
-            </div>
-
-            <div>
-              <strong>Academic Management</strong>
-              <span>View courses and academic structure</span>
             </div>
 
             <i className="fa-solid fa-chevron-right" />
@@ -416,18 +510,14 @@ function AdminDashboard() {
                 <h2>Recent Activity</h2>
 
                 <p>
-                  Recent administrative activity from the backend
+                  Activity history requires a dedicated backend API.
                 </p>
               </div>
             </div>
           </div>
 
           <div className="admin-recent-content">
-            {hasRecentActivity ? (
-              <div>
-                {/* Backend activity records */}
-              </div>
-            ) : (
+            {!hasRecentActivity && (
               <div className="admin-empty-state">
                 <div className="admin-empty-icon">
                   <i className="fa-solid fa-clock" />
@@ -436,8 +526,7 @@ function AdminDashboard() {
                 <h3>No recent activity</h3>
 
                 <p>
-                  Recent system activities will appear here when activity
-                  data becomes available from the backend.
+                  API integration is pending for recent system activity.
                 </p>
               </div>
             )}
@@ -465,35 +554,37 @@ function AdminDashboard() {
 
           <div className="admin-quick-stats-grid">
             <div className="admin-quick-stat admin-quick-stat-blue">
-              <span>Active Courses</span>
+              <span>Total Courses</span>
 
               <strong
                 className={
-                  dashboardData.activeCourses === null
+                  totalCourses === null ||
+                  totalCourses === undefined
                     ? "is-empty"
                     : ""
                 }
               >
-                {formatMetric(dashboardData.activeCourses)}
+                {formatMetric(totalCourses)}
               </strong>
 
-              <small>Academic data</small>
+              <small>Backend data</small>
             </div>
 
             <div className="admin-quick-stat admin-quick-stat-purple">
-              <span>Course Offerings</span>
+              <span>Total Students</span>
 
               <strong
                 className={
-                  dashboardData.courseOfferings === null
+                  totalStudents === null ||
+                  totalStudents === undefined
                     ? "is-empty"
                     : ""
                 }
               >
-                {formatMetric(dashboardData.courseOfferings)}
+                {formatMetric(totalStudents)}
               </strong>
 
-              <small>Academic data</small>
+              <small>Backend data</small>
             </div>
 
             <div className="admin-quick-stat admin-quick-stat-green">
@@ -501,37 +592,37 @@ function AdminDashboard() {
 
               <strong
                 className={
-                  dashboardData.attendanceRecords === null
+                  totalAttendanceRecords === null ||
+                  totalAttendanceRecords === undefined
                     ? "is-empty"
                     : ""
                 }
               >
-                {formatMetric(dashboardData.attendanceRecords)}
+                {formatMetric(totalAttendanceRecords)}
+              </strong>
+
+              <small>Verified records</small>
+            </div>
+
+            <div className="admin-quick-stat admin-quick-stat-neutral">
+              <span>Absent Records</span>
+
+              <strong
+                className={
+                  absentAttendance === null ||
+                  absentAttendance === undefined
+                    ? "is-empty"
+                    : ""
+                }
+              >
+                {formatMetric(absentAttendance)}
               </strong>
 
               <small>Attendance data</small>
             </div>
-
-            <div className="admin-quick-stat admin-quick-stat-neutral">
-              <span>Pending Approvals</span>
-
-              <strong
-                className={
-                  dashboardData.pendingApprovals === null
-                    ? "is-empty"
-                    : ""
-                }
-              >
-                {formatMetric(dashboardData.pendingApprovals)}
-              </strong>
-
-              <small>Backend information</small>
-            </div>
           </div>
         </section>
       </div>
-
-    
     </section>
   );
 }

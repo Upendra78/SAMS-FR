@@ -807,3 +807,25 @@
     width: 100%;
   }
 }
+.academic-enrollment-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.academic-enrollment-toolbar h2 {
+  margin: 0;
+}
+
+.academic-enrollment-toolbar p {
+  margin: 0.35rem 0 0;
+}
+
+@media (max-width: 768px) {
+  .academic-enrollment-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

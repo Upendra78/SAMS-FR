@@ -1,19 +1,19 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+
 import "./Students.css";
 
-const students = [];
+import {
+  getFacultyCourses,
+  getFacultyStudents,
+} from "../../services/facultyService";
 
 const EMPTY_METRICS = {
-  totalStudents: null,
   activeStudents: null,
-  classes: null,
   attendanceRate: null,
 };
-
-const classOptions = ["All Classes"];
-const departments = ["All"];
-const semesters = ["All"];
-const statuses = ["All", "Active", "Inactive"];
 
 const formatMetric = (value) => {
   if (value === null || value === undefined) {
@@ -36,61 +36,233 @@ const getInitials = (name = "") => {
     .join("");
 };
 
+const normalizeStudent = (student) => ({
+  studentId: String(student.student_id ?? ""),
+  userId: student.user_id ?? null,
+  fullName: student.name ?? "",
+  email: student.email ?? "",
+  enrollmentNo: student.enrollment_no ?? "",
+  semester:
+    student.semester !== null && student.semester !== undefined
+      ? String(student.semester)
+      : "",
+  section: student.section ?? "",
+  academicYear: student.academic_year ?? "",
+  departmentId: student.department?.department_id ?? null,
+  department:
+    student.department?.department_name ??
+    student.department?.department_code ??
+    "",
+  departmentCode: student.department?.department_code ?? "",
+});
+
 function Students() {
+  const [students, setStudents] = useState([]);
+  const [courseCount, setCourseCount] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+  const [coursesLoading, setCoursesLoading] = useState(true);
+
+  const [error, setError] = useState("");
+  const [coursesError, setCoursesError] = useState("");
+
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedClass, setSelectedClass] = useState("All Classes");
   const [department, setDepartment] = useState("All");
   const [semester, setSemester] = useState("All");
-  const [status, setStatus] = useState("All");
   const [selectedStudent, setSelectedStudent] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadStudents = async () => {
+      setLoading(true);
+      setError("");
+
+      try {
+        const result = await getFacultyStudents();
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!result?.success) {
+          throw new Error(
+            result?.message || "Unable to load students."
+          );
+        }
+
+        const studentData = Array.isArray(result.data)
+          ? result.data.map(normalizeStudent)
+          : [];
+
+        setStudents(studentData);
+      } catch (requestError) {
+        if (!isMounted) {
+          return;
+        }
+
+        setStudents([]);
+
+        setError(
+          requestError?.response?.data?.message ||
+            requestError?.message ||
+            "Unable to load students."
+        );
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadStudents();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadCourses = async () => {
+      setCoursesLoading(true);
+      setCoursesError("");
+
+      try {
+        const result = await getFacultyCourses();
+
+        if (!isMounted) {
+          return;
+        }
+
+        if (!result?.success) {
+          throw new Error(
+            result?.message || "Unable to load course offerings."
+          );
+        }
+
+        const courses = Array.isArray(result.data)
+          ? result.data
+          : [];
+
+        setCourseCount(courses.length);
+      } catch (requestError) {
+        if (!isMounted) {
+          return;
+        }
+
+        setCourseCount(null);
+
+        setCoursesError(
+          requestError?.response?.data?.message ||
+            requestError?.message ||
+            "Unable to load course offerings."
+        );
+      } finally {
+        if (isMounted) {
+          setCoursesLoading(false);
+        }
+      }
+    };
+
+    loadCourses();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const departmentOptions = useMemo(() => {
+    const values = students
+      .map((student) => student.department)
+      .filter(Boolean);
+
+    return [
+      "All",
+      ...Array.from(new Set(values)).sort(),
+    ];
+  }, [students]);
+
+  const semesterOptions = useMemo(() => {
+    const values = students
+      .map((student) => student.semester)
+      .filter(Boolean);
+
+    return [
+      "All",
+      ...Array.from(new Set(values)).sort(),
+    ];
+  }, [students]);
+
+  const classOptions = useMemo(() => {
+    const values = students
+      .map((student) => student.section)
+      .filter(Boolean);
+
+    return [
+      "All Classes",
+      ...Array.from(new Set(values)).sort(),
+    ];
+  }, [students]);
 
   const filteredStudents = useMemo(() => {
     const normalizedSearch = searchTerm.trim().toLowerCase();
 
     return students.filter((student) => {
+      const searchableValues = [
+        student.studentId,
+        student.enrollmentNo,
+        student.fullName,
+        student.email,
+      ].map((value) => value.toLowerCase());
+
       const matchesSearch =
         !normalizedSearch ||
-        student.studentId?.toLowerCase().includes(normalizedSearch) ||
-        student.fullName?.toLowerCase().includes(normalizedSearch) ||
-        student.email?.toLowerCase().includes(normalizedSearch);
+        searchableValues.some((value) =>
+          value.includes(normalizedSearch)
+        );
 
       const matchesClass =
         selectedClass === "All Classes" ||
-        student.className === selectedClass;
+        student.section === selectedClass;
 
       const matchesDepartment =
-        department === "All" || student.department === department;
+        department === "All" ||
+        student.department === department;
 
       const matchesSemester =
-        semester === "All" || student.semester === semester;
-
-      const matchesStatus =
-        status === "All" || student.status === status;
+        semester === "All" ||
+        student.semester === semester;
 
       return (
         matchesSearch &&
         matchesClass &&
         matchesDepartment &&
-        matchesSemester &&
-        matchesStatus
+        matchesSemester
       );
     });
-  }, [searchTerm, selectedClass, department, semester, status]);
+  }, [
+    students,
+    searchTerm,
+    selectedClass,
+    department,
+    semester,
+  ]);
 
   const clearFilters = () => {
     setSearchTerm("");
     setSelectedClass("All Classes");
     setDepartment("All");
     setSemester("All");
-    setStatus("All");
   };
 
   const hasFilters =
-    searchTerm ||
+    Boolean(searchTerm) ||
     selectedClass !== "All Classes" ||
     department !== "All" ||
-    semester !== "All" ||
-    status !== "All";
+    semester !== "All";
 
   const handleViewStudent = (student) => {
     setSelectedStudent(student);
@@ -103,7 +275,9 @@ function Students() {
   const metrics = [
     {
       label: "Total Students",
-      value: formatMetric(EMPTY_METRICS.totalStudents),
+      value: formatMetric(
+        loading ? null : students.length
+      ),
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -113,6 +287,7 @@ function Students() {
             strokeWidth="1.8"
             strokeLinecap="round"
           />
+
           <circle
             cx="9"
             cy="7"
@@ -121,6 +296,7 @@ function Students() {
             stroke="currentColor"
             strokeWidth="1.8"
           />
+
           <path
             d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
             fill="none"
@@ -134,7 +310,9 @@ function Students() {
     },
     {
       label: "Active Students",
-      value: formatMetric(EMPTY_METRICS.activeStudents),
+      value: formatMetric(
+        EMPTY_METRICS.activeStudents
+      ),
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <circle
@@ -145,6 +323,7 @@ function Students() {
             stroke="currentColor"
             strokeWidth="1.8"
           />
+
           <path
             d="m8 12 2.5 2.5L16 9"
             fill="none"
@@ -158,8 +337,10 @@ function Students() {
       tone: "green",
     },
     {
-      label: "Classes",
-      value: formatMetric(EMPTY_METRICS.classes),
+      label: "Course Offerings",
+      value: formatMetric(
+        coursesLoading ? null : courseCount
+      ),
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect
@@ -172,6 +353,7 @@ function Students() {
             stroke="currentColor"
             strokeWidth="1.8"
           />
+
           <path
             d="M8 4v4M16 4v4M3 10h18"
             fill="none"
@@ -185,7 +367,9 @@ function Students() {
     },
     {
       label: "Attendance Rate",
-      value: formatMetric(EMPTY_METRICS.attendanceRate),
+      value: formatMetric(
+        EMPTY_METRICS.attendanceRate
+      ),
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -195,6 +379,7 @@ function Students() {
             strokeWidth="1.8"
             strokeLinecap="round"
           />
+
           <path
             d="m7 15 4-4 3 2 5-6"
             fill="none"
@@ -213,15 +398,24 @@ function Students() {
     <div className="faculty-students-page">
       <section className="students-page-header">
         <div>
-          <span className="students-eyebrow">FACULTY PORTAL</span>
+          <span className="students-eyebrow">
+            FACULTY PORTAL
+          </span>
+
           <h1>Students</h1>
+
           <p>
-            View students enrolled in your assigned classes and monitor their
-            academic and attendance information.
+            View students enrolled in your assigned classes
+            and monitor their academic information.
           </p>
         </div>
 
-        <button type="button" className="students-primary-button" disabled>
+        <button
+          type="button"
+          className="students-primary-button"
+          disabled
+          title="Attendance view is not connected to a student-specific attendance API yet"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
               d="M4 5h16v14H4z"
@@ -230,6 +424,7 @@ function Students() {
               strokeWidth="1.8"
               strokeLinejoin="round"
             />
+
             <path
               d="M8 9h8M8 13h5"
               fill="none"
@@ -238,14 +433,20 @@ function Students() {
               strokeLinecap="round"
             />
           </svg>
+
           View Attendance
         </button>
       </section>
 
       <section className="students-metrics-grid">
         {metrics.map((metric) => (
-          <article className="students-metric-card" key={metric.label}>
-            <div className={`students-metric-icon ${metric.tone}`}>
+          <article
+            className="students-metric-card"
+            key={metric.label}
+          >
+            <div
+              className={`students-metric-icon ${metric.tone}`}
+            >
               {metric.icon}
             </div>
 
@@ -259,7 +460,10 @@ function Students() {
 
       <section className="students-filters-card">
         <div className="students-filter search-filter">
-          <label htmlFor="student-search">Search Students</label>
+          <label htmlFor="student-search">
+            Search Students
+          </label>
+
           <div className="students-search-wrapper">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle
@@ -270,6 +474,7 @@ function Students() {
                 stroke="currentColor"
                 strokeWidth="1.8"
               />
+
               <path
                 d="m20 20-4-4"
                 fill="none"
@@ -283,18 +488,25 @@ function Students() {
               id="student-search"
               type="search"
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Search by student ID, name or email..."
+              onChange={(event) =>
+                setSearchTerm(event.target.value)
+              }
+              placeholder="Search by ID, enrollment no., name or email..."
             />
           </div>
         </div>
 
         <div className="students-filter">
-          <label htmlFor="student-class">Class</label>
+          <label htmlFor="student-class">
+            Section
+          </label>
+
           <select
             id="student-class"
             value={selectedClass}
-            onChange={(event) => setSelectedClass(event.target.value)}
+            onChange={(event) =>
+              setSelectedClass(event.target.value)
+            }
           >
             {classOptions.map((option) => (
               <option key={option} value={option}>
@@ -305,13 +517,18 @@ function Students() {
         </div>
 
         <div className="students-filter">
-          <label htmlFor="student-department">Department</label>
+          <label htmlFor="student-department">
+            Department
+          </label>
+
           <select
             id="student-department"
             value={department}
-            onChange={(event) => setDepartment(event.target.value)}
+            onChange={(event) =>
+              setDepartment(event.target.value)
+            }
           >
-            {departments.map((option) => (
+            {departmentOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
@@ -320,28 +537,18 @@ function Students() {
         </div>
 
         <div className="students-filter">
-          <label htmlFor="student-semester">Semester</label>
+          <label htmlFor="student-semester">
+            Semester
+          </label>
+
           <select
             id="student-semester"
             value={semester}
-            onChange={(event) => setSemester(event.target.value)}
+            onChange={(event) =>
+              setSemester(event.target.value)
+            }
           >
-            {semesters.map((option) => (
-              <option key={option} value={option}>
-                {option}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="students-filter">
-          <label htmlFor="student-status">Status</label>
-          <select
-            id="student-status"
-            value={status}
-            onChange={(event) => setStatus(event.target.value)}
-          >
-            {statuses.map((option) => (
+            {semesterOptions.map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
@@ -355,7 +562,7 @@ function Students() {
           onClick={clearFilters}
           disabled={!hasFilters}
         >
-          <span>↻</span>
+          <span aria-hidden="true">↻</span>
           Clear Filters
         </button>
       </section>
@@ -364,12 +571,72 @@ function Students() {
         <div className="students-section-heading">
           <div>
             <h2>Students</h2>
-            <p>Students enrolled in your assigned classes.</p>
+
+            <p>
+              Students enrolled in your assigned classes.
+            </p>
           </div>
         </div>
 
         <div className="students-table-card">
-          {students.length === 0 ? (
+          {loading ? (
+            <div className="students-empty-state">
+              <div className="students-empty-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  />
+
+                  <path
+                    d="M12 7v5l3 2"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+
+              <h3>Loading students...</h3>
+
+              <p>
+                Student information is being loaded from the
+                faculty backend.
+              </p>
+            </div>
+          ) : error ? (
+            <div className="students-empty-state">
+              <div className="students-empty-icon">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="9"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                  />
+
+                  <path
+                    d="M12 7v6M12 16v1"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                  />
+                </svg>
+              </div>
+
+              <h3>Unable to load students</h3>
+
+              <p>{error}</p>
+            </div>
+          ) : students.length === 0 ? (
             <div className="students-empty-state">
               <div className="students-empty-icon">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -380,6 +647,7 @@ function Students() {
                     strokeWidth="1.8"
                     strokeLinecap="round"
                   />
+
                   <circle
                     cx="9"
                     cy="7"
@@ -388,6 +656,7 @@ function Students() {
                     stroke="currentColor"
                     strokeWidth="1.8"
                   />
+
                   <path
                     d="M17 8h5M19.5 5.5v5"
                     fill="none"
@@ -399,9 +668,10 @@ function Students() {
               </div>
 
               <h3>No students available</h3>
+
               <p>
-                Students enrolled in your assigned classes will appear here
-                when enrollment data is provided by the backend.
+                No students are currently enrolled in your
+                assigned course offerings.
               </p>
             </div>
           ) : filteredStudents.length === 0 ? (
@@ -416,6 +686,7 @@ function Students() {
                     stroke="currentColor"
                     strokeWidth="1.8"
                   />
+
                   <path
                     d="m20 20-4-4"
                     fill="none"
@@ -427,7 +698,10 @@ function Students() {
               </div>
 
               <h3>No matching students</h3>
-              <p>Try changing your search or filters.</p>
+
+              <p>
+                Try changing your search or filters.
+              </p>
             </div>
           ) : (
             <div className="students-table-wrapper">
@@ -435,11 +709,11 @@ function Students() {
                 <thead>
                   <tr>
                     <th>Student</th>
-                    <th>Student ID</th>
-                    <th>Class</th>
+                    <th>Enrollment No.</th>
+                    <th>Section</th>
                     <th>Department</th>
-                    <th>Attendance</th>
-                    <th>Status</th>
+                    <th>Semester</th>
+                    <th>Academic Year</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -454,32 +728,44 @@ function Students() {
                           </div>
 
                           <div>
-                            <strong>{student.fullName}</strong>
-                            <span>{student.email}</span>
+                            <strong>
+                              {student.fullName || "N/A"}
+                            </strong>
+
+                            <span>
+                              {student.email || "N/A"}
+                            </span>
                           </div>
                         </div>
                       </td>
 
-                      <td>{student.studentId}</td>
-                      <td>{student.className || "N/A"}</td>
-                      <td>{student.department || "N/A"}</td>
-                      <td>{student.attendanceRate || "N/A"}</td>
+                      <td>
+                        {student.enrollmentNo || "N/A"}
+                      </td>
 
                       <td>
-                        <span
-                          className={`student-status ${
-                            student.status?.toLowerCase() || "unknown"
-                          }`}
-                        >
-                          {student.status || "N/A"}
-                        </span>
+                        {student.section || "N/A"}
+                      </td>
+
+                      <td>
+                        {student.department || "N/A"}
+                      </td>
+
+                      <td>
+                        {student.semester || "N/A"}
+                      </td>
+
+                      <td>
+                        {student.academicYear || "N/A"}
                       </td>
 
                       <td>
                         <button
                           type="button"
                           className="student-view-button"
-                          onClick={() => handleViewStudent(student)}
+                          onClick={() =>
+                            handleViewStudent(student)
+                          }
                         >
                           View
                         </button>
@@ -494,16 +780,23 @@ function Students() {
 
         <div className="students-list-footer">
           <span>
-            Showing {filteredStudents.length} of {students.length} students
+            Showing {filteredStudents.length} of{" "}
+            {students.length} students
           </span>
 
           <div className="students-pagination">
             <button type="button" disabled>
               ‹ Previous
             </button>
-            <button type="button" className="active" disabled>
+
+            <button
+              type="button"
+              className="active"
+              disabled
+            >
               1
             </button>
+
             <button type="button" disabled>
               Next ›
             </button>
@@ -525,27 +818,62 @@ function Students() {
         </div>
 
         <div>
-          <strong>Student data integration pending</strong>
+          <strong>Student data connected</strong>
+
           <p>
-            Student enrollment, attendance and profile information will be
-            loaded from the Flask backend once the API is available.
+            Student enrollment information is loaded from the
+            Flask faculty student API. Attendance-specific
+            statistics are not available from this endpoint yet.
           </p>
         </div>
       </div>
 
+      {coursesError && (
+        <div className="students-integration-notice">
+          <div className="students-notice-icon">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path
+                d="M12 3v18M3 12h18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
+          </div>
+
+          <div>
+            <strong>Course data unavailable</strong>
+
+            <p>{coursesError}</p>
+          </div>
+        </div>
+      )}
+
       {selectedStudent && (
         <div
           className="students-modal-backdrop"
+          role="presentation"
           onMouseDown={closeStudentModal}
         >
           <div
             className="students-modal"
-            onMouseDown={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="faculty-student-profile-title"
+            onMouseDown={(event) =>
+              event.stopPropagation()
+            }
           >
             <div className="students-modal-header">
               <div>
-                <span className="students-eyebrow">STUDENT PROFILE</span>
-                <h2>Student Overview</h2>
+                <span className="students-eyebrow">
+                  STUDENT PROFILE
+                </span>
+
+                <h2 id="faculty-student-profile-title">
+                  Student Overview
+                </h2>
               </div>
 
               <button
@@ -554,7 +882,7 @@ function Students() {
                 onClick={closeStudentModal}
                 aria-label="Close student profile"
               >
-                ×
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
@@ -564,43 +892,91 @@ function Students() {
               </div>
 
               <div>
-                <h3>{selectedStudent.fullName}</h3>
-                <p>{selectedStudent.studentId}</p>
-                <span>{selectedStudent.email}</span>
+                <h3>
+                  {selectedStudent.fullName || "N/A"}
+                </h3>
+
+                <p>
+                  Student ID:{" "}
+                  {selectedStudent.studentId || "N/A"}
+                </p>
+
+                <span>
+                  {selectedStudent.email || "N/A"}
+                </span>
               </div>
             </div>
 
             <div className="student-profile-grid">
               <div>
-                <span>Department</span>
-                <strong>{selectedStudent.department || "N/A"}</strong>
+                <span>Enrollment No.</span>
+
+                <strong>
+                  {selectedStudent.enrollmentNo || "N/A"}
+                </strong>
               </div>
 
               <div>
-                <span>Program</span>
-                <strong>{selectedStudent.program || "N/A"}</strong>
+                <span>Department</span>
+
+                <strong>
+                  {selectedStudent.department || "N/A"}
+                </strong>
+              </div>
+
+              <div>
+                <span>Department Code</span>
+
+                <strong>
+                  {selectedStudent.departmentCode || "N/A"}
+                </strong>
               </div>
 
               <div>
                 <span>Semester</span>
-                <strong>{selectedStudent.semester || "N/A"}</strong>
+
+                <strong>
+                  {selectedStudent.semester || "N/A"}
+                </strong>
               </div>
 
               <div>
-                <span>Status</span>
-                <strong>{selectedStudent.status || "N/A"}</strong>
+                <span>Section</span>
+
+                <strong>
+                  {selectedStudent.section || "N/A"}
+                </strong>
+              </div>
+
+              <div>
+                <span>Academic Year</span>
+
+                <strong>
+                  {selectedStudent.academicYear || "N/A"}
+                </strong>
               </div>
             </div>
 
             <div className="student-profile-section">
-              <h3>Enrolled Classes</h3>
+              <h3>Enrollment Information</h3>
+
               <div className="student-profile-empty">
-                Enrollment details will appear when backend data is available.
+                <strong>
+                  Course-specific enrollment details
+                </strong>
+
+                <p>
+                  This student is included in the faculty
+                  student list. The current student API does
+                  not return individual course enrollment
+                  details.
+                </p>
               </div>
             </div>
 
             <div className="student-profile-section">
               <h3>Attendance Summary</h3>
+
               <div className="student-attendance-summary">
                 <div>
                   <span>Overall Attendance</span>
@@ -621,6 +997,11 @@ function Students() {
                   <span>Late</span>
                   <strong>N/A</strong>
                 </div>
+              </div>
+
+              <div className="student-profile-empty">
+                Attendance summary is not returned by the
+                current faculty student API.
               </div>
             </div>
 
