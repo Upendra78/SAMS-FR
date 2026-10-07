@@ -1,26 +1,14 @@
+from sqlalchemy.exc import IntegrityError
+
 from app.extensions import db
-from app.models import (
-    AttendanceRecord,
-    AttendanceSession,
-    Enrollment,
-)
+from app.models import AttendanceRecord, AttendanceSession, Enrollment
 
 
 def get_active_session(faculty_id):
-    """
-    Return the most recent active attendance session
-    belonging to the faculty member.
-    """
-
     return (
         AttendanceSession.query
-        .filter_by(
-            faculty_id=faculty_id,
-            status="ACTIVE",
-        )
-        .order_by(
-            AttendanceSession.session_id.desc()
-        )
+        .filter_by(faculty_id=faculty_id, status="ACTIVE")
+        .order_by(AttendanceSession.session_id.desc())
         .first()
     )
 
@@ -29,25 +17,15 @@ def mark_face_attendance(
     session_id,
     student_id,
     confidence_score,
+    faculty_id=None,
 ):
-    """
-    Mark attendance for a face-recognized student.
-
-    Validates:
-    - Attendance session exists
-    - Session is active
-    - Student is enrolled in the offering
-    - Confidence score is valid
-    - Duplicate attendance is prevented
-    """
-
-    session = db.session.get(
-        AttendanceSession,
-        session_id,
-    )
+    session = db.session.get(AttendanceSession, session_id)
 
     if not session:
         return None, "Attendance session not found"
+
+    if faculty_id is not None and session.faculty_id != faculty_id:
+        return None, "Attendance session does not belong to this faculty"
 
     if session.status != "ACTIVE":
         return None, "Attendance session is not active"
@@ -86,6 +64,20 @@ def mark_face_attendance(
     )
 
     db.session.add(record)
-    db.session.commit()
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+
+        existing_record = AttendanceRecord.query.filter_by(
+            session_id=session_id,
+            student_id=student_id,
+        ).first()
+
+        if existing_record:
+            return existing_record, "Attendance already marked"
+
+        return None, "Unable to mark attendance"
 
     return record, "Attendance marked successfully"
