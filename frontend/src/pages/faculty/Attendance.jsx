@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -33,6 +34,7 @@ import {
   getFacultyCourses,
   getFacultyStudents,
   markFacultyAttendance,
+  recognizeFacultyAttendance,
   startFacultyAttendanceSession,
 } from "../../services/facultyService";
 
@@ -144,14 +146,70 @@ function Attendance() {
   const [showStartModal, setShowStartModal] = useState(false);
   const [selectedOfferingId, setSelectedOfferingId] =
     useState("");
-  const [startingSession, setStartingSession] = useState(false);
   const [closingSession, setClosingSession] = useState(false);
+  const [startingSession, setStartingSession] = useState(false);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const cameraStreamRef = useRef(null);
+  const [showFaceAttendance, setShowFaceAttendance] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
+  const [recognizingFace, setRecognizingFace] = useState(false);
+  const [faceAttendanceError, setFaceAttendanceError] = useState("");
 
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedClass, setSelectedClass] =
     useState("All Classes");
   const [date, setDate] = useState("");
   const [status, setStatus] = useState("All");
+  useEffect(() => {
+    return() => {
+      if(cameraStreamRef.current){
+        cameraStreamRef.current.getTracks().forEach((track) => {
+          track.stop();
+        });
+        cameraStreamRef.current = null;
+      }
+    };
+  },[]);
+  useEffect(() => {
+    if(!showFaceAttendance || !cameraStreamRef.current){
+      return;
+    }
+    const video = videoRef.current;
+    if(!video){
+      return;
+    }
+    video.srcObject = cameraStreamRef.current;
+    const handlevideoReady = async() => {
+      try {
+        await video.play();
+        setCameraReady(true);
+      } catch(error){
+        console.error(
+          "Unable to start camera preview:",
+          error
+        );
+        setFaceAttendanceError(
+          "Unable to start the camera preview."
+        );
+      }
+    };
+    if (video.readyState >=2){
+      handlevideoReady();
+    } else {
+      video.addEventListener(
+        "loadeddata",
+        handlevideoReady,
+        {once: true}
+      );
+    }
+    return() => {
+      video.removeEventListener(
+        "loadeddata",
+        handlevideoReady
+      );
+    };
+  },[showFaceAttendance]);
 
   /*
    * Load attendance sessions and active session.
@@ -601,7 +659,147 @@ function Attendance() {
       setMarkingStudentId(null);
     }
   };
+  /*
+  * Start camera-based face attendance.
+  */
+ const handleStartFaceAttendance = async() => {
+  if (!selectedSession?.session_id){
+    setFaceAttendanceError("Select an attendance session first.");
+    return;
+  }
+  if (selectedSession.status !== "ACTIVE"){
+    setFaceAttendanceError(
+      "Face attendance can only be used for an active session."
+    );
+    return;
+  }
+  setFaceAttendanceError("");
+  setCameraReady(false);
+  try{
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video:{
+        facingMode: "user",
+      },
+      audio: false,
+    });
+    cameraStreamRef.current = stream;
+    setShowFaceAttendance(true);
+  }catch(error){
+    console.error("Unable to access camera:", error);
+    setFaceAttendanceError(
+      "Unable to access the camera. Please allow camera permission and try again."
+    );
+  }
+ };
 
+ const handleCloseFaceAttendance = () => {
+  if (cameraStreamRef.current){
+    cameraStreamRef.current.getTracks().forEach((track) => {
+      track.stop();
+    });
+    cameraStreamRef.current = null;
+  }
+  if (videoRef.current){
+    videoRef.current.srcObject =null;
+  }
+  setCameraReady(false);
+  setRecognizingFace(false);
+  setFaceAttendanceError("");
+  setShowFaceAttendance(false);
+ };
+
+ /*
+ * Capture the current camera frame and sent it to the face_recognition attendance endpoint.
+ */
+  const handleRecognizeFace = async () =>{
+    if(!selectedSession?.session_id){
+      setFaceAttendanceError("Select an attendance session first.");
+      return;
+    }
+    if(!cameraReady || !videoRef.current || !canvasRef.current){
+      setFaceAttendanceError(
+        "Camera is not ready. Please wait and try again."
+      );
+      return;
+    }
+    setRecognizingFace(true);
+    setFaceAttendanceError("");
+
+    try{
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      const context = canvas.getContext("2d");
+      if (!context){
+        throw new Error(
+          "Unable to capture the camera frame."
+        );
+      }
+      context.drawImage(
+        video,
+        0,
+        0,
+        canvas.width,
+        canvas.height
+      );
+      const imageBlob = await new Promise((resolve, reject) =>{
+        canvas.toBlob(
+          (blob) => {
+            if(blob){
+              resolve(blob);
+            } else{
+              reject(
+                new Error(
+                  "Unable to create an image from the camera frame."
+                )
+              );
+            }
+          },
+          "image/jpeg",
+          0.9
+        );
+      });
+      const result = await recognizeFacultyAttendance(
+        selectedSession.session_id,
+        imageBlob
+      );
+      if (!result?.success){
+        throw new Error(
+          result?.message ||
+          "Face recognition did not identify a student."
+        );
+      }
+      const returnedRecord = result.data;
+      setAttendanceRecords(currentRecords => {
+        const existingIndex = currentRecords.findIndex(
+          (record) =>
+            String(record.student_id) ===
+          String(returnedRecord.student_id)
+        );
+        if (existingIndex === -1){
+          return[...currentRecords, returnedRecord];
+        }
+        return currentRecords.map(
+          (record, index) =>
+            index === existingIndex
+          ? returnedRecord
+          : record
+        );
+      });
+      handleCloseFaceAttendance();
+    } catch (requestError){
+      setFaceAttendanceError(
+        requestError?.response?.data?.message ||
+        requestError?.message ||
+        "Face recognition failed. Please try again."
+      );
+    } finally {
+      setRecognizingFace(false);
+    }
+  };
   /*
    * Start attendance session.
    */
@@ -882,6 +1080,7 @@ function Attendance() {
                 ? "active"
                 : "pending"
             }`}
+
           >
             {activeSession
               ? "Active Session"
@@ -937,6 +1136,15 @@ function Attendance() {
                   Close Attendance
                 </>
               )}
+            </button>
+            <button
+            type = "button"
+            className = "attendance-primary-button"
+            onClick = {handleStartFaceAttendance}
+            disabled = {closingSession}
+            >
+              <FontAwesomeIcon icon = {faUserCheck} />
+              Face Attendance
             </button>
           </div>
         ) : (
@@ -1536,7 +1744,130 @@ function Attendance() {
           </p>
         </div>
       </section>
+     {showFaceAttendance && (
+      <div
+        className="attendance-modal-backdrop"
+        role="presentation"
+        onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          handleCloseFaceAttendance();
+        }
+      }}
+      >
+      <div
+        className="attendance-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="face-attendance-title"
+      >
+        <div className="attendance-modal-header">
+          <div>
+            <h2 id="face-attendance-title">
+              Face Attendance
+            </h2>
 
+            <p>
+              Position one student in front of the camera
+              and capture their face.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className="attendance-modal-close"
+            onClick={handleCloseFaceAttendance}
+            disabled={recognizingFace}
+            aria-label="Close"
+          >
+            <FontAwesomeIcon icon={faXmark} />
+          </button>
+        </div>
+
+        <div className="attendance-modal-body">
+          <div className="attendance-camera-container">
+            <video
+              ref={videoRef}
+              autoPlay
+              playsInline
+              muted
+              className="attendance-camera-video"
+            />
+
+            <canvas
+              ref={canvasRef}
+              className="attendance-camera-canvas"
+              aria-hidden="true"
+            />
+          </div>
+
+          {faceAttendanceError && (
+            <div className="attendance-session-pending">
+              <div className="attendance-pending-dot">
+                <FontAwesomeIcon
+                  icon={faCircleExclamation}
+                />
+              </div>
+
+              <div>
+                <strong>
+                  Face recognition unavailable
+                </strong>
+
+                <p>{faceAttendanceError}</p>
+              </div>
+            </div>
+        )}
+
+        {!cameraReady && !faceAttendanceError && (
+          <p className="attendance-integration-notice">
+            Starting camera...
+          </p>
+        )}
+
+        {cameraReady && !faceAttendanceError && (
+          <p className="attendance-integration-notice">
+            Camera ready. Make sure exactly one student
+            is visible before capturing.
+          </p>
+        )}
+      </div>
+
+      <div className="attendance-modal-footer">
+        <button
+          type="button"
+          className="attendance-secondary-button"
+          onClick={handleCloseFaceAttendance}
+          disabled={recognizingFace}
+        >
+          <FontAwesomeIcon icon={faXmark} />
+          Cancel
+        </button>
+
+        <button
+          type="button"
+          className="attendance-primary-button"
+          onClick={handleRecognizeFace}
+          disabled={!cameraReady || recognizingFace}
+        >
+          {recognizingFace ? (
+            <>
+              <FontAwesomeIcon
+                icon={faSpinner}
+                spin
+              />
+              Recognizing...
+            </>
+          ) : (
+            <>
+              <FontAwesomeIcon icon={faUserCheck} />
+              Capture & Recognize
+            </>
+          )}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {showStartModal && (
         <div
           className="attendance-modal-backdrop"

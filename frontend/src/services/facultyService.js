@@ -98,16 +98,24 @@ export async function markFacultyAttendance(
 
 export async function recognizeFacultyAttendance(
   sessionId,
-  studentId,
-  confidenceScore
+  imageBlob
 ) {
+  const formData = new FormData();
+
+  formData.append(
+    "session_id",
+    String(sessionId)
+  );
+
+  formData.append(
+    "image",
+    imageBlob,
+    "attendance-frame.jpg"
+  );
+
   const response = await api.post(
     "/faculty/recognition/attendance",
-    {
-      session_id: sessionId,
-      student_id: studentId,
-      confidence_score: confidenceScore,
-    }
+    formData
   );
 
   return response.data;
