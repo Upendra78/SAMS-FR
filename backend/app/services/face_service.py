@@ -243,8 +243,10 @@ class FaceService:
                 "encoding": None,
             }
         # Step 2: Detect faces in the image.
-        faces = self.detect_faces(image)
-        if len(faces) == 0:
+        height, width = image.shape[:2]
+        self.detector.setInputSize((width,height))
+        _, faces = self.detector.detect(image)
+        if faces is None or len(faces) == 0:
             return {
                 "status": "no_face",
                 "encoding": None,

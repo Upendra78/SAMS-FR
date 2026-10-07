@@ -9,7 +9,23 @@ class TestFaceEnrollment(unittest.TestCase):
         self.image = np.zeros((100,100,3), dtype=np.uint8)
         self.encoding = np.zeros((1,128), dtype= np.float32)
 
-        self.service.detect_faces = MagicMock(return_value=[{"face": "detect"}])
+        self.service.detector = MagicMock()
+        self.service.detector.detect.return_value = (
+            None, 
+            np.array(
+                [[
+                    10, 10, 50, 50,
+                    20, 20,
+                    40, 20,
+                    30, 30,
+                    20, 40,
+                    40, 40,
+                    0.99,
+
+                ]],
+                dtype = np.float32,
+            ),
+        )
         self.service.extract_face = MagicMock(return_value=self.image)
         self.service.generate_encoding = MagicMock(return_value = self.encoding)
 
@@ -30,16 +46,30 @@ class TestFaceEnrollment(unittest.TestCase):
         self.assertIsNone(result["encoding"])
 
     def test_no_face_detected(self):
-        self.service.detect_faces.return_value = []
+        self.service.detector.detect.return_value = (None, None)
         result = self.service.enroll_student(self.image)
         self.assertEqual(result["status"],"no_face")
         self.assertIsNone(result["encoding"])
 
     def test_multiple_faces_detected(self):
-        self.service.detect_faces.return_value = [
-            {"face": "one"},
-            {"face": "two"},
-        ]
+        self.service.detector.detect.return_value = (
+            None,
+            np.array(
+                [
+                    [
+                        10, 10, 50, 50,
+                        20, 20, 40, 20, 30, 30, 20, 40, 40, 40,
+                        0.99,
+                    ],
+                    [
+                        60, 60, 50, 50,
+                        70, 70, 90, 70, 80, 80, 70, 90, 90, 90,
+                        0.98,
+                    ],
+                ],
+                dtype=np.float32,
+            ),
+        )
         result = self.service.enroll_student(self.image)
         self.assertEqual(result["status"], "multiple_faces")
         self.assertIsNone(result["encoding"])
