@@ -124,6 +124,14 @@ def update_admin_profile():
             "message": "No fields provided for update",
         }), 400
 
+    forbidden_fields = {"role", "user_id", "password"}
+
+    if forbidden_fields.intersection(data.keys()):
+        return jsonify({
+            "success": False,
+            "message": "Role, user_id and password cannot be updated through admin profile",
+        }), 400
+
     # -------------------------
     # Name
     # -------------------------
