@@ -74,11 +74,14 @@ def process_recognition_attendance():
         session_id=session_id,
         student_id=student_id,
         confidence_score=confidence_score,
+        faculty_id=faculty.faculty_id,
     )
 
     if record is None:
         if message == "Attendance session not found":
             status_code = 404
+        elif message == "Attendance session does not belong to this faculty":
+            status_code = 403
         elif message == "Attendance session is not active":
             status_code = 409
         elif message == "Student is not enrolled in this course":

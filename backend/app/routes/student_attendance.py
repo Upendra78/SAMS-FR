@@ -102,7 +102,7 @@ def get_attendance_summary():
 
         sessions = AttendanceSession.query.filter_by(
             offering_id=offering.offering_id,
-            status="COMPLETED",
+            status="CLOSED",
         ).all()
 
         total_sessions = len(sessions)
