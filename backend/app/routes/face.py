@@ -155,32 +155,33 @@ def enroll_face():
 @face_bp.get("/status/<int:student_id>")
 @admin_required
 def face_registration_status(student_id):
-    """Return the active face registration status for a studnet."""
+    """Return the active face registration status for a student."""
     student = db.session.get(Student, student_id)
 
     if not student:
         return jsonify({
             "success": False,
             "message": "Student not found",
-        }),404
+        }), 404
 
     face_profile = FaceProfile.query.filter_by(
-        student_id  = student_id,
-        is_active = True,
+        student_id=student_id,
+        is_active=True,
     ).first()
+
     if face_profile:
         return jsonify({
             "success": True,
-            "data":{
+            "data": {
                 "student_id": student.student_id,
                 "registered": True,
                 "status": "registered",
                 "model_version": face_profile.model_version,
             },
+        }), 200
 
-        }),200
     return jsonify({
-        "sucess": True,
+        "success": True,
         "data": {
             "student_id": student.student_id,
             "registered": False,

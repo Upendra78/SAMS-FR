@@ -385,6 +385,66 @@ class TestFaceEnrollmentAPI(unittest.TestCase):
             "encoding_failed",
         )
 
+    def test_face_status_registered(self):
+        with self.app.app_context():
+            profile = FaceProfile(
+                student_id = self.student_id,
+                embedding = np.zeros(
+                    (1,128),
+                    dtype = np.float32,
+                ).tobytes(),
+                model_version ="sface_2021dec",
+                is_active = True,
+            )
+            db.session.add(profile)
+            db.session.commit()
+        response = self.client.get(
+            f"/api/face/status/{self.student_id}",
+            headers = self._admin_headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        self.assertEqual(
+            body["data"]["student_id"],
+            self.student_id,
+        )
+        self.assertTrue(body["data"]["registered"])
+        self.assertEqual(body["data"]["status"],"registered",)
+        self.assertEqual(
+            body["data"]["model_version"],
+            "sface_2021dec",
+        )
+    def test_face_status_not_registered(self):
+        response = self.client.get(
+            f"/api/face/status/{self.student_id}",
+            headers = self._admin_headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        self.assertEqual(
+            body["data"]["student_id"],
+            self.student_id,
+        )
+        self.assertFalse(body["data"]["registered"])
+        self.assertEqual(body["data"]["status"], "not_registered",)
+        self.assertIsNone(body["data"]["model_version"],)
 
+    def test_face_status_student_not_found(self):
+        response = self.client.get(
+            "/api/face/status/999999",
+            headers = self._admin_headers(),
+        )
+        self.assertEqual(response.status_code, 404)
+        body = response.get_json()
+        self.assertFalse(body["success"])
+        self.assertEqual(body["message"], "Student not found",)
+
+    def test_face_status_missing_authentication(self):
+        response = self.client.get(
+            f"/api/face/status/{self.student_id}",
+        )
+        self.assertEqual(response.status_code, 401)
 if __name__ == "__main__":
     unittest.main()
