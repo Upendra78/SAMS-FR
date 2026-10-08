@@ -5,7 +5,7 @@ from app.services.cv.face_service import (
 )
 
 
-DEFAULT_THRESHOLD = 0.60
+DEFAULT_THRESHOLD = 0.62
 
 
 def find_matching_student(
