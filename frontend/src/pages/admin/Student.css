@@ -1060,6 +1060,876 @@
 }
 
 /* =========================================================
+   FACE MANAGEMENT
+========================================================= */
+
+.student-face-management-section {
+  margin-top: 24px;
+  padding: 20px;
+  border: 1px solid #e5e7eb;
+  border-radius: 16px;
+  background: #f8fafc;
+}
+
+.student-face-management-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.student-face-management-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.student-face-management-header strong {
+  font-size: 16px;
+  color: #111827;
+}
+
+.student-face-management-header span {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.student-face-management-content {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+}
+
+.student-face-management-icon {
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: #eef2ff;
+  color: #4f46e5;
+  font-size: 20px;
+}
+
+.student-face-management-content > div:nth-child(2) {
+  flex: 1;
+}
+
+.student-face-management-content > div:nth-child(2) strong {
+  display: block;
+  margin-bottom: 5px;
+  color: #111827;
+}
+
+.student-face-management-content > div:nth-child(2) p {
+  margin: 0;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* =========================================================
+   FACE ENROLLMENT MODAL
+========================================================= */
+
+.student-face-enrollment-modal {
+  max-width: 620px;
+}
+
+.student-face-upload-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 24px;
+  border: 2px dashed #d1d5db;
+  border-radius: 16px;
+  background: #f9fafb;
+}
+
+.student-face-upload-placeholder {
+  min-height: 180px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #6b7280;
+  text-align: center;
+}
+
+.student-face-upload-placeholder svg {
+  margin-bottom: 8px;
+  font-size: 42px;
+  color: #6366f1;
+}
+
+.student-face-upload-placeholder strong {
+  color: #111827;
+  font-size: 16px;
+}
+
+.student-face-upload-placeholder span {
+  font-size: 13px;
+}
+
+.student-face-preview {
+  width: 100%;
+  max-width: 280px;
+  height: 280px;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #e5e7eb;
+  border: 1px solid #d1d5db;
+}
+
+.student-face-preview img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.student-face-upload-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 9px;
+  background: #eef2ff;
+  color: #4338ca;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    transform 0.2s ease;
+}
+
+.student-face-upload-button:hover {
+  background: #e0e7ff;
+}
+
+.student-face-upload-button:active {
+  transform: translateY(1px);
+}
+
+.student-face-file-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.student-face-guidelines {
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 12px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.student-face-guidelines strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #111827;
+  font-size: 14px;
+}
+
+.student-face-guidelines ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.student-face-guidelines li {
+  margin-bottom: 5px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.student-face-guidelines li:last-child {
+  margin-bottom: 0;
+}
+
+/* =========================================================
+   FACE SUCCESS MESSAGE
+========================================================= */
+
+.student-form-success {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 12px 14px;
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+  background: #f0fdf4;
+  color: #166534;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.student-form-success svg {
+  margin-top: 2px;
+  flex-shrink: 0;
+}
+
+/* =========================================================
+   RESPONSIVE FACE UI
+========================================================= */
+
+@media (max-width: 700px) {
+  .student-face-management-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .student-face-management-content {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .student-face-management-content
+    .student-primary-button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .student-face-preview {
+    width: 220px;
+    height: 220px;
+  }
+
+  .student-face-upload-area {
+    padding: 16px;
+  }
+}
+
+/* =========================================================
+   LIVE FACE CAPTURE
+========================================================= */
+
+.live-face-capture {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* =========================================================
+   CAMERA FRAME
+========================================================= */
+
+.live-face-camera {
+  position: relative;
+  width: 100%;
+  min-height: 430px;
+  overflow: hidden;
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+  background: #07111f;
+  isolation: isolate;
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+}
+
+/* =========================================================
+   LIVE VIDEO
+========================================================= */
+
+.live-face-video {
+  position: absolute;
+  inset: 0;
+
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: cover;
+
+  background: #07111f;
+
+  /*
+   * Front camera mirror.
+   */
+  transform: scaleX(-1);
+}
+
+/* =========================================================
+   FACE OVERLAY
+========================================================= */
+
+.live-face-overlay {
+  position: absolute;
+  inset: 0;
+
+  z-index: 2;
+
+  pointer-events: none;
+}
+
+/*
+ * Darkens everything outside the face area.
+ */
+.live-face-overlay::before {
+  position: absolute;
+  inset: 0;
+
+  content: "";
+
+  background:
+    radial-gradient(
+      ellipse 23% 38% at 50% 48%,
+      transparent 0%,
+      transparent 68%,
+      rgba(3, 9, 18, 0.08) 69%,
+      rgba(3, 9, 18, 0.34) 100%
+    );
+
+  pointer-events: none;
+}
+
+/* =========================================================
+   FACE OVAL
+========================================================= */
+
+.live-face-oval {
+  position: absolute;
+
+  left: 50%;
+  top: 50%;
+
+  width: min(42%, 270px);
+  height: min(76%, 350px);
+
+  transform: translate(-50%, -50%);
+
+  border: 3px solid rgba(255, 255, 255, 0.88);
+
+  border-radius: 50%;
+
+  box-shadow:
+    0 0 0 9999px rgba(4, 10, 20, 0.28),
+    0 0 22px rgba(255, 255, 255, 0.14),
+    inset 0 0 20px rgba(255, 255, 255, 0.04);
+
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+/* Ready state */
+
+.live-face-overlay-ready .live-face-oval {
+  border-color: #57e389;
+
+  box-shadow:
+    0 0 0 9999px rgba(4, 10, 20, 0.19),
+    0 0 28px rgba(87, 227, 137, 0.48),
+    inset 0 0 22px rgba(87, 227, 137, 0.08);
+}
+
+/* Capturing state */
+
+.live-face-overlay-capturing .live-face-oval {
+  border-color: #57e389;
+
+  animation: live-face-capture-pulse 650ms ease-in-out infinite;
+
+  box-shadow:
+    0 0 0 9999px rgba(4, 10, 20, 0.18),
+    0 0 32px rgba(87, 227, 137, 0.6),
+    inset 0 0 24px rgba(87, 227, 137, 0.12);
+}
+
+@keyframes live-face-capture-pulse {
+  0%,
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+  }
+
+  50% {
+    transform: translate(-50%, -50%) scale(1.015);
+  }
+}
+
+/* =========================================================
+   SCORE
+========================================================= */
+
+.live-face-score {
+  position: absolute;
+
+  top: 18px;
+  right: 18px;
+
+  z-index: 4;
+
+  min-width: 92px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+
+  padding: 10px 14px;
+
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+
+  background: rgba(7, 17, 31, 0.82);
+
+  color: #ffffff;
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+}
+
+.live-face-score strong {
+  font-size: 22px;
+  line-height: 1;
+  font-weight: 750;
+}
+
+.live-face-score span {
+  margin-top: 5px;
+
+  color: rgba(255, 255, 255, 0.7);
+
+  font-size: 10px;
+  font-weight: 700;
+
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* =========================================================
+   STATUS MESSAGE
+========================================================= */
+
+.live-face-camera-status {
+  position: absolute;
+
+  left: 50%;
+  bottom: 20px;
+
+  z-index: 4;
+
+  transform: translateX(-50%);
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  width: max-content;
+  max-width: calc(100% - 32px);
+
+  padding: 9px 14px;
+
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+
+  background: rgba(7, 17, 31, 0.84);
+
+  color: #ffffff;
+
+  font-size: 12px;
+  font-weight: 650;
+
+  text-align: center;
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+}
+
+.live-face-camera-status > span {
+  width: 8px;
+  height: 8px;
+
+  flex: 0 0 8px;
+
+  border-radius: 50%;
+
+  background: #f4b942;
+
+  box-shadow: 0 0 0 3px rgba(244, 185, 66, 0.12);
+}
+
+.live-face-camera-status .live-face-status-ready {
+  background: #57e389;
+
+  box-shadow:
+    0 0 0 3px rgba(87, 227, 137, 0.14),
+    0 0 10px rgba(87, 227, 137, 0.35);
+}
+
+/* =========================================================
+   CAPTURE PROGRESS
+========================================================= */
+
+.live-face-capture-progress {
+  position: absolute;
+
+  left: 50%;
+  top: 18px;
+
+  z-index: 4;
+
+  transform: translateX(-50%);
+
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 7px 9px;
+
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+
+  background: rgba(7, 17, 31, 0.78);
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.live-face-capture-progress span {
+  width: 29px;
+  height: 29px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 50%;
+
+  color: rgba(255, 255, 255, 0.72);
+
+  font-size: 11px;
+  font-weight: 750;
+
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
+}
+
+.live-face-capture-progress span.completed {
+  border-color: #57e389;
+
+  background: #57e389;
+
+  color: #06200f;
+
+  transform: scale(1.04);
+}
+
+/* =========================================================
+   START CAMERA
+========================================================= */
+
+.live-face-start {
+  min-height: 300px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  padding: 36px 24px;
+
+  border: 1px solid #e3e8ef;
+  border-radius: 18px;
+
+  background: #f8fafc;
+
+  text-align: center;
+}
+
+.live-face-start-icon {
+  width: 58px;
+  height: 58px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 50%;
+
+  background: #eaf2ff;
+
+  color: #2563eb;
+
+  font-size: 22px;
+}
+
+.live-face-start h3 {
+  margin: 16px 0 7px;
+
+  color: #172033;
+
+  font-size: 18px;
+  font-weight: 750;
+}
+
+.live-face-start p {
+  max-width: 520px;
+
+  margin: 0 0 20px;
+
+  color: #667085;
+
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.live-face-start-button,
+.live-face-retake-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  min-height: 40px;
+
+  padding: 9px 16px;
+
+  border: 0;
+  border-radius: 9px;
+
+  background: #2563eb;
+
+  color: #ffffff;
+
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  box-shadow: 0 4px 10px rgba(37, 99, 235, 0.18);
+
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.live-face-start-button:hover:not(:disabled),
+.live-face-retake-button:hover:not(:disabled) {
+  background: #1d4ed8;
+
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.22);
+
+  transform: translateY(-1px);
+}
+
+.live-face-start-button:active:not(:disabled),
+.live-face-retake-button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.live-face-start-button:disabled,
+.live-face-retake-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* =========================================================
+   FINAL PREVIEW
+========================================================= */
+
+.live-face-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.live-face-preview-image {
+  position: relative;
+
+  width: 100%;
+
+  overflow: hidden;
+
+  border: 1px solid #dbe3ef;
+  border-radius: 18px;
+
+  background: #07111f;
+}
+
+.live-face-preview-image img {
+  display: block;
+
+  width: 100%;
+  height: auto;
+
+  max-height: 520px;
+
+  object-fit: contain;
+}
+
+.live-face-best-badge {
+  position: absolute;
+
+  top: 14px;
+  left: 14px;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 8px 12px;
+
+  border-radius: 999px;
+
+  background: #57e389;
+
+  color: #06200f;
+
+  font-size: 12px;
+  font-weight: 750;
+
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.15);
+}
+
+.live-face-preview-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 11px 13px;
+
+  border: 1px solid #bbf7d0;
+  border-radius: 10px;
+
+  background: #f0fdf4;
+
+  color: #166534;
+
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.live-face-preview-status strong {
+  margin-left: auto;
+}
+
+/* =========================================================
+   ERROR
+========================================================= */
+
+.live-face-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+
+  padding: 11px 13px;
+
+  border: 1px solid #fecdd3;
+  border-radius: 10px;
+
+  background: #fff1f2;
+
+  color: #be123c;
+
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.live-face-error svg {
+  flex: 0 0 auto;
+
+  margin-top: 2px;
+}
+
+/* =========================================================
+   RESPONSIVE
+========================================================= */
+
+@media (max-width: 700px) {
+  .live-face-camera {
+    min-height: 390px;
+
+    border-radius: 14px;
+  }
+
+  .live-face-oval {
+    width: 54%;
+    height: 76%;
+  }
+
+  .live-face-score {
+    top: 12px;
+    right: 12px;
+
+    min-width: 82px;
+
+    padding: 8px 11px;
+  }
+
+  .live-face-score strong {
+    font-size: 19px;
+  }
+
+  .live-face-score span {
+    font-size: 9px;
+  }
+
+  .live-face-capture-progress {
+    top: 12px;
+  }
+
+  .live-face-camera-status {
+    bottom: 14px;
+
+    max-width: calc(100% - 24px);
+
+    padding: 8px 12px;
+
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 450px) {
+  .live-face-camera {
+    min-height: 350px;
+  }
+
+  .live-face-oval {
+    width: 58%;
+    height: 74%;
+  }
+
+  .live-face-capture-progress span {
+    width: 26px;
+    height: 26px;
+
+    font-size: 10px;
+  }
+}
+
+/* =========================================================
    Responsive
    ========================================================= */
 

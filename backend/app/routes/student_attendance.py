@@ -113,6 +113,7 @@ def get_attendance_summary():
             .filter(
                 AttendanceRecord.student_id == student.student_id,
                 AttendanceSession.offering_id == offering.offering_id,
+                AttendanceSession.status == "CLOSED",
                 AttendanceRecord.status == "PRESENT",
             )
             .count()
