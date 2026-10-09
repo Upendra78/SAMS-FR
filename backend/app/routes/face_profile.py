@@ -4,7 +4,7 @@ from flask_jwt_extended import get_jwt_identity
 from app.extensions import db
 from app.models import FaceProfile, Student
 from app.utils.auth import admin_required, student_required
-
+from app.services.cv.face_service import serialize_embedding
 
 face_profile_bp = Blueprint(
     "face_profile",
@@ -37,41 +37,67 @@ def create_face_profile():
     embedding = data.get("embedding")
     model_version = data.get("model_version")
 
-    if not embedding:
+    # Validate embedding presence
+    if embedding is None:
         return jsonify({
             "success": False,
             "message": "embedding is required",
         }), 400
 
-    if not model_version:
+    # Validate model version presence
+    if model_version is None:
         return jsonify({
             "success": False,
             "message": "model_version is required",
         }), 400
 
+    # Validate embedding type
     if not isinstance(embedding, list):
         return jsonify({
             "success": False,
             "message": "embedding must be a list",
         }), 400
 
-    if not embedding:
+    # Validate embedding dimension
+    if len(embedding) != 512:
         return jsonify({
             "success": False,
-            "message": "embedding cannot be empty",
+            "message": "embedding must contain exactly 512 values",
         }), 400
 
+    # Validate model version type
+    if not isinstance(model_version, str):
+        return jsonify({
+            "success": False,
+            "message": "model_version must be a string",
+        }), 400
+
+    model_version = model_version.strip()
+
+    # Validate model version content
+    if not model_version:
+        return jsonify({
+            "success": False,
+            "message": "model_version cannot be empty",
+        }), 400
+
+    # Validate database column limit
+    if len(model_version) > 50:
+        return jsonify({
+            "success": False,
+            "message": "model_version must not exceed 50 characters",
+        }), 400
+
+    # Serialize and validate embedding values
     try:
-        embedding_bytes = ",".join(
-            str(float(value))
-            for value in embedding
-        ).encode("utf-8")
+        embedding_bytes = serialize_embedding(embedding)
     except (TypeError, ValueError):
         return jsonify({
             "success": False,
             "message": "embedding must contain numeric values",
         }), 400
 
+    # Update existing active profile instead of creating duplicates
     existing_profile = FaceProfile.query.filter_by(
         student_id=student.student_id,
         is_active=True,
@@ -79,7 +105,7 @@ def create_face_profile():
 
     if existing_profile:
         existing_profile.embedding = embedding_bytes
-        existing_profile.model_version = model_version.strip()
+        existing_profile.model_version = model_version
 
         db.session.commit()
 
@@ -94,10 +120,11 @@ def create_face_profile():
             },
         }), 200
 
+    # Create new face profile
     face_profile = FaceProfile(
         student_id=student.student_id,
         embedding=embedding_bytes,
-        model_version=model_version.strip(),
+        model_version=model_version,
         is_active=True,
     )
 

@@ -10,6 +10,7 @@ from app.models import (
     Course,
     CourseOffering,
     Department,
+    Enrollment,
     Faculty,
     Student,
     User,
@@ -24,10 +25,7 @@ admin_bp = Blueprint(
     url_prefix="/api/admin",
 )
 
-
-# ============================================================
 # ADMIN DASHBOARD
-# ============================================================
 
 @admin_bp.get("/dashboard")
 @admin_required
@@ -60,10 +58,7 @@ def get_admin_dashboard():
         },
     }), 200
 
-
-# ============================================================
 # ADMIN PROFILE
-# ============================================================
 
 @admin_bp.get("/profile")
 @admin_required
@@ -230,10 +225,32 @@ def update_admin_profile():
         },
     }), 200
 
+# ============================================================
+# DEPARTMENT MANAGEMENT
+# ============================================================
 
-# ============================================================
+@admin_bp.get("/departments")
+@admin_required
+def get_departments():
+    departments = Department.query.order_by(
+        Department.department_id.asc()
+    ).all()
+
+    data = [
+        {
+            "department_id": department.department_id,
+            "department_name": department.department_name,
+            "department_code": department.department_code,
+        }
+        for department in departments
+    ]
+
+    return jsonify({
+        "success": True,
+        "data": data,
+    }), 200
+
 # USER MANAGEMENT
-# ============================================================
 
 @admin_bp.get("/users")
 @admin_required
@@ -473,8 +490,56 @@ def delete_user(user_id):
         "success": True,
         "message": "User deleted successfully",
     }), 200
+def get_student_attendance_summary(student_id):
+    active_enrollments = Enrollment.query.filter_by(
+        student_id=student_id,
+        status="ACTIVE",
+    ).all()
 
+    offering_ids = [
+        enrollment.offering_id
+        for enrollment in active_enrollments
+    ]
 
+    closed_sessions = []
+
+    if offering_ids:
+        closed_sessions = AttendanceSession.query.filter(
+            AttendanceSession.offering_id.in_(offering_ids),
+            AttendanceSession.status == "CLOSED",
+        ).all()
+
+    session_ids = [
+        session.session_id
+        for session in closed_sessions
+    ]
+
+    total_sessions = len(session_ids)
+    present_sessions = 0
+
+    if session_ids:
+        present_sessions = AttendanceRecord.query.filter(
+            AttendanceRecord.student_id == student_id,
+            AttendanceRecord.session_id.in_(session_ids),
+            AttendanceRecord.status == "PRESENT",
+        ).count()
+
+    absent_sessions = total_sessions - present_sessions
+
+    attendance_percentage = (
+        (present_sessions / total_sessions) * 100
+        if total_sessions > 0
+        else 0.0
+    )
+
+    return {
+        "total_sessions": total_sessions,
+        "present_sessions": present_sessions,
+        "absent_sessions": absent_sessions,
+        "attendance_percentage": round(
+            attendance_percentage, 2
+        ),
+    }
 # ============================================================
 # STUDENT MANAGEMENT
 # ============================================================
@@ -503,6 +568,9 @@ def get_students():
             "department_id": student.department.department_id,
             "department_name": student.department.department_name,
             "department_code": student.department.department_code,
+            "attendance_summary": get_student_attendance_summary(
+                student.student_id
+            ),
         }
         for student in students
     ]
@@ -544,6 +612,7 @@ def get_student(student_id):
             "department_id": student.department.department_id,
             "department_name": student.department.department_name,
             "department_code": student.department.department_code,
+            "attendance_summary": get_student_attendance_summary(student.student_id),
         },
     }), 200
 
@@ -1018,6 +1087,391 @@ def delete_student(student_id):
         "data": {
             "student_id": student_id,
         },
+    }), 200
+
+# COURSE MANAGEMENT
+
+
+@admin_bp.get("/courses")
+@admin_required
+def get_courses():
+    courses = Course.query.order_by(
+        Course.course_id.asc()
+    ).all()
+
+    data = [
+        {
+            "course_id": course.course_id,
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "department_id": course.department.department_id,
+            "department_name": course.department.department_name,
+            "department_code": course.department.department_code,
+            "semester": course.semester,
+            "credits": course.credits,
+        }
+        for course in courses
+    ]
+
+    return jsonify({
+        "success": True,
+        "data": data,
+    }), 200
+
+
+@admin_bp.get("/courses/<int:course_id>")
+@admin_required
+def get_course(course_id):
+    course = db.session.get(Course, course_id)
+
+    if not course:
+        return jsonify({
+            "success": False,
+            "message": "Course not found",
+        }), 404
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "course_id": course.course_id,
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "department_id": course.department.department_id,
+            "department_name": course.department.department_name,
+            "department_code": course.department.department_code,
+            "semester": course.semester,
+            "credits": course.credits,
+        },
+    }), 200
+
+
+@admin_bp.post("/courses")
+@admin_required
+def create_course():
+    data = request.get_json(silent=True) or {}
+
+    course_code = str(data.get("course_code") or "").strip()
+    course_name = str(data.get("course_name") or "").strip()
+    department_id = data.get("department_id")
+    semester = data.get("semester")
+    credits = data.get("credits")
+
+    if (
+        not course_code
+        or not course_name
+        or department_id is None
+        or semester is None
+        or credits is None
+    ):
+        return jsonify({
+            "success": False,
+            "message": (
+                "course_code, course_name, department_id, "
+                "semester and credits are required"
+            ),
+        }), 400
+
+    try:
+        department_id = int(department_id)
+        semester = int(semester)
+        credits = int(credits)
+    except (TypeError, ValueError):
+        return jsonify({
+            "success": False,
+            "message": (
+                "department_id, semester and credits "
+                "must be integers"
+            ),
+        }), 400
+
+    if department_id < 1:
+        return jsonify({
+            "success": False,
+            "message": "Department ID must be greater than 0",
+        }), 400
+
+    if semester < 1:
+        return jsonify({
+            "success": False,
+            "message": "Semester must be greater than 0",
+        }), 400
+
+    if credits < 1:
+        return jsonify({
+            "success": False,
+            "message": "Credits must be greater than 0",
+        }), 400
+
+    if len(course_code) > 30:
+        return jsonify({
+            "success": False,
+            "message": "Course code cannot exceed 30 characters",
+        }), 400
+
+    if len(course_name) > 150:
+        return jsonify({
+            "success": False,
+            "message": "Course name cannot exceed 150 characters",
+        }), 400
+
+    department = db.session.get(Department, department_id)
+
+    if not department:
+        return jsonify({
+            "success": False,
+            "message": "Department not found",
+        }), 404
+
+    existing_course = Course.query.filter_by(
+        course_code=course_code
+    ).first()
+
+    if existing_course:
+        return jsonify({
+            "success": False,
+            "message": "Course code already exists",
+        }), 409
+
+    course = Course(
+        course_code=course_code,
+        course_name=course_name,
+        department_id=department_id,
+        semester=semester,
+        credits=credits,
+    )
+
+    try:
+        db.session.add(course)
+        db.session.commit()
+        db.session.refresh(course)
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course could not be created due to a conflict",
+        }), 409
+
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course could not be created",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Course created successfully",
+        "data": {
+            "course_id": course.course_id,
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "department_id": course.department.department_id,
+            "department_name": course.department.department_name,
+            "department_code": course.department.department_code,
+            "semester": course.semester,
+            "credits": course.credits,
+        },
+    }), 201
+
+
+@admin_bp.patch("/courses/<int:course_id>")
+@admin_required
+def update_course(course_id):
+    course = db.session.get(Course, course_id)
+
+    if not course:
+        return jsonify({
+            "success": False,
+            "message": "Course not found",
+        }), 404
+
+    data = request.get_json(silent=True) or {}
+
+    allowed_fields = {
+        "course_code",
+        "course_name",
+        "department_id",
+        "semester",
+        "credits",
+    }
+
+    if not data or not set(data.keys()).issubset(allowed_fields):
+        return jsonify({
+            "success": False,
+            "message": "Provide valid course fields to update",
+        }), 400
+
+    if "course_code" in data:
+        course_code = str(data.get("course_code") or "").strip()
+
+        if not course_code:
+            return jsonify({
+                "success": False,
+                "message": "Course code cannot be empty",
+            }), 400
+
+        if len(course_code) > 30:
+            return jsonify({
+                "success": False,
+                "message": "Course code cannot exceed 30 characters",
+            }), 400
+
+        duplicate = Course.query.filter(
+            Course.course_code == course_code,
+            Course.course_id != course_id,
+        ).first()
+
+        if duplicate:
+            return jsonify({
+                "success": False,
+                "message": "Course code already exists",
+            }), 409
+
+        course.course_code = course_code
+
+    if "course_name" in data:
+        course_name = str(data.get("course_name") or "").strip()
+
+        if not course_name:
+            return jsonify({
+                "success": False,
+                "message": "Course name cannot be empty",
+            }), 400
+
+        if len(course_name) > 150:
+            return jsonify({
+                "success": False,
+                "message": "Course name cannot exceed 150 characters",
+            }), 400
+
+        course.course_name = course_name
+
+    if "department_id" in data:
+        try:
+            department_id = int(data["department_id"])
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "message": "Department ID must be an integer",
+            }), 400
+
+        if department_id < 1:
+            return jsonify({
+                "success": False,
+                "message": "Department ID must be greater than 0",
+            }), 400
+
+        department = db.session.get(Department, department_id)
+
+        if not department:
+            return jsonify({
+                "success": False,
+                "message": "Department not found",
+            }), 404
+
+        course.department_id = department_id
+
+    for field in ("semester", "credits"):
+        if field in data:
+            try:
+                value = int(data[field])
+            except (TypeError, ValueError):
+                return jsonify({
+                    "success": False,
+                    "message": f"{field} must be an integer",
+                }), 400
+
+            if value < 1:
+                return jsonify({
+                    "success": False,
+                    "message": f"{field} must be greater than 0",
+                }), 400
+
+            setattr(course, field, value)
+
+    try:
+        db.session.commit()
+        db.session.refresh(course)
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course could not be updated due to a conflict",
+        }), 409
+
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course could not be updated",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Course updated successfully",
+        "data": {
+            "course_id": course.course_id,
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "department_id": course.department.department_id,
+            "department_name": course.department.department_name,
+            "department_code": course.department.department_code,
+            "semester": course.semester,
+            "credits": course.credits,
+        },
+    }), 200
+
+
+@admin_bp.delete("/courses/<int:course_id>")
+@admin_required
+def delete_course(course_id):
+    course = db.session.get(Course, course_id)
+
+    if not course:
+        return jsonify({
+            "success": False,
+            "message": "Course not found",
+        }), 404
+
+    offering_count = CourseOffering.query.filter_by(
+        course_id=course_id
+    ).count()
+
+    if offering_count > 0:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Course cannot be deleted because "
+                "course offerings exist"
+            ),
+        }), 409
+
+    try:
+        db.session.delete(course)
+        db.session.commit()
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": (
+                "Course cannot be deleted because "
+                "related records exist"
+            ),
+        }), 409
+
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course could not be deleted",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Course deleted successfully",
     }), 200
 
 

@@ -26,6 +26,10 @@ from app.routes.attendance import attendance_bp
 from app.routes.student_attendance import student_attendance_bp
 from app.routes.face_profile import face_profile_bp
 from app.routes.recognition import recognition_bp
+from app.routes.reports import reports_bp
+from app.routes.analytics import analytics_bp
+from app.routes.admin_attendance import admin_attendance_bp
+from app.routes.admin_analytics import admin_analytics_bp
 
 
 def create_app():
@@ -59,5 +63,9 @@ def create_app():
     app.register_blueprint(student_attendance_bp)
     app.register_blueprint(face_profile_bp)
     app.register_blueprint(recognition_bp)
+    app.register_blueprint(reports_bp)
+    app.register_blueprint(analytics_bp)
+    app.register_blueprint(admin_attendance_bp)
+    app.register_blueprint(admin_analytics_bp)
 
     return app

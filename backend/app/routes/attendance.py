@@ -255,10 +255,43 @@ def close_attendance_session(session_id):
             "message": "Attendance session is already closed",
         }), 409
 
+    # Find all actively enrolled students for this course offering.
+    active_enrollments = Enrollment.query.filter_by(
+        offering_id=session.offering_id,
+        status="ACTIVE",
+    ).all()
+
+    # Find students whose attendance has already been recorded.
+    existing_records = AttendanceRecord.query.filter_by(
+        session_id=session.session_id,
+    ).all()
+
+    recorded_student_ids = {
+        record.student_id for record in existing_records
+    }
+
+    # Automatically mark students without an attendance record as ABSENT.
+    for enrollment in active_enrollments:
+        if enrollment.student_id not in recorded_student_ids:
+            absent_record = AttendanceRecord(
+                session_id=session.session_id,
+                student_id=enrollment.student_id,
+                status="ABSENT",
+                marked_at=datetime.utcnow(),
+                recognition_method="SYSTEM",
+            )
+            db.session.add(absent_record)
+
+    # Close the session and save all absence records together.
     session.end_time = datetime.utcnow().time()
     session.status = "CLOSED"
 
-    db.session.commit()
+    try:
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        raise
+
 
     return jsonify({
         "success": True,
@@ -381,7 +414,7 @@ def mark_attendance(session_id):
         recognition_method
     ).upper().strip()
 
-    if recognition_method not in {"FACE", "MANUAL"}:
+    if recognition_method not in {"FACE", "MANUAL", "SYSTEM"}:
         return jsonify({
             "success": False,
             "message": "Invalid recognition_method",

@@ -80,6 +80,16 @@ def enroll_face():
         }), 400
 
     image = _decode_image(image_file)
+    if image is not None:
+        print(
+            "[FACE DEBUG]",
+            "shape:", image.shape,
+            "dtype:", image.dtype,
+            "min:", int(image.min()),
+            "max:", int(image.max()),
+        )
+    else:
+        print("[FACE DEBUG] Image decoding failed")
 
     if image is None:
         return jsonify({
