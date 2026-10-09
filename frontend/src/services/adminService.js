@@ -140,3 +140,43 @@ export async function getAdminFaceProfiles() {
   const response = await api.get("/admin/face-profiles");
   return response.data;
 }
+
+// ==================== ADMIN ATTENDANCE REPORTS ====================
+
+export async function getAdminAttendanceSessions(params = {}) {
+  const response = await api.get(
+    "/admin/attendance/sessions",
+    {
+      params,
+    },
+  );
+
+  return response.data;
+}
+
+export async function getAdminAttendanceSession(sessionId) {
+  const response = await api.get(
+    `/admin/attendance/sessions/${sessionId}`,
+  );
+
+  return response.data;
+}
+
+export async function getAdminAttendanceRecords(sessionId) {
+  const response = await api.get(
+    `/admin/attendance/sessions/${sessionId}/records`,
+  );
+
+  return response.data;
+}
+
+export async function getAdminAttendanceAnalytics(params = {}) {
+  const response = await api.get(
+    "/admin/attendance/analytics",
+    {
+      params,
+    },
+  );
+
+  return response.data;
+}

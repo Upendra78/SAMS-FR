@@ -1,3 +1,23 @@
-const reportService = {};
+import api from "./api";
 
-export default reportService;
+export async function getFacultyAttendanceAnalytics(params = {}) {
+  const response = await api.get(
+    "/faculty/attendance/analytics",
+    {
+      params,
+    }
+  );
+
+  return response.data;
+}
+
+export async function getFacultyAttendanceReports(params = {}) {
+  const response = await api.get(
+    "/faculty/attendance/reports",
+    {
+      params,
+    }
+  );
+
+  return response.data;
+}

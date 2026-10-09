@@ -1,4 +1,10 @@
-import { useContext, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCheck,
@@ -50,10 +56,13 @@ function getRoleLabel(role) {
   switch (role) {
     case "STUDENT":
       return "Student";
+
     case "FACULTY":
       return "Faculty";
+
     case "ADMIN":
       return "Admin";
+
     default:
       return role || "Unknown";
   }
@@ -63,10 +72,13 @@ function getRoleIcon(role) {
   switch (role) {
     case "STUDENT":
       return faUserGraduate;
+
     case "FACULTY":
       return faUserTie;
+
     case "ADMIN":
       return faShieldHalved;
+
     default:
       return faUser;
   }
@@ -101,18 +113,16 @@ function AdminManagement() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("ALL");
-  const [faceStatusFilter, setFaceStatusFilter] = useState("ALL");
 
   const [currentPage, setCurrentPage] = useState(1);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [faceRegistrationUser, setFaceRegistrationUser] =
-    useState(null);
 
   const [formData, setFormData] = useState(initialFormData);
-  const [editFormData, setEditFormData] =
-    useState(initialEditFormData);
+  const [editFormData, setEditFormData] = useState(
+    initialEditFormData
+  );
 
   const [status, setStatus] = useState({
     type: "",
@@ -123,7 +133,7 @@ function AdminManagement() {
   const [updatingUserId, setUpdatingUserId] = useState(null);
   const [deletingUserId, setDeletingUserId] = useState(null);
 
-  async function loadUsers() {
+  const loadUsers = useCallback(async () => {
     setLoadingUsers(true);
 
     try {
@@ -140,7 +150,9 @@ function AdminManagement() {
       }
 
       setUsers(
-        Array.isArray(result.data) ? result.data : []
+        Array.isArray(result.data)
+          ? result.data
+          : []
       );
 
       setCurrentPage(1);
@@ -155,55 +167,12 @@ function AdminManagement() {
     } finally {
       setLoadingUsers(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function fetchUsers() {
-      try {
-        const result = await getUsers();
-
-        if (cancelled) {
-          return;
-        }
-
-        if (!result?.success) {
-          setStatus({
-            type: "error",
-            message:
-              result?.message || "Unable to load users.",
-          });
-
-          return;
-        }
-
-        setUsers(
-          Array.isArray(result.data) ? result.data : []
-        );
-
-        setCurrentPage(1);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-
-        setStatus({
-          type: "error",
-          message: getApiErrorMessage(
-            error,
-            "Unable to load users. Please try again."
-          ),
-        });
-      }
-    }
-
-    fetchUsers();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadUsers();
+  }, [loadUsers]);
 
   function handleSearchChange(event) {
     setSearchTerm(event.target.value);
@@ -212,11 +181,6 @@ function AdminManagement() {
 
   function handleRoleFilterChange(event) {
     setRoleFilter(event.target.value);
-    setCurrentPage(1);
-  }
-
-  function handleFaceStatusFilterChange(event) {
-    setFaceStatusFilter(event.target.value);
     setCurrentPage(1);
   }
 
@@ -576,28 +540,18 @@ function AdminManagement() {
     }
   }
 
-  function openFaceRegistration(user) {
-    setStatus({
-      type: "",
-      message: "",
-    });
-
-    setFaceRegistrationUser(user);
-  }
-
-  function closeFaceRegistration() {
-    setFaceRegistrationUser(null);
-  }
-
   const userCounts = useMemo(
     () => ({
       total: users.length,
+
       students: users.filter(
         (user) => user.role === "STUDENT"
       ).length,
+
       faculty: users.filter(
         (user) => user.role === "FACULTY"
       ).length,
+
       admins: users.filter(
         (user) => user.role === "ADMIN"
       ).length,
@@ -606,42 +560,33 @@ function AdminManagement() {
   );
 
   const filteredUsers = useMemo(() => {
-    const searchValue = searchTerm.trim().toLowerCase();
+    const searchValue = searchTerm
+      .trim()
+      .toLowerCase();
 
     return users.filter((user) => {
       const matchesSearch =
         !searchValue ||
-        user.name?.toLowerCase().includes(searchValue) ||
-        user.email?.toLowerCase().includes(searchValue) ||
+        user.name
+          ?.toLowerCase()
+          .includes(searchValue) ||
+        user.email
+          ?.toLowerCase()
+          .includes(searchValue) ||
         String(user.user_id)
           .toLowerCase()
           .includes(searchValue) ||
-        user.role?.toLowerCase().includes(searchValue);
+        user.role
+          ?.toLowerCase()
+          .includes(searchValue);
 
       const matchesRole =
         roleFilter === "ALL" ||
         user.role === roleFilter;
 
-      /*
-       * Face status is not currently returned by
-       * /api/admin/users, so this filter remains
-       * intentionally inactive.
-       */
-      const matchesFaceStatus =
-        faceStatusFilter === "ALL";
-
-      return (
-        matchesSearch &&
-        matchesRole &&
-        matchesFaceStatus
-      );
+      return matchesSearch && matchesRole;
     });
-  }, [
-    users,
-    searchTerm,
-    roleFilter,
-    faceStatusFilter,
-  ]);
+  }, [users, searchTerm, roleFilter]);
 
   const totalPages = Math.max(
     1,
@@ -774,37 +719,20 @@ function AdminManagement() {
               value={roleFilter}
               onChange={handleRoleFilterChange}
             >
-              <option value="ALL">All Roles</option>
-              <option value="STUDENT">Students</option>
-              <option value="FACULTY">Faculty</option>
-              <option value="ADMIN">Admins</option>
-            </select>
-
-            <FontAwesomeIcon icon={faChevronDown} />
-          </label>
-
-          <label className="admin-filter-select">
-            <span className="sr-only">
-              Filter by face status
-            </span>
-
-            <select
-              value={faceStatusFilter}
-              onChange={handleFaceStatusFilterChange}
-            >
               <option value="ALL">
-                All Face Status
+                All Roles
               </option>
 
-              <option value="REGISTERED" disabled>
-                Registered
+              <option value="STUDENT">
+                Students
               </option>
 
-              <option
-                value="NOT_REGISTERED"
-                disabled
-              >
-                Not Registered
+              <option value="FACULTY">
+                Faculty
+              </option>
+
+              <option value="ADMIN">
+                Admins
               </option>
             </select>
 
@@ -847,8 +775,6 @@ function AdminManagement() {
                     <th>User ID</th>
                     <th>Email</th>
                     <th>Role</th>
-                    <th>Department</th>
-                    <th>Face Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -916,25 +842,6 @@ function AdminManagement() {
 
                             {getRoleLabel(user.role)}
                           </span>
-                        </td>
-
-                        <td>
-                          <span className="admin-pending-value">
-                            Not available
-                          </span>
-                        </td>
-
-                        <td>
-                          <button
-                            type="button"
-                            className="admin-face-pending"
-                            onClick={() =>
-                              openFaceRegistration(user)
-                            }
-                            title="Open face registration"
-                          >
-                            Register Face
-                          </button>
                         </td>
 
                         <td>
@@ -1066,40 +973,6 @@ function AdminManagement() {
             </div>
           </>
         )}
-      </section>
-
-      <section className="admin-face-pending-card">
-        <div className="admin-face-pending-header">
-          <div className="admin-face-pending-icon">
-            <FontAwesomeIcon icon={faUser} />
-          </div>
-
-          <div>
-            <h2>Face Registration</h2>
-
-            <p>
-              Face registration remains pending until
-              the confirmed Face Profile API is available.
-            </p>
-          </div>
-        </div>
-
-        <div className="admin-face-pending-content">
-          <div>
-            <FontAwesomeIcon icon={faShieldHalved} />
-
-            <div>
-              <strong>
-                Face registration integration pending
-              </strong>
-
-              <p>
-                Camera capture and face-profile submission
-                must use the confirmed Face Profile API.
-              </p>
-            </div>
-          </div>
-        </div>
       </section>
 
       {showCreateModal && (
@@ -1286,7 +1159,9 @@ function AdminManagement() {
                 type="button"
                 className="admin-modal-close"
                 onClick={closeEditModal}
-                disabled={updatingUserId !== null}
+                disabled={
+                  updatingUserId !== null
+                }
                 aria-label="Close"
               >
                 <FontAwesomeIcon icon={faXmark} />
@@ -1308,7 +1183,9 @@ function AdminManagement() {
                   type="text"
                   value={editFormData.name}
                   onChange={handleEditChange}
-                  disabled={updatingUserId !== null}
+                  disabled={
+                    updatingUserId !== null
+                  }
                   required
                 />
               </div>
@@ -1324,7 +1201,9 @@ function AdminManagement() {
                   type="email"
                   value={editFormData.email}
                   onChange={handleEditChange}
-                  disabled={updatingUserId !== null}
+                  disabled={
+                    updatingUserId !== null
+                  }
                   required
                 />
               </div>
@@ -1372,7 +1251,9 @@ function AdminManagement() {
                   onChange={handleEditChange}
                   placeholder="Leave blank to keep current"
                   minLength={8}
-                  disabled={updatingUserId !== null}
+                  disabled={
+                    updatingUserId !== null
+                  }
                 />
               </div>
 
@@ -1385,11 +1266,15 @@ function AdminManagement() {
                   id="edit-user-confirm-password"
                   name="confirmPassword"
                   type="password"
-                  value={editFormData.confirmPassword}
+                  value={
+                    editFormData.confirmPassword
+                  }
                   onChange={handleEditChange}
                   placeholder="Re-enter new password"
                   minLength={8}
-                  disabled={updatingUserId !== null}
+                  disabled={
+                    updatingUserId !== null
+                  }
                 />
               </div>
 
@@ -1398,7 +1283,9 @@ function AdminManagement() {
                   type="button"
                   className="admin-modal-cancel"
                   onClick={closeEditModal}
-                  disabled={updatingUserId !== null}
+                  disabled={
+                    updatingUserId !== null
+                  }
                 >
                   Cancel
                 </button>
@@ -1406,7 +1293,9 @@ function AdminManagement() {
                 <button
                   type="submit"
                   className="admin-add-user-button"
-                  disabled={updatingUserId !== null}
+                  disabled={
+                    updatingUserId !== null
+                  }
                 >
                   {updatingUserId !== null ? (
                     <>
@@ -1418,99 +1307,15 @@ function AdminManagement() {
                     </>
                   ) : (
                     <>
-                      <FontAwesomeIcon icon={faCheck} />
+                      <FontAwesomeIcon
+                        icon={faCheck}
+                      />
                       Save Changes
                     </>
                   )}
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {faceRegistrationUser && (
-        <div className="admin-modal-backdrop">
-          <div
-            className="admin-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="face-registration-title"
-          >
-            <div className="admin-modal-header">
-              <div>
-                <h2 id="face-registration-title">
-                  Register Face
-                </h2>
-
-                <p>
-                  Register face profile for{" "}
-                  <strong>
-                    {faceRegistrationUser.name}
-                  </strong>
-                  .
-                </p>
-              </div>
-
-              <button
-                type="button"
-                className="admin-modal-close"
-                onClick={closeFaceRegistration}
-                aria-label="Close"
-              >
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
-            </div>
-
-            <div className="admin-modal-form">
-              <div className="admin-form-field">
-                <label htmlFor="face-registration-user">
-                  User
-                </label>
-
-                <input
-                  id="face-registration-user"
-                  type="text"
-                  value={`${faceRegistrationUser.name} — ${faceRegistrationUser.email}`}
-                  readOnly
-                />
-              </div>
-
-              <div className="admin-form-field">
-                <label>
-                  Face Capture
-                </label>
-
-                <div className="admin-list-state">
-                  <FontAwesomeIcon icon={faUser} />
-
-                  <span>
-                    Camera capture will be enabled after
-                    the confirmed Face Profile API is
-                    available.
-                  </span>
-                </div>
-              </div>
-
-              <div className="admin-modal-actions">
-                <button
-                  type="button"
-                  className="admin-modal-cancel"
-                  onClick={closeFaceRegistration}
-                >
-                  Close
-                </button>
-
-                <button
-                  type="button"
-                  className="admin-add-user-button"
-                  disabled
-                  title="Waiting for Face Profile backend integration"
-                >
-                  Register Face
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       )}
