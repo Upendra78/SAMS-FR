@@ -21,3 +21,22 @@ backend/student-cookies.txt
 
 # VS Code workspace settings
 .vscode/
+
+# Local test credentials and session data
+/admin-cookies.txt
+/faculty-cookies.txt
+/login.json
+/faculty.json
+/faculty-login.json
+/student-user.json
+/session.json
+
+/backend/enrollment.json
+/backend/student-profile.json
+/backend/faculty-profile.json
+/backend/student-user.json
+/backend/faculty-login.json
+/backend/session.json
+
+# Local backup files
+*.py.bak
