@@ -180,3 +180,49 @@ export async function getAdminAttendanceAnalytics(params = {}) {
 
   return response.data;
 }
+
+
+export async function getAdminDepartments() {
+  const response = await api.get("/admin/departments");
+  return response.data;
+}
+
+
+ // ==================== COURSE OFFERINGS ====================
+
+export async function getAdminCourses() {
+  const response = await api.get("/admin/courses");
+  return response.data;
+}
+
+export async function getAdminCourseOfferings() {
+  const response = await api.get("/admin/course-offerings");
+  return response.data;
+}
+
+export async function createAdminCourseOffering(offeringData) {
+  const response = await api.post(
+    "/admin/course-offerings",
+    offeringData,
+  );
+  return response.data;
+}
+
+export async function updateAdminCourseOffering(
+  offeringId,
+  offeringData,
+) {
+  const response = await api.patch(
+    `/admin/course-offerings/${offeringId}`,
+    offeringData,
+  );
+  return response.data;
+}
+
+export async function deleteAdminCourseOffering(offeringId) {
+  const response = await api.delete(
+    `/admin/course-offerings/${offeringId}`,
+  );
+  return response.data;
+}
+

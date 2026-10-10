@@ -654,6 +654,189 @@
   background: #f7faff;
 }
 
+
+/* Department management: compact desktop typography */
+.department-management-page {
+  font-size: 13px;
+}
+
+.department-page-header h1 {
+  font-size: clamp(25px, 2vw, 30px);
+  line-height: 1.2;
+}
+
+.department-page-header p {
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.department-eyebrow {
+  font-size: 10px;
+  letter-spacing: 0.07em;
+}
+
+.department-summary-card {
+  padding: 16px 20px;
+}
+
+.department-summary-card > span {
+  font-size: 12px;
+}
+
+.department-summary-card strong {
+  font-size: 25px;
+  line-height: 1.2;
+}
+
+.department-filter-panel {
+  padding: 16px 20px;
+  gap: 16px;
+}
+
+.department-filter-panel label,
+.department-form-field label {
+  font-size: 12px;
+}
+
+.department-filter-panel input,
+.department-filter-panel select,
+.department-form-field input,
+.department-form-field textarea {
+  font-size: 13px;
+}
+
+.department-table th {
+  font-size: 10px;
+  letter-spacing: 0.025em;
+  padding: 12px 16px;
+}
+
+.department-table td {
+  font-size: 12px;
+  padding: 12px 16px;
+}
+
+.department-identity strong {
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.department-identity span,
+.department-status {
+  font-size: 11px;
+}
+
+.department-pagination {
+  font-size: 11px;
+}
+
+.department-integration-notice {
+  padding: 14px 18px;
+  gap: 12px;
+}
+
+.department-integration-notice strong {
+  font-size: 12px;
+}
+
+.department-integration-notice span {
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.department-modal {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.department-modal-header {
+  padding: 20px 24px;
+}
+
+.department-modal-header h2 {
+  font-size: 22px;
+  line-height: 1.25;
+}
+
+.department-modal-header p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.department-form-section {
+  padding: 18px 24px;
+}
+
+.department-form-section h3 {
+  font-size: 13px;
+}
+
+.department-form-grid {
+  gap: 14px;
+}
+
+.department-modal-backend-note {
+  margin: 0 24px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.department-modal-footer {
+  padding: 16px 24px 20px;
+}
+
+.department-primary-button,
+.department-secondary-button {
+  font-size: 12px;
+}
+
+.department-empty-state h2 {
+  font-size: 16px;
+}
+
+.department-empty-state p {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .department-page-header h1 {
+    font-size: 24px;
+  }
+
+  .department-summary-card {
+    padding: 14px;
+  }
+
+  .department-filter-panel {
+    padding: 14px;
+  }
+
+  .department-table-wrapper {
+    overflow-x: auto;
+  }
+
+  .department-table {
+    min-width: 760px;
+  }
+
+  .department-modal-header,
+  .department-form-section {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+
+  .department-modal-backend-note {
+    margin-left: 18px;
+    margin-right: 18px;
+  }
+
+  .department-modal-footer {
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+}
+
+
 /* Responsive */
 
 @media (max-width: 1050px) {

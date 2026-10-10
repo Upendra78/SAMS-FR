@@ -24,6 +24,7 @@ import {
   createAdminStudent,
   getAdminStudents,
   getUsers,
+  getAdminDepartments,
 } from "../../services/adminService";
 
 import {
@@ -74,6 +75,8 @@ function Student() {
 
   const [students, setStudents] = useState([]);
   const [studentUsers, setStudentUsers] = useState([]);
+  const [departmentOptions, setDepartmentOptions] = useState([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
 
   // =========================================================
   // FACE REGISTRATION STATUS
@@ -343,6 +346,42 @@ function Student() {
     };
   }, [fetchStudentData]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchDepartments = async () => {
+      setDepartmentsLoading(true);
+
+      try {
+        const response = await getAdminDepartments();
+
+        if (response?.success && Array.isArray(response.data)) {
+          if (!cancelled) {
+            setDepartmentOptions(response.data);
+          }
+        } else {
+          throw new Error(
+            response?.message || "Failed to load departments."
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to fetch departments:", error);
+        }
+      } finally {
+        if (!cancelled) {
+          setDepartmentsLoading(false);
+        }
+      }
+    };
+
+    fetchDepartments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // =========================================================
   // FACE STATUS HELPER
   // =========================================================
@@ -417,16 +456,13 @@ function Student() {
   // FILTER OPTIONS
   // =========================================================
 
-  const departments = useMemo(() => {
-    const values = students
-      .map(
-        (student) =>
-          student?.department_name,
-      )
-      .filter(Boolean);
-
-    return ["All", ...new Set(values)];
-  }, [students]);
+  const departments = useMemo(
+    () => [
+      "All",
+      ...departmentOptions.map((item) => item.department_name),
+    ],
+    [departmentOptions]
+  );
 
   const programs = ["All"];
 
@@ -443,7 +479,12 @@ function Student() {
     return ["All", ...new Set(values)];
   }, [students]);
 
-  const statuses = ["All"];
+  const statuses = [
+    "All",
+    "Registered",
+    "Not Registered",
+    "Pending",
+  ];
 
   // =========================================================
   // FILTERED STUDENTS
@@ -500,8 +541,18 @@ function Student() {
         String(student?.semester) ===
           yearSemester;
 
+      const faceStatus = faceStatuses[String(student?.student_id)];
+
       const matchesStatus =
-        status === "All";
+        status === "All" ||
+        (status === "Registered" &&
+          faceStatus?.status !== "unknown" &&
+          faceStatus?.registered === true) ||
+        (status === "Not Registered" &&
+          faceStatus?.status !== "unknown" &&
+          faceStatus?.registered === false) ||
+        (status === "Pending" &&
+          (!faceStatus || faceStatus.status === "unknown"));
 
       return (
         matchesSearch &&
@@ -513,6 +564,7 @@ function Student() {
     });
   }, [
     students,
+    faceStatuses,
     searchTerm,
     department,
     program,
@@ -1069,7 +1121,7 @@ function Student() {
 
         <div className="student-filter-field">
           <label htmlFor="student-status">
-            Status
+            Face Registration
           </label>
 
           <select
@@ -1090,10 +1142,6 @@ function Student() {
               </option>
             ))}
           </select>
-
-          <small>
-            API integration pending
-          </small>
         </div>
 
         <button
@@ -1401,13 +1449,8 @@ function Student() {
           </strong>
 
           <span>
-            Student records, Student User
-            accounts and face registration
-            status are loaded from the
-            confirmed Admin and Face APIs.
-            Program, status and department
-            listing require additional
-            backend data.
+            Program, status Pending,
+            from backend data.
           </span>
         </div>
 
@@ -1646,32 +1689,41 @@ function Student() {
 
                 <div className="student-form-field">
                   <label htmlFor="create-student-department">
-                    Department ID *
+                    Department *
                   </label>
 
-                  <input
+                  <select
                     id="create-student-department"
                     name="department_id"
-                    type="number"
-                    min="1"
-                    value={
-                      createStudentForm.department_id
-                    }
-                    onChange={
-                      handleCreateStudentChange
-                    }
-                    disabled={
-                      createStudentLoading
-                    }
+                    value={createStudentForm.department_id}
+                    onChange={handleCreateStudentChange}
+                    disabled={createStudentLoading || departmentsLoading}
                     required
-                  />
+                  >
+                    <option value="">
+                      {departmentsLoading
+                        ? "Loading departments..."
+                        : "Select a Department"}
+                    </option>
 
-                  <small>
-                    Department listing API is
-                    not currently available.
-                    Enter the confirmed
-                    Department ID.
-                  </small>
+                    {departmentOptions.map((item) => (
+                      <option
+                        key={item.department_id}
+                        value={item.department_id}
+                      >
+                        {item.department_name}
+                        {item.department_code
+                          ? ` (${item.department_code})`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+
+                  {!departmentsLoading && departmentOptions.length === 0 && (
+                    <small>
+                      No departments are available. Check the admin departments API.
+                    </small>
+                  )}
                 </div>
               </div>
 
