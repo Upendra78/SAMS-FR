@@ -20,7 +20,6 @@ SFACE_MODEL = (
 
 class FaceService:
     """Computer vision service for face detection and recognition."""
-
     def __init__(self):
         if not YU_NET_MODEL.exists():
             raise FileNotFoundError(

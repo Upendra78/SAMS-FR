@@ -1,8 +1,11 @@
 from cv.embedding import generate_embedding
-from app.services.cv.recognition_service import find_matching_student
+from app.services.cv.recognition_service import (
+    DEFAULT_THRESHOLD,
+    find_matching_student,
+)
 
 
-def recognize_face(face_image, threshold=0.60):
+def recognize_face(face_image, threshold=DEFAULT_THRESHOLD):
     """
     Generate an embedding for a detected face image
     and find the best matching registered student.

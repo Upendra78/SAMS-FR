@@ -7,10 +7,10 @@ def serialize_embedding(embedding):
     """
     Convert a face embedding into bytes for database storage.
     """
-    array = np.asarray(
-        embedding,
-        dtype=np.float32,
-    )
+    try:
+        array = np.asarray(embedding, dtype=np.float32)
+    except (TypeError, ValueError):
+        raise ValueError("Face embedding must contain numeric values")
 
     if array.ndim != 1:
         raise ValueError(
@@ -22,8 +22,12 @@ def serialize_embedding(embedding):
             "Face embedding cannot be empty"
         )
 
+    if not np.isfinite(array).all():
+        raise ValueError("Face embedding must contain only finite values")
+
     return json.dumps(
-        array.tolist()
+        array.tolist(),
+        allow_nan=False,
     ).encode("utf-8")
 
 
