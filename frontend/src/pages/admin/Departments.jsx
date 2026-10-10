@@ -1,16 +1,9 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { getAdminDepartments } from "../../services/adminService";
 
 import "./Departments.css";
-
-const departments = [];
-
-const EMPTY_METRICS = {
-  total: null,
-  active: null,
-  inactive: null,
-};
 
 function formatMetric(value) {
   return value === null || value === undefined ? "N/A" : value;
@@ -42,7 +35,103 @@ function Departments() {
     description: "",
   });
 
-  const metrics = EMPTY_METRICS;
+  const [departments, setDepartments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const fetchDepartments = useCallback(async () => {
+    try {
+      const response = await getAdminDepartments();
+
+      if (!response?.success || !Array.isArray(response.data)) {
+        throw new Error("Unexpected department API response.");
+      }
+
+      const normalizedDepartments = response.data.map((item) => ({
+        departmentId: String(item.department_id),
+        code: item.department_code ?? "",
+        name: item.department_name ?? "",
+        headName: null,
+        facultyCount: null,
+        studentCount: null,
+        status: null,
+      }));
+
+      setDepartments(normalizedDepartments);
+      setError("");
+    } catch (err) {
+      setError(
+        err.response?.data?.message ||
+          err.message ||
+          "Failed to load departments.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleRetry = () => {
+    setLoading(true);
+    setError("");
+    fetchDepartments();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadDepartments = async () => {
+      try {
+        const response = await getAdminDepartments();
+
+        if (!response?.success || !Array.isArray(response.data)) {
+          throw new Error("Unexpected department API response.");
+        }
+
+        const normalizedDepartments = response.data.map((item) => ({
+          departmentId: String(item.department_id),
+          code: item.department_code ?? "",
+          name: item.department_name ?? "",
+          headName: null,
+          facultyCount: null,
+          studentCount: null,
+          status: null,
+        }));
+
+        if (!cancelled) {
+          setDepartments(normalizedDepartments);
+          setError("");
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err.response?.data?.message ||
+              err.message ||
+              "Failed to load departments.",
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    loadDepartments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The backend does not currently provide department status or counts.
+  const metrics = useMemo(
+    () => ({
+      total: departments.length,
+      active: null,
+      inactive: null,
+    }),
+    [departments],
+  );
 
   const statuses = ["All"];
 
@@ -52,18 +141,16 @@ function Departments() {
     return departments.filter((department) => {
       const matchesSearch =
         !search ||
-        department.departmentId
-          ?.toLowerCase()
-          .includes(search) ||
-        department.name?.toLowerCase().includes(search);
+        department.departmentId.toLowerCase().includes(search) ||
+        department.name.toLowerCase().includes(search) ||
+        department.code.toLowerCase().includes(search);
 
       const matchesStatus =
-        status === "All" ||
-        department.status === status;
+        status === "All" || department.status === status;
 
       return matchesSearch && matchesStatus;
     });
-  }, [searchTerm, status]);
+  }, [departments, searchTerm, status]);
 
   const hasActiveFilters =
     Boolean(searchTerm) || status !== "All";
@@ -82,6 +169,7 @@ function Departments() {
     }));
   };
 
+  // Department creation is not supported by the current backend.
   const handleAddDepartment = (event) => {
     event.preventDefault();
   };
@@ -133,9 +221,7 @@ function Departments() {
 
           <span>Total Departments</span>
 
-          <strong>
-            {formatMetric(metrics.total)}
-          </strong>
+          <strong>{formatMetric(metrics.total)}</strong>
         </article>
 
         <article className="department-summary-card department-summary-green">
@@ -148,9 +234,7 @@ function Departments() {
 
           <span>Active Departments</span>
 
-          <strong>
-            {formatMetric(metrics.active)}
-          </strong>
+          <strong>{formatMetric(metrics.active)}</strong>
         </article>
 
         <article className="department-summary-card department-summary-red">
@@ -163,9 +247,7 @@ function Departments() {
 
           <span>Inactive Departments</span>
 
-          <strong>
-            {formatMetric(metrics.inactive)}
-          </strong>
+          <strong>{formatMetric(metrics.inactive)}</strong>
         </article>
       </div>
 
@@ -181,7 +263,7 @@ function Departments() {
             <input
               id="department-search"
               type="search"
-              placeholder="Search by department name or ID..."
+              placeholder="Search by department name, ID, or code..."
               value={searchTerm}
               onChange={(event) =>
                 setSearchTerm(event.target.value)
@@ -198,9 +280,7 @@ function Departments() {
           <select
             id="department-status"
             value={status}
-            onChange={(event) =>
-              setStatus(event.target.value)
-            }
+            onChange={(event) => setStatus(event.target.value)}
           >
             {statuses.map((item) => (
               <option key={item} value={item}>
@@ -236,67 +316,85 @@ function Departments() {
             </thead>
 
             <tbody>
-              {filteredDepartments.map((department) => (
-                <tr key={department.departmentId}>
-                  <td>
-                    <div className="department-identity">
-                      <div className="department-avatar">
-                        {getInitials(department.name)}
+              {!loading &&
+                !error &&
+                filteredDepartments.map((department) => (
+                  <tr key={department.departmentId}>
+                    <td>
+                      <div className="department-identity">
+                        <div className="department-avatar">
+                          {getInitials(department.name)}
+                        </div>
+
+                        <div>
+                          <strong>{department.name || "Unnamed Department"}</strong>
+
+                          {department.code && (
+                            <span>{department.code}</span>
+                          )}
+                        </div>
                       </div>
+                    </td>
 
-                      <div>
-                        <strong>
-                          {department.name}
-                        </strong>
+                    <td>{department.departmentId}</td>
 
-                        <span>
-                          {department.departmentId}
-                        </span>
-                      </div>
-                    </div>
-                  </td>
+                    <td>{department.headName || "N/A"}</td>
 
-                  <td>
-                    {department.departmentId}
-                  </td>
+                    <td>
+                      {department.facultyCount ?? "N/A"}
+                    </td>
 
-                  <td>
-                    {department.headName || "N/A"}
-                  </td>
+                    <td>
+                      {department.studentCount ?? "N/A"}
+                    </td>
 
-                  <td>
-                    {department.facultyCount ?? "N/A"}
-                  </td>
+                    <td>
+                      <span className="department-status">
+                        {department.status || "Not provided"}
+                      </span>
+                    </td>
 
-                  <td>
-                    {department.studentCount ?? "N/A"}
-                  </td>
-
-                  <td>
-                    <span
-                      className={`department-status department-status-${department.status?.toLowerCase()}`}
-                    >
-                      ● {department.status || "N/A"}
-                    </span>
-                  </td>
-
-                  <td>
-                    <button
-                      type="button"
-                      className="department-action-button"
-                      aria-label={`Actions for ${department.name}`}
-                      disabled
-                      title="Department management API is not available yet"
-                    >
-                      ⋮
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                    <td>
+                      <button
+                        type="button"
+                        className="department-action-button"
+                        aria-label={`Actions for ${department.name || "department"}`}
+                        disabled
+                        title="Department management API is not available yet"
+                      >
+                        ⋮
+                      </button>
+                    </td>
+                  </tr>
+                ))}
             </tbody>
           </table>
 
-          {departments.length === 0 ? (
+          {loading ? (
+            <div
+              className="department-empty-state"
+              role="status"
+            >
+              <h2>Loading departments...</h2>
+              <p>Please wait while department records are loaded.</p>
+            </div>
+          ) : error ? (
+            <div
+              className="department-empty-state"
+              role="alert"
+            >
+              <h2>Unable to load departments</h2>
+              <p>{error}</p>
+
+              <button
+                type="button"
+                className="department-secondary-button"
+                onClick={handleRetry}
+              >
+                Retry
+              </button>
+            </div>
+          ) : departments.length === 0 ? (
             <div className="department-empty-state">
               <div
                 className="department-empty-icon"
@@ -308,9 +406,7 @@ function Departments() {
               <h2>No departments available</h2>
 
               <p>
-                Department records will appear here when the
-                required department management API is available
-                from the backend.
+                No department records were returned by the backend.
               </p>
             </div>
           ) : filteredDepartments.length === 0 ? (
@@ -333,8 +429,8 @@ function Departments() {
 
         <div className="department-pagination">
           <span>
-            Showing {filteredDepartments.length} of{" "}
-            {departments.length} departments
+            Showing {loading || error ? 0 : filteredDepartments.length} of{" "}
+            {loading || error ? 0 : departments.length} departments
           </span>
 
           <div className="department-pagination-controls">
@@ -366,19 +462,17 @@ function Departments() {
         </div>
 
         <div>
-          <strong>
-            Department management integration pending
-          </strong>
+          <strong>Department listing connected</strong>
 
           <span>
-            The current Flask backend does not expose the
-            department management API required to load, create,
-            update or delete department records.
+            Department listing is connected to the Flask API.
+            Status management and department create, edit, and
+            delete operations are not yet available.
           </span>
         </div>
 
         <span className="department-integration-badge">
-          Integration Pending
+          Listing Connected
         </span>
       </div>
 
@@ -409,8 +503,8 @@ function Departments() {
                 </h2>
 
                 <p>
-                  Enter department information once the
-                  department management API is available.
+                  Department creation will be enabled when the
+                  corresponding backend API is implemented.
                 </p>
               </div>
 
@@ -484,11 +578,9 @@ function Departments() {
 
               <div className="department-modal-backend-note">
                 <span aria-hidden="true">i</span>
-
                 <span>
-                  Department creation is currently disabled
-                  until the Flask Department API contract is
-                  available.
+                  Saving departments will be enabled after the backend
+                  creation endpoint is connected.
                 </span>
               </div>
 

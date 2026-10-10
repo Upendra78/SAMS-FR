@@ -53,7 +53,11 @@ const initialEditFormData = {
 };
 
 function getRoleLabel(role) {
-  switch (role) {
+  const normalizedRole = String(role ?? "")
+    .trim()
+    .toUpperCase();
+
+  switch (normalizedRole) {
     case "STUDENT":
       return "Student";
 
@@ -64,7 +68,7 @@ function getRoleLabel(role) {
       return "Admin";
 
     default:
-      return role || "Unknown";
+      return normalizedRole || "Unknown";
   }
 }
 
@@ -138,6 +142,8 @@ function AdminManagement() {
 
     try {
       const result = await getUsers();
+      console.log("Users API response:", result);
+      console.log("First user object:", result?.data?.[0]);
 
       if (!result?.success) {
         setStatus({

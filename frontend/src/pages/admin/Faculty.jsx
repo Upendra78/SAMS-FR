@@ -19,6 +19,7 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   createAdminFaculty,
   deleteAdminFaculty,
+  getAdminDepartments,
   getAdminFaculty,
   getUsers,
   updateAdminFaculty,
@@ -52,6 +53,9 @@ function Faculty() {
   const [department, setDepartment] = useState("All");
   const [designation, setDesignation] = useState("All");
 
+  const [departmentOptions, setDepartmentOptions] = useState([]);
+  const [departmentsLoading, setDepartmentsLoading] = useState(false);
+
   const [selectedFaculty, setSelectedFaculty] =
     useState(null);
 
@@ -76,10 +80,12 @@ function Faculty() {
     setError("");
 
     try {
-      const [facultyResponse, usersResponse] =
+      setDepartmentsLoading(true);
+      const [facultyResponse, usersResponse, departmentsResponse] =
         await Promise.all([
           getAdminFaculty(),
           getUsers(),
+          getAdminDepartments(),
         ]);
 
       if (!facultyResponse?.success) {
@@ -96,6 +102,13 @@ function Faculty() {
         );
       }
 
+      if (!departmentsResponse?.success) {
+        throw new Error(
+          departmentsResponse?.message ||
+            "Failed to load departments."
+        );
+      }
+
       const facultyData = Array.isArray(
         facultyResponse.data
       )
@@ -108,6 +121,12 @@ function Faculty() {
         ? usersResponse.data
         : [];
 
+      const departmentsData = Array.isArray(
+        departmentsResponse.data
+      )
+        ? departmentsResponse.data
+        : [];
+      setDepartmentOptions(departmentsData);
       const existingFacultyUserIds = new Set(
         facultyData
           .map((member) => member?.user_id)
@@ -145,6 +164,7 @@ function Faculty() {
       );
     } finally {
       setLoading(false);
+      setDepartmentsLoading(false);
     }
   };
 
@@ -179,35 +199,25 @@ function Faculty() {
 
     return {
       total: faculty.length,
+      active: faculty.filter(
+        (member) => member?.is_active === true
+      ).length,
+      inactive: faculty.filter(
+        (member) => member?.is_active === false
+      ).length,
       departments: departmentIds.size,
     };
   }, [faculty]);
 
-  const departments = useMemo(() => {
-    const uniqueDepartments = new Map();
-
-    faculty.forEach((member) => {
-      if (
-        member?.department_id !== null &&
-        member?.department_id !== undefined
-      ) {
-        uniqueDepartments.set(
-          String(member.department_id),
-          member.department_name ||
-            member.department_code ||
-            `Department ${member.department_id}`
-        );
-      }
-    });
-
-    return [
+  const departments = useMemo(
+    () => [
       "All",
-      ...Array.from(uniqueDepartments.values()).sort(
-        (first, second) =>
-          first.localeCompare(second)
+      ...departmentOptions.map(
+        (item) => item.department_name
       ),
-    ];
-  }, [faculty]);
+    ],
+    [departmentOptions]
+  );
 
   const designations = useMemo(() => {
     const uniqueDesignations = new Set();
@@ -538,9 +548,10 @@ function Faculty() {
 
           <span>Active</span>
 
-          <strong>N/A</strong>
-
-          <small>API integration pending</small>
+          <strong>
+            {loading ? "..." : metrics.active}
+          </strong>
+          <small>Active faculty accounts</small>
         </article>
 
         <article className="faculty-summary-card faculty-summary-red">
@@ -552,9 +563,10 @@ function Faculty() {
 
           <span>Inactive</span>
 
-          <strong>N/A</strong>
-
-          <small>API integration pending</small>
+          <strong>
+            {loading ? "..." : metrics.inactive}
+          </strong>
+          <small>Inactive faculty accounts</small>
         </article>
 
         <article className="faculty-summary-card faculty-summary-purple">
@@ -787,11 +799,23 @@ function Faculty() {
                             "N/A"}
                         </td>
 
-                        <td>
-                          <span className="faculty-status faculty-status-pending">
-                            API integration pending
-                          </span>
-                        </td>
+                         <td>
+                            {typeof member.is_active === "boolean" ? (
+                              <span
+                                className={`faculty-status ${
+                                  member.is_active
+                                    ? "faculty-status-active"
+                                    : "faculty-status-inactive"
+                                }`}
+                              >
+                                {member.is_active ? "Active" : "Inactive"}
+                              </span>
+                            ) : (
+                              <span className="faculty-status faculty-status-pending">
+                                Status unavailable
+                              </span>
+                            )}
+                          </td>
 
                         <td>
                           <div className="faculty-row-actions">
@@ -892,33 +916,6 @@ function Faculty() {
             </div>
           )}
       </section>
-
-      <div className="faculty-integration-note">
-        <div className="faculty-integration-icon">
-          <FontAwesomeIcon
-            icon={faCircleInfo}
-          />
-        </div>
-
-        <div className="faculty-integration-content">
-          <strong>
-            Faculty management connected
-          </strong>
-
-          <span>
-            Faculty profiles and Faculty User
-            accounts are loaded from the confirmed
-            Admin APIs. Account status and
-            department listing are not currently
-            provided by the backend.
-          </span>
-        </div>
-
-        <span className="faculty-integration-status">
-          Integrated
-        </span>
-      </div>
-
       {showFacultyModal && (
         <div
           className="faculty-modal-overlay"
@@ -1079,29 +1076,40 @@ function Faculty() {
 
                 <div className="faculty-form-field faculty-form-field-full">
                   <label htmlFor="faculty-department-id">
-                    Department ID *
+                    Department *
                   </label>
 
-                  <input
+                  <select
                     id="faculty-department-id"
                     name="department_id"
-                    type="number"
-                    min="1"
-                    value={
-                      facultyForm.department_id
-                    }
-                    onChange={
-                      handleFormChange
-                    }
-                    disabled={formLoading}
+                    value={facultyForm.department_id}
+                    onChange={handleFormChange}
+                    disabled={formLoading || departmentsLoading}
                     required
-                  />
+                  >
+                    <option value="">
+                      {departmentsLoading
+                        ? "Loading departments..."
+                        : "Select a department"}
+                    </option>
 
-                  <small>
-                    Department listing API is not
-                    currently available. Enter the
-                    confirmed Department ID.
-                  </small>
+                    {departmentOptions.map((item) => (
+                      <option
+                        key={item.department_id}
+                        value={String(item.department_id)}
+                      >
+                        {item.department_name} ({item.department_code})
+                      </option>
+                    ))}
+                  </select>
+
+                  {!departmentsLoading &&
+                    departmentOptions.length === 0 && (
+                      <small>
+                        No departments are available. Add a department before
+                        creating a faculty profile.
+                      </small>
+                    )}
                 </div>
               </div>
 
@@ -1282,10 +1290,13 @@ function Faculty() {
                 </strong>
 
                 <p>
-                  The current backend does not
-                  expose a Faculty status field.
-                  Status management remains
-                  pending backend support.
+                  {typeof selectedFaculty.is_active === "boolean"
+                    ? `This faculty account is ${
+                        selectedFaculty.is_active
+                          ? "active"
+                          : "inactive"
+                      }.`
+                    : "Account status is unavailable for this faculty record."}
                 </p>
               </div>
             </div>

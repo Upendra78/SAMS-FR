@@ -265,6 +265,7 @@ def get_users():
             "name": user.name,
             "email": user.email,
             "role": user.role,
+            "is_active": user.is_active,
             "created_at": user.created_at.isoformat(),
             "updated_at": user.updated_at.isoformat(),
         }
@@ -326,6 +327,7 @@ def create_admin_user():
             "name": user.name,
             "email": user.email,
             "role": user.role,
+            "is_active": user.is_active,
         },
     }), 201
 
@@ -348,6 +350,7 @@ def get_user(user_id):
             "name": user.name,
             "email": user.email,
             "role": user.role,
+            "is_active": user.is_active,
             "created_at": user.created_at.isoformat(),
             "updated_at": user.updated_at.isoformat(),
         },
@@ -366,6 +369,17 @@ def update_user(user_id):
         }), 404
 
     data = request.get_json(silent=True) or {}
+
+    if "is_active" in data:
+        is_active = data["is_active"]
+
+        if not isinstance(is_active, bool):
+            return jsonify({
+                "success": False,
+                "message": "is_active must be a boolean",
+            }), 400
+
+        user.is_active = is_active
 
     if "name" in data:
         name = str(data["name"]).strip()
@@ -450,7 +464,7 @@ def update_user(user_id):
             "user_id": user.user_id,
             "name": user.name,
             "email": user.email,
-            "role": user.role,
+            "is_active": user.is_active,
         },
     }), 200
 
@@ -1476,6 +1490,289 @@ def delete_course(course_id):
 
 
 # ============================================================
+# COURSE OFFERING MANAGEMENT
+# ============================================================
+
+@admin_bp.get("/course-offerings")
+@admin_required
+def get_course_offerings():
+    offerings = (
+        CourseOffering.query
+        .order_by(CourseOffering.offering_id.asc())
+        .all()
+    )
+
+    data = [
+        {
+            "offering_id": offering.offering_id,
+            "course_id": offering.course_id,
+            "course_code": offering.course.course_code,
+            "course_name": offering.course.course_name,
+            "faculty_id": offering.faculty_id,
+            "faculty_name": offering.faculty.user.name,
+            "academic_year": offering.academic_year,
+            "semester": offering.semester,
+            "section": offering.section,
+            "room": offering.room,
+            "enrollment_count": len(offering.enrollments),
+            "attendance_session_count": len(
+                offering.attendance_sessions
+            ),
+        }
+        for offering in offerings
+    ]
+
+    return jsonify({
+        "success": True,
+        "data": data,
+    }), 200
+
+
+@admin_bp.post("/course-offerings")
+@admin_required
+def create_course_offering():
+    data = request.get_json(silent=True) or {}
+
+    try:
+        course_id = int(data.get("course_id"))
+        faculty_id = int(data.get("faculty_id"))
+        semester = int(data.get("semester"))
+    except (TypeError, ValueError):
+        return jsonify({
+            "success": False,
+            "message": (
+                "Valid course_id, faculty_id and semester are required"
+            ),
+        }), 400
+
+    academic_year = str(
+        data.get("academic_year") or ""
+    ).strip()
+    section = str(data.get("section") or "").strip()
+    room = str(data.get("room") or "").strip() or None
+
+    if not academic_year or not section or semester < 1:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Academic year, section and a valid semester are required"
+            ),
+        }), 400
+
+    course = db.session.get(Course, course_id)
+    faculty = db.session.get(Faculty, faculty_id)
+
+    if not course:
+        return jsonify({
+            "success": False,
+            "message": "Course not found",
+        }), 404
+
+    if not faculty:
+        return jsonify({
+            "success": False,
+            "message": "Faculty not found",
+        }), 404
+
+    offering = CourseOffering(
+        course_id=course_id,
+        faculty_id=faculty_id,
+        academic_year=academic_year,
+        semester=semester,
+        section=section,
+        room=room,
+    )
+
+    try:
+        db.session.add(offering)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course offering could not be created due to a data conflict",
+        }), 409
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course offering could not be created",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Course offering created successfully",
+        "data": {
+            "offering_id": offering.offering_id,
+        },
+    }), 201
+
+
+@admin_bp.patch("/course-offerings/<int:offering_id>")
+@admin_required
+def update_course_offering(offering_id):
+    offering = db.session.get(CourseOffering, offering_id)
+
+    if not offering:
+        return jsonify({
+            "success": False,
+            "message": "Course offering not found",
+        }), 404
+
+    data = request.get_json(silent=True) or {}
+
+    if not data:
+        return jsonify({
+            "success": False,
+            "message": "No fields provided for update",
+        }), 400
+
+    if "course_id" in data:
+        try:
+            course_id = int(data["course_id"])
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid course_id",
+            }), 400
+
+        if not db.session.get(Course, course_id):
+            return jsonify({
+                "success": False,
+                "message": "Course not found",
+            }), 404
+
+        offering.course_id = course_id
+
+    if "faculty_id" in data:
+        try:
+            faculty_id = int(data["faculty_id"])
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid faculty_id",
+            }), 400
+
+        if not db.session.get(Faculty, faculty_id):
+            return jsonify({
+                "success": False,
+                "message": "Faculty not found",
+            }), 404
+
+        offering.faculty_id = faculty_id
+
+    if "semester" in data:
+        try:
+            semester = int(data["semester"])
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid semester",
+            }), 400
+
+        if semester < 1:
+            return jsonify({
+                "success": False,
+                "message": "Semester must be at least 1",
+            }), 400
+
+        offering.semester = semester
+
+    if "academic_year" in data:
+        academic_year = str(data["academic_year"] or "").strip()
+        if not academic_year:
+            return jsonify({
+                "success": False,
+                "message": "Academic year cannot be empty",
+            }), 400
+        offering.academic_year = academic_year
+
+    if "section" in data:
+        section = str(data["section"] or "").strip()
+        if not section:
+            return jsonify({
+                "success": False,
+                "message": "Section cannot be empty",
+            }), 400
+        offering.section = section
+
+    if "room" in data:
+        offering.room = str(data["room"] or "").strip() or None
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course offering could not be updated due to a data conflict",
+        }), 409
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course offering could not be updated",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Course offering updated successfully",
+    }), 200
+
+
+@admin_bp.delete("/course-offerings/<int:offering_id>")
+@admin_required
+def delete_course_offering(offering_id):
+    offering = db.session.get(CourseOffering, offering_id)
+
+    if not offering:
+        return jsonify({
+            "success": False,
+            "message": "Course offering not found",
+        }), 404
+
+    enrollment_count = Enrollment.query.filter_by(
+        offering_id=offering_id
+    ).count()
+
+    attendance_session_count = AttendanceSession.query.filter_by(
+        offering_id=offering_id
+    ).count()
+
+    if enrollment_count or attendance_session_count:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Course offering cannot be deleted because it has "
+                "enrollments or attendance sessions"
+            ),
+        }), 409
+
+    try:
+        db.session.delete(offering)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": (
+                "Course offering cannot be deleted because related records exist"
+            ),
+        }), 409
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Course offering could not be deleted",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Course offering deleted successfully",
+    }), 200
+
+
+# ============================================================
 # FACULTY MANAGEMENT
 # ============================================================
 
@@ -1501,6 +1798,7 @@ def get_faculty():
             "department_id": faculty.department.department_id,
             "department_name": faculty.department.department_name,
             "department_code": faculty.department.department_code,
+            "is_active": faculty.user.is_active,
         }
         for faculty in faculty_members
     ]
@@ -1540,6 +1838,7 @@ def get_faculty_by_id(faculty_id):
             "department_id": faculty.department.department_id,
             "department_name": faculty.department.department_name,
             "department_code": faculty.department.department_code,
+            "is_active": faculty.user.is_active,
         },
     }), 200
 

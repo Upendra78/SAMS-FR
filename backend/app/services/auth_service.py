@@ -3,12 +3,20 @@ from app.models.user import User
 
 
 def authenticate_user(email, password):
-    user = User.query.filter_by(email=email.lower().strip()).first()
+    user = User.query.filter_by(
+        email=email.lower().strip()
+    ).first()
 
     if not user:
         return None
 
-    if not bcrypt.check_password_hash(user.password_hash, password):
+    if not user.is_active:
+        return None
+
+    if not bcrypt.check_password_hash(
+        user.password_hash,
+        password,
+    ):
         return None
 
     return user

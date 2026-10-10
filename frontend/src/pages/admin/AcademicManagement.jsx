@@ -12,6 +12,7 @@ import {
   faXmark,
   faSpinner,
   faTrash,
+  faPen,
 } from "@fortawesome/free-solid-svg-icons";
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
@@ -21,6 +22,14 @@ import {
   deleteAdminEnrollment,
   getAdminEnrollments,
 } from "../../services/enrollmentService";
+import {
+  getAdminCourses,
+  getAdminCourseOfferings,
+  getAdminFaculty,
+  createAdminCourseOffering,
+  updateAdminCourseOffering,
+  deleteAdminCourseOffering,
+} from "../../services/adminService";
 
 import "./AcademicManagement.css";
 
@@ -77,6 +86,13 @@ function formatEnrollmentDate(value) {
 function AcademicManagement() {
   const [activeTab, setActiveTab] = useState("courses");
 
+  const [offerings, setOfferings] = useState([]);
+  const [offeringsLoading, setOfferingsLoading] = useState(false);
+  const [offeringsError, setOfferingsError] = useState("");
+  const [courses, setCourses] = useState([]);
+  const [faculty, setFaculty] = useState([]);
+  const [offeringActionError, setOfferingActionError] = useState("");
+
   const [enrollments, setEnrollments] = useState([]);
   const [enrollmentsLoading, setEnrollmentsLoading] =
     useState(false);
@@ -104,6 +120,82 @@ function AcademicManagement() {
 
   const [enrollmentActionMessage, setEnrollmentActionMessage] =
     useState("");
+
+  const [offeringActionMessage, setOfferingActionMessage] = useState("");
+
+  const [showOfferingModal, setShowOfferingModal] = useState(false);
+  const [editingOfferingId, setEditingOfferingId] = useState(null);
+  const [savingOffering, setSavingOffering] = useState(false);
+  const [deletingOfferingId, setDeletingOfferingId] = useState(null);
+
+  const EMPTY_OFFERING_FORM = {
+    course_id: "",
+    faculty_id: "",
+    academic_year: "",
+    semester: "",
+    section: "",
+    room: "",
+  };
+
+  useEffect(() => {
+    if (activeTab !== "offerings") return;
+
+    let cancelled = false;
+
+    async function loadOfferingData() {
+      setOfferingsLoading(true);
+      setOfferingsError("");
+      setOfferingActionError("");
+      setOfferingActionMessage("");
+
+      try {
+        const [offeringResult, courseResult, facultyResult] =
+          await Promise.all([
+            getAdminCourseOfferings(),
+            getAdminCourses(),
+            getAdminFaculty(),
+          ]);
+
+        if (cancelled) return;
+
+        if (!offeringResult?.success || !Array.isArray(offeringResult.data)) {
+          throw new Error(
+            offeringResult?.message || "Unable to load course offerings."
+          );
+        }
+
+        if (!courseResult?.success || !Array.isArray(courseResult.data)) {
+          throw new Error(courseResult?.message || "Unable to load courses.");
+        }
+
+        if (!facultyResult?.success || !Array.isArray(facultyResult.data)) {
+          throw new Error(facultyResult?.message || "Unable to load faculty.");
+        }
+
+        setOfferings(offeringResult.data);
+        setCourses(courseResult.data);
+        setFaculty(facultyResult.data);
+      } catch (error) {
+        if (!cancelled) {
+          setOfferingsError(
+            error?.response?.data?.message ||
+              error?.message ||
+              "Unable to load course offering data."
+          );
+        }
+      } finally {
+        if (!cancelled) setOfferingsLoading(false);
+      }
+    }
+
+    loadOfferingData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const [offeringForm, setOfferingForm] = useState(EMPTY_OFFERING_FORM);  
 
   useEffect(() => {
     if (activeTab !== "enrollments") {
@@ -362,6 +454,144 @@ function AcademicManagement() {
             "Course records will appear here when the required course management API is available.",
           icon: faBook,
         };
+    }
+  };
+
+  const openOfferingModal = (offering = null) => {
+    setOfferingActionError("");
+    setOfferingActionMessage("");
+    setEditingOfferingId(offering?.offering_id ?? null);
+
+    setOfferingForm(
+      offering
+        ? {
+            course_id: String(offering.course_id),
+            faculty_id: String(offering.faculty_id),
+            academic_year: offering.academic_year || "",
+            semester: String(offering.semester),
+            section: offering.section || "",
+            room: offering.room || "",
+          }
+        : { ...EMPTY_OFFERING_FORM }
+    );
+
+    setShowOfferingModal(true);
+  };
+
+  const handleOfferingFormChange = (event) => {
+    const { name, value } = event.target;
+
+    setOfferingForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  };
+
+  const handleSaveOffering = async (event) => {
+    event.preventDefault();
+
+    const payload = {
+      course_id: Number(offeringForm.course_id),
+      faculty_id: Number(offeringForm.faculty_id),
+      academic_year: offeringForm.academic_year.trim(),
+      semester: Number(offeringForm.semester),
+      section: offeringForm.section.trim(),
+      room: offeringForm.room.trim() || null,
+    };
+
+    if (
+      !Number.isInteger(payload.course_id) ||
+      payload.course_id <= 0 ||
+      !Number.isInteger(payload.faculty_id) ||
+      payload.faculty_id <= 0 ||
+      !Number.isInteger(payload.semester) ||
+      payload.semester < 1 ||
+      !payload.academic_year ||
+      !payload.section
+    ) {
+      setOfferingActionError("Complete all required fields with valid values.");
+      return;
+    }
+
+    setSavingOffering(true);
+    setOfferingActionError("");
+    setOfferingActionMessage("");
+
+    try {
+      let result;
+
+      if (editingOfferingId !== null) {
+        result = await updateAdminCourseOffering(editingOfferingId, payload);
+      } else {
+        result = await createAdminCourseOffering(payload);
+      }
+
+      if (!result?.success) {
+        throw new Error(result?.message || "Unable to save course offering.");
+      }
+
+      const refreshed = await getAdminCourseOfferings();
+
+      if (!refreshed?.success || !Array.isArray(refreshed.data)) {
+        throw new Error("Saved successfully, but refreshing the offering list failed.");
+      }
+
+      setOfferings(refreshed.data);
+      setShowOfferingModal(false);
+      setOfferingForm({ ...EMPTY_OFFERING_FORM });
+      setEditingOfferingId(null);
+      setOfferingActionMessage(
+        result.message ||
+          (editingOfferingId !== null
+            ? "Course offering updated successfully."
+            : "Course offering created successfully.")
+      );
+    } catch (error) {
+      setOfferingActionError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Unable to save course offering."
+      );
+    } finally {
+      setSavingOffering(false);
+    }
+  };
+
+  const handleDeleteOffering = async (offering) => {
+    const confirmed = window.confirm(
+      `Delete offering #${offering.offering_id} (${offering.course_code})? Offerings with enrollments or attendance sessions cannot be deleted.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingOfferingId(offering.offering_id);
+    setOfferingActionError("");
+    setOfferingActionMessage("");
+
+    try {
+      const result = await deleteAdminCourseOffering(offering.offering_id);
+
+      if (!result?.success) {
+        throw new Error(result?.message || "Unable to delete course offering.");
+      }
+
+      setOfferings((current) =>
+        current.filter(
+          (item) => item.offering_id !== offering.offering_id
+        )
+      );
+
+      setOfferingActionMessage(
+        result.message || "Course offering deleted successfully."
+      );
+    } catch (error) {
+      setOfferingActionError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Unable to delete course offering."
+      );
+    } finally {
+      setDeletingOfferingId(null);
     }
   };
 
@@ -762,56 +992,320 @@ function AcademicManagement() {
             )}
           </div>
         </>
+      ) : activeTab === "offerings" ? (
+        <div className="academic-table-card">
+          <div className="academic-enrollment-toolbar">
+            <div>
+              <h2>Course Offerings</h2>
+              <p>Assign courses to faculty for a semester and section.</p>
+            </div>
+
+            <button
+              type="button"
+              className="academic-primary-button"
+              onClick={() => openOfferingModal()}
+            >
+              <FontAwesomeIcon icon={faPlus} />
+              Add Offering
+            </button>
+          </div>
+
+          {offeringsLoading ? (
+            <div className="academic-empty-state">
+              <FontAwesomeIcon icon={faSpinner} spin />
+              <h2>Loading course offerings</h2>
+            </div>
+          ) : offeringsError ? (
+            <div className="academic-empty-state">
+              <FontAwesomeIcon icon={faCircleExclamation} />
+              <h2>Unable to load course offerings</h2>
+              <p>{offeringsError}</p>
+              <button
+                type="button"
+                className="academic-secondary-button"
+                onClick={() => setActiveTab("courses")}
+              >
+                Back
+              </button>
+            </div>
+          ) : offerings.length === 0 ? (
+            <div className="academic-empty-state">
+              <FontAwesomeIcon icon={faBookOpen} />
+              <h2>No course offerings yet</h2>
+              <p>Create an offering to assign a course to faculty.</p>
+            </div>
+          ) : (
+            <div className="academic-table-wrapper">
+              <table className="academic-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Course</th>
+                    <th>Faculty</th>
+                    <th>Academic Year</th>
+                    <th>Semester</th>
+                    <th>Section</th>
+                    <th>Room</th>
+                    <th>Enrollments</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {offerings.map((offering) => (
+                    <tr key={offering.offering_id}>
+                      <td>{offering.offering_id}</td>
+                      <td>
+                        <strong>{offering.course_code}</strong>
+                        <br />
+                        {offering.course_name}
+                      </td>
+                      <td>{offering.faculty_name || `Faculty #${offering.faculty_id}`}</td>
+                      <td>{offering.academic_year}</td>
+                      <td>{offering.semester}</td>
+                      <td>{offering.section}</td>
+                      <td>{offering.room || "—"}</td>
+                      <td>{offering.enrollment_count ?? 0}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="academic-action-button"
+                          title="Edit offering"
+                          aria-label={`Edit offering ${offering.offering_id}`}
+                          onClick={() => openOfferingModal(offering)}
+                          disabled={deletingOfferingId !== null}
+                        >
+                          <FontAwesomeIcon icon={faPen} />
+                        </button>
+                        <button
+                          type="button"
+                          className="academic-action-button"
+                          title="Delete offering"
+                          aria-label={`Delete offering ${offering.offering_id}`}
+                          onClick={() => handleDeleteOffering(offering)}
+                          disabled={deletingOfferingId === offering.offering_id}
+                        >
+                          <FontAwesomeIcon
+                            icon={
+                              deletingOfferingId === offering.offering_id
+                                ? faSpinner
+                                : faTrash
+                            }
+                            spin={deletingOfferingId === offering.offering_id}
+                          />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {offeringActionMessage && (
+            <div className="academic-integration-notice">
+              <div>
+                <strong>Course offering updated</strong>
+                <span>{offeringActionMessage}</span>
+              </div>
+            </div>
+          )}
+
+          {offeringActionError && (
+            <div className="academic-integration-notice">
+              <div>
+                <strong>Course offering action failed</strong>
+                <span>{offeringActionError}</span>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="academic-table-card academic-future-tab">
           <div className="academic-empty-state">
-            <div
-              className="academic-empty-icon"
-              aria-hidden="true"
-            >
-              <FontAwesomeIcon
-                icon={emptyState.icon}
-              />
+            <div className="academic-empty-icon" aria-hidden="true">
+              <FontAwesomeIcon icon={emptyState.icon} />
             </div>
-
             <h2>{emptyState.title}</h2>
-
-            <p>
-              {emptyState.description}
-            </p>
+            <p>{emptyState.description}</p>
           </div>
         </div>
       )}
 
-      <div className="academic-integration-notice">
+      {showOfferingModal && (
         <div
-          className="academic-integration-icon"
-          aria-hidden="true"
+          className="academic-modal-overlay"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !savingOffering) {
+              setShowOfferingModal(false);
+            }
+          }}
         >
-          <FontAwesomeIcon
-            icon={faCircleInfo}
-          />
+          <div
+            className="academic-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="offering-modal-title"
+          >
+            <div className="academic-modal-header">
+              <div>
+                <span className="academic-eyebrow">Academic Management</span>
+                <h2 id="offering-modal-title">
+                  {editingOfferingId !== null
+                    ? "Edit Course Offering"
+                    : "Add Course Offering"}
+                </h2>
+                <p>Enter the course, faculty, and semester details.</p>
+              </div>
+
+              <button
+                type="button"
+                className="academic-modal-close"
+                onClick={() => setShowOfferingModal(false)}
+                disabled={savingOffering}
+                aria-label="Close offering dialog"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveOffering}>
+              <div className="academic-form-section">
+                <h3>Offering Information</h3>
+
+                <div className="academic-form-grid">
+                  <div className="academic-form-field">
+                    <label htmlFor="offering-course">Course *</label>
+                    <select
+                      id="offering-course"
+                      name="course_id"
+                      value={offeringForm.course_id}
+                      onChange={handleOfferingFormChange}
+                      required
+                      disabled={savingOffering}
+                    >
+                      <option value="">Select course</option>
+                      {courses.map((course) => (
+                        <option key={course.course_id} value={course.course_id}>
+                          {course.course_code} — {course.course_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="academic-form-field">
+                    <label htmlFor="offering-faculty">Faculty *</label>
+                    <select
+                      id="offering-faculty"
+                      name="faculty_id"
+                      value={offeringForm.faculty_id}
+                      onChange={handleOfferingFormChange}
+                      required
+                      disabled={savingOffering}
+                    >
+                      <option value="">Select faculty</option>
+                      {faculty.map((member) => (
+                        <option key={member.faculty_id} value={member.faculty_id}>
+                          {member.name || member.employee_id || `Faculty #${member.faculty_id}`}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="academic-form-field">
+                    <label htmlFor="offering-year">Academic Year *</label>
+                    <input
+                      id="offering-year"
+                      name="academic_year"
+                      value={offeringForm.academic_year}
+                      onChange={handleOfferingFormChange}
+                      placeholder="e.g. 2026-2027"
+                      required
+                      disabled={savingOffering}
+                    />
+                  </div>
+
+                  <div className="academic-form-field">
+                    <label htmlFor="offering-semester">Semester *</label>
+                    <input
+                      id="offering-semester"
+                      name="semester"
+                      type="number"
+                      min="1"
+                      step="1"
+                      value={offeringForm.semester}
+                      onChange={handleOfferingFormChange}
+                      required
+                      disabled={savingOffering}
+                    />
+                  </div>
+
+                  <div className="academic-form-field">
+                    <label htmlFor="offering-section">Section *</label>
+                    <input
+                      id="offering-section"
+                      name="section"
+                      value={offeringForm.section}
+                      onChange={handleOfferingFormChange}
+                      placeholder="e.g. A"
+                      required
+                      disabled={savingOffering}
+                    />
+                  </div>
+
+                  <div className="academic-form-field">
+                    <label htmlFor="offering-room">Room</label>
+                    <input
+                      id="offering-room"
+                      name="room"
+                      value={offeringForm.room}
+                      onChange={handleOfferingFormChange}
+                      placeholder="e.g. Lab 2"
+                      disabled={savingOffering}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {offeringActionError && (
+                <div className="academic-integration-notice">
+                  <div>
+                    <strong>Unable to save offering</strong>
+                    <span>{offeringActionError}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="academic-modal-footer">
+                <button
+                  type="button"
+                  className="academic-secondary-button"
+                  onClick={() => setShowOfferingModal(false)}
+                  disabled={savingOffering}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="academic-primary-button"
+                  disabled={savingOffering || courses.length === 0 || faculty.length === 0}
+                >
+                  <FontAwesomeIcon
+                    icon={savingOffering ? faSpinner : faCheck}
+                    spin={savingOffering}
+                  />
+                  {savingOffering
+                    ? "Saving..."
+                    : editingOfferingId !== null
+                      ? "Save Changes"
+                      : "Create Offering"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
-
-        <div>
-          <strong>
-            Academic management integration
-          </strong>
-
-          <span>
-            Enrollment listing, creation and
-            removal are connected to the
-            confirmed Flask APIs. Course,
-            offering and faculty-assignment
-            management remain pending their
-            respective backend APIs.
-          </span>
-        </div>
-
-        <span className="academic-integration-badge">
-          Partial Integration
-        </span>
-      </div>
+      )}
 
       {showEnrollmentModal && (
         <div
