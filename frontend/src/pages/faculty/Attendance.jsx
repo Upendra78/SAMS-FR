@@ -172,44 +172,47 @@ function Attendance() {
     };
   },[]);
   useEffect(() => {
-    if(!showFaceAttendance || !cameraStreamRef.current){
+    if (!showFaceAttendance || !cameraStreamRef.current) {
       return;
     }
+
     const video = videoRef.current;
-    if(!video){
+
+    if (!video) {
       return;
     }
+
     video.srcObject = cameraStreamRef.current;
-    const handlevideoReady = async() => {
+
+    const handleVideoReady = async () => {
       try {
         await video.play();
         setCameraReady(true);
-      } catch(error){
-        console.error(
-          "Unable to start camera preview:",
-          error
-        );
-        setFaceAttendanceError(
-          "Unable to start the camera preview."
-        );
+        setFaceAttendanceError("");
+      } catch (error) {
+        console.error("Unable to play camera video:", error);
+
+        const errorName = error?.name || "CameraError";
+        const errorMessage =
+          error?.message || "Unable to start the camera preview.";
+
+        setFaceAttendanceError(`${errorName}: ${errorMessage}`);
       }
     };
-    if (video.readyState >=2){
-      handlevideoReady();
+
+    if (video.readyState >= 2) {
+      handleVideoReady();
     } else {
-      video.addEventListener(
-        "loadeddata",
-        handlevideoReady,
-        {once: true}
-      );
+      video.addEventListener("loadeddata", handleVideoReady, {
+        once: true,
+      });
     }
-    return() => {
-      video.removeEventListener(
-        "loadeddata",
-        handlevideoReady
-      );
+
+    return () => {
+      video.removeEventListener("loadeddata", handleVideoReady);
     };
-  },[showFaceAttendance]);
+  }, [showFaceAttendance]);
+
 
   /*
    * Load attendance sessions and active session.
