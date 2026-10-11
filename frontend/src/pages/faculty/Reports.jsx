@@ -1,3 +1,4 @@
+
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -68,8 +69,7 @@ function Reports() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [selectedClass, setSelectedClass] =
-    useState("All Classes");
+  const [selectedClass, setSelectedClass] = useState("All Classes");
 
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -86,6 +86,15 @@ function Reports() {
       setLoading(true);
       setError("");
 
+      if (dateFrom && dateTo && dateFrom > dateTo) {
+        setError("Date From cannot be later than Date To.");
+        setReportStudents([]);
+        setClassReports([]);
+        setMetricsData(EMPTY_METRICS);
+        setLoading(false);
+        return;
+      }
+
       try {
         const offeringId =
           selectedClass !== "All Classes"
@@ -98,125 +107,102 @@ function Reports() {
           to_date: dateTo || undefined,
         };
 
-        const [
-          analyticsResponse,
-          reportsResponse,
-        ] = await Promise.all([
-          getFacultyAttendanceAnalytics(params),
-          getFacultyAttendanceReports(params),
-        ]);
+        const [analyticsResponse, reportsResponse] =
+          await Promise.all([
+            getFacultyAttendanceAnalytics(params),
+            getFacultyAttendanceReports(params),
+          ]);
 
         if (!isMounted) {
           return;
         }
 
-        const analyticsData =
-          analyticsResponse?.data || {};
+        const analyticsData = analyticsResponse?.data || {};
+        const reportsData = reportsResponse?.data || [];
 
-        const reportsData =
-          reportsResponse?.data || [];
+        const lowAttendanceCount =
+          analyticsData.low_attendance_students ??
+          reportsData.reduce(
+            (total, report) =>
+              total +
+              (report.students || []).filter(
+                (student) => student.is_low_attendance === true
+              ).length,
+            0
+          );
 
         setMetricsData({
           overallAttendance:
-            analyticsData.overall_attendance_percentage ??
-            null,
+            analyticsData.overall_attendance_percentage ?? null,
 
-          totalStudents:
-            analyticsData.total_students ?? null,
+          totalStudents: analyticsData.total_students ?? null,
 
-          totalSessions:
-            analyticsData.total_sessions ?? null,
+          totalSessions: analyticsData.total_sessions ?? null,
 
-          totalPresent:
-            analyticsData.total_present ?? null,
+          totalPresent: analyticsData.total_present ?? null,
 
-          totalAbsent:
-            analyticsData.total_absent ?? null,
+          totalAbsent: analyticsData.total_absent ?? null,
 
-          lowAttendance: null,
+          lowAttendance: lowAttendanceCount,
         });
 
-        const courses =
-          analyticsData.courses || [];
+        const courses = analyticsData.courses || [];
 
         setClassOptions([
           {
             value: "All Classes",
             label: "All Classes",
           },
-
           ...courses.map((course) => ({
             value: String(course.offering_id),
-
-            label:
-              `${course.course_code} - ${course.section}`,
+            label: `${course.course_code} - ${course.section}`,
           })),
         ]);
 
-        const students = reportsData.flatMap(
-          (report) =>
-            (report.students || []).map(
-              (student) => ({
-                id:
-                  `${report.offering_id}-${student.student_id}`,
+        const students = reportsData.flatMap((report) =>
+          (report.students || []).map((student) => ({
+            id: `${report.offering_id}-${student.student_id}`,
 
-                studentId:
-                  student.enrollment_no ||
-                  String(student.student_id),
+            studentId:
+              student.enrollment_no || String(student.student_id),
 
-                studentName:
-                  student.student_name || "N/A",
+            studentName: student.student_name || "N/A",
 
-                className:
-                  `${report.course_code} - ${report.section}`,
+            className: `${report.course_code} - ${report.section}`,
 
-                sessions:
-                  student.total_sessions ?? null,
+            sessions: student.total_sessions ?? null,
 
-                present:
-                  student.present_sessions ?? null,
+            present: student.present_sessions ?? null,
 
-                absent:
-                  student.absent_sessions ?? null,
+            absent: student.absent_sessions ?? null,
 
-                attendanceRate:
-                  student.attendance_percentage ?? null,
+            attendanceRate: student.attendance_percentage ?? null,
 
-                email:
-                  student.email || "",
+            isLowAttendance: student.is_low_attendance ?? null,
 
-                offeringId:
-                  String(report.offering_id),
-              })
-            )
+            email: student.email || "",
+
+            offeringId: String(report.offering_id),
+          }))
         );
 
-        const classData = courses.map(
-          (course) => ({
-            id: course.offering_id,
+        const classData = courses.map((course) => ({
+          id: course.offering_id,
 
-            className:
-              `${course.course_code} - ${course.section}`,
+          className: `${course.course_code} - ${course.section}`,
 
-            students:
-              course.students ?? null,
+          students: course.students ?? null,
 
-            sessions:
-              course.total_sessions ?? null,
+          sessions: course.total_sessions ?? null,
 
-            attendanceRate:
-              course.attendance_percentage ?? null,
+          attendanceRate: course.attendance_percentage ?? null,
 
-            courseCode:
-              course.course_code,
+          courseCode: course.course_code,
 
-            courseName:
-              course.course_name,
+          courseName: course.course_name,
 
-            offeringId:
-              String(course.offering_id),
-          })
-        );
+          offeringId: String(course.offering_id),
+        }));
 
         setReportStudents(students);
         setClassReports(classData);
@@ -253,43 +239,33 @@ function Reports() {
   }, [selectedClass, dateFrom, dateTo]);
 
   const filteredStudents = useMemo(() => {
-    const normalizedSearch =
-      searchTerm.trim().toLowerCase();
+    const normalizedSearch = searchTerm.trim().toLowerCase();
 
     return reportStudents.filter((student) => {
       const matchesSearch =
         !normalizedSearch ||
-        student.studentId
-          ?.toLowerCase()
-          .includes(normalizedSearch) ||
-        student.studentName
-          ?.toLowerCase()
-          .includes(normalizedSearch);
+        student.studentId?.toLowerCase().includes(normalizedSearch) ||
+        student.studentName?.toLowerCase().includes(normalizedSearch);
 
       const matchesClass =
         selectedClass === "All Classes" ||
-        String(student.offeringId) ===
-          String(selectedClass);
+        String(student.offeringId) === String(selectedClass);
+
+      const presentCount = Number(student.present ?? 0);
+      const absentCount = Number(student.absent ?? 0);
 
       const matchesStatus =
         status === "All" ||
         (status === "Present" &&
-          Number(student.present) > 0) ||
+          presentCount > 0 &&
+          absentCount === 0) ||
         (status === "Absent" &&
-          Number(student.absent) > 0);
+          absentCount > 0 &&
+          presentCount === 0);
 
-      return (
-        matchesSearch &&
-        matchesClass &&
-        matchesStatus
-      );
+      return matchesSearch && matchesClass && matchesStatus;
     });
-  }, [
-    reportStudents,
-    searchTerm,
-    selectedClass,
-    status,
-  ]);
+  }, [reportStudents, searchTerm, selectedClass, status]);
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -306,16 +282,68 @@ function Reports() {
     Boolean(dateTo) ||
     status !== "All";
 
+  const invalidDateRange = Boolean(
+    dateFrom && dateTo && dateFrom > dateTo
+  );
+
+  const exportCSV = () => {
+    const headers = [
+      "Student Name",
+      "Student ID",
+      "Class",
+      "Total Sessions",
+      "Present",
+      "Absent",
+      "Attendance Percentage",
+      "Low Attendance",
+    ];
+
+    const escapeCSV = (value) => {
+      const text = String(value ?? "");
+      return `"${text.replace(/"/g, '""')}"`;
+    };
+
+    const rows = filteredStudents.map((student) => [
+      student.studentName,
+      student.studentId,
+      student.className,
+      student.sessions,
+      student.present,
+      student.absent,
+      student.attendanceRate,
+      student.isLowAttendance === null
+        ? "Unknown"
+        : student.isLowAttendance
+          ? "Yes"
+          : "No",
+    ]);
+
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map(escapeCSV).join(","))
+      .join("\r\n");
+
+    const blob = new Blob(["\uFEFF", csvContent], {
+      type: "text/csv;charset=utf-8;",
+    });
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "faculty-attendance-report.csv";
+
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    URL.revokeObjectURL(url);
+  };
+
   const metrics = [
     {
       label: "Overall Attendance",
-
-      value: formatPercentage(
-        metricsData.overallAttendance
-      ),
-
+      value: formatPercentage(metricsData.overallAttendance),
       tone: "blue",
-
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -325,7 +353,6 @@ function Reports() {
             strokeWidth="1.8"
             strokeLinecap="round"
           />
-
           <path
             d="m7 15 4-4 3 2 5-6"
             fill="none"
@@ -337,16 +364,10 @@ function Reports() {
         </svg>
       ),
     },
-
     {
       label: "Total Students",
-
-      value: formatMetric(
-        metricsData.totalStudents
-      ),
-
+      value: formatMetric(metricsData.totalStudents),
       tone: "purple",
-
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -356,7 +377,6 @@ function Reports() {
             strokeWidth="1.8"
             strokeLinecap="round"
           />
-
           <circle
             cx="9"
             cy="7"
@@ -365,7 +385,6 @@ function Reports() {
             stroke="currentColor"
             strokeWidth="1.8"
           />
-
           <path
             d="M16 3.5a4 4 0 0 1 0 7.8"
             fill="none"
@@ -376,16 +395,10 @@ function Reports() {
         </svg>
       ),
     },
-
     {
       label: "Total Sessions",
-
-      value: formatMetric(
-        metricsData.totalSessions
-      ),
-
+      value: formatMetric(metricsData.totalSessions),
       tone: "green",
-
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <rect
@@ -398,7 +411,6 @@ function Reports() {
             stroke="currentColor"
             strokeWidth="1.8"
           />
-
           <path
             d="M8 2v4M16 2v4M3 9h18"
             fill="none"
@@ -409,16 +421,10 @@ function Reports() {
         </svg>
       ),
     },
-
     {
       label: "Low Attendance",
-
-      value: formatMetric(
-        metricsData.lowAttendance
-      ),
-
+      value: formatMetric(metricsData.lowAttendance),
       tone: "orange",
-
       icon: (
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path
@@ -428,7 +434,6 @@ function Reports() {
             strokeWidth="1.8"
             strokeLinejoin="round"
           />
-
           <path
             d="M12 9v5M12 17v.5"
             fill="none"
@@ -445,30 +450,22 @@ function Reports() {
     <div className="faculty-reports-page">
       <section className="reports-page-header">
         <div>
-          <span className="reports-eyebrow">
-            FACULTY PORTAL
-          </span>
+          <span className="reports-eyebrow">FACULTY PORTAL</span>
 
           <h1>Reports</h1>
 
           <p>
-            Analyze attendance performance for your
-            assigned classes and generate attendance
-            reports.
+            Analyze attendance performance for your assigned classes
+            and generate attendance reports.
           </p>
         </div>
 
         <button
           type="button"
           className="reports-primary-button"
-          onClick={() =>
-            setShowExportModal(true)
-          }
+          onClick={() => setShowExportModal(true)}
         >
-          <svg
-            viewBox="0 0 24 24"
-            aria-hidden="true"
-          >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
             <path
               d="M12 3v12M7 10l5 5 5-5M5 21h14"
               fill="none"
@@ -478,31 +475,20 @@ function Reports() {
               strokeLinejoin="round"
             />
           </svg>
-
           Export Report
         </button>
       </section>
 
       <section className="reports-metrics-grid">
         {metrics.map((metric) => (
-          <article
-            className="reports-metric-card"
-            key={metric.label}
-          >
-            <div
-              className={`reports-metric-icon ${metric.tone}`}
-            >
+          <article className="reports-metric-card" key={metric.label}>
+            <div className={`reports-metric-icon ${metric.tone}`}>
               {metric.icon}
             </div>
 
             <div className="reports-metric-content">
               <span>{metric.label}</span>
-
-              <strong>
-                {loading
-                  ? "..."
-                  : metric.value}
-              </strong>
+              <strong>{loading ? "..." : metric.value}</strong>
             </div>
           </article>
         ))}
@@ -512,25 +498,16 @@ function Reports() {
         <div className="reports-section-heading">
           <div>
             <h2>Report Filters</h2>
-
-            <p>
-              Filter attendance information by
-              student, class, and date.
-            </p>
+            <p>Filter attendance information by student, class, and date.</p>
           </div>
         </div>
 
         <div className="reports-filters-card">
           <div className="reports-filter reports-search-filter">
-            <label htmlFor="report-search">
-              Search Student
-            </label>
+            <label htmlFor="report-search">Search Student</label>
 
             <div className="reports-search-wrapper">
-              <svg
-                viewBox="0 0 24 24"
-                aria-hidden="true"
-              >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
                 <circle
                   cx="11"
                   cy="11"
@@ -539,7 +516,6 @@ function Reports() {
                   stroke="currentColor"
                   strokeWidth="1.8"
                 />
-
                 <path
                   d="m20 20-4-4"
                   fill="none"
@@ -553,35 +529,22 @@ function Reports() {
                 id="report-search"
                 type="search"
                 value={searchTerm}
-                onChange={(event) =>
-                  setSearchTerm(
-                    event.target.value
-                  )
-                }
+                onChange={(event) => setSearchTerm(event.target.value)}
                 placeholder="Search by student ID or name..."
               />
             </div>
           </div>
 
           <div className="reports-filter">
-            <label htmlFor="report-class">
-              Class
-            </label>
+            <label htmlFor="report-class">Class</label>
 
             <select
               id="report-class"
               value={selectedClass}
-              onChange={(event) =>
-                setSelectedClass(
-                  event.target.value
-                )
-              }
+              onChange={(event) => setSelectedClass(event.target.value)}
             >
               {classOptions.map((option) => (
-                <option
-                  key={option.value}
-                  value={option.value}
-                >
+                <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
@@ -589,58 +552,41 @@ function Reports() {
           </div>
 
           <div className="reports-filter">
-            <label htmlFor="report-date-from">
-              Date From
-            </label>
+            <label htmlFor="report-date-from">Date From</label>
 
             <input
               id="report-date-from"
               type="date"
               value={dateFrom}
-              onChange={(event) =>
-                setDateFrom(
-                  event.target.value
-                )
-              }
+              max={dateTo || undefined}
+              aria-invalid={invalidDateRange}
+              onChange={(event) => setDateFrom(event.target.value)}
             />
           </div>
 
           <div className="reports-filter">
-            <label htmlFor="report-date-to">
-              Date To
-            </label>
+            <label htmlFor="report-date-to">Date To</label>
 
             <input
               id="report-date-to"
               type="date"
               value={dateTo}
-              onChange={(event) =>
-                setDateTo(
-                  event.target.value
-                )
-              }
+              min={dateFrom || undefined}
+              aria-invalid={invalidDateRange}
+              onChange={(event) => setDateTo(event.target.value)}
             />
           </div>
 
           <div className="reports-filter">
-            <label htmlFor="report-status">
-              Status
-            </label>
+            <label htmlFor="report-status">Status</label>
 
             <select
               id="report-status"
               value={status}
-              onChange={(event) =>
-                setStatus(
-                  event.target.value
-                )
-              }
+              onChange={(event) => setStatus(event.target.value)}
             >
               {statuses.map((option) => (
-                <option
-                  key={option}
-                  value={option}
-                >
+                <option key={option} value={option}>
                   {option}
                 </option>
               ))}
@@ -653,10 +599,7 @@ function Reports() {
             onClick={clearFilters}
             disabled={!hasFilters}
           >
-            <span aria-hidden="true">
-              ↻
-            </span>
-
+            <span aria-hidden="true">↻</span>
             Clear Filters
           </button>
         </div>
@@ -664,15 +607,9 @@ function Reports() {
 
       {error && (
         <section className="reports-integration-notice">
-          <div className="reports-notice-icon">
-            !
-          </div>
-
+          <div className="reports-notice-icon">!</div>
           <div>
-            <strong>
-              Unable to load reports
-            </strong>
-
+            <strong>Unable to load reports</strong>
             <p>{error}</p>
           </div>
         </section>
@@ -682,30 +619,20 @@ function Reports() {
         <div className="reports-overview-header">
           <div>
             <h2>Attendance Overview</h2>
-
-            <p>
-              Attendance distribution across your
-              assigned classes.
-            </p>
+            <p>Attendance distribution across your assigned classes.</p>
           </div>
 
-          <span className="reports-data-badge">
-            Backend Data
-          </span>
+          <span className="reports-data-badge">Backend Data</span>
         </div>
 
         <div className="reports-overview-grid">
           <div className="reports-overview-main">
-            <span>
-              Overall Attendance
-            </span>
+            <span>Overall Attendance</span>
 
             <strong>
               {loading
                 ? "..."
-                : formatPercentage(
-                    metricsData.overallAttendance
-                  )}
+                : formatPercentage(metricsData.overallAttendance)}
             </strong>
 
             <div className="reports-progress-track">
@@ -713,13 +640,10 @@ function Reports() {
                 className="reports-progress-fill"
                 style={{
                   width:
-                    metricsData.overallAttendance !==
-                    null
+                    metricsData.overallAttendance !== null
                       ? `${Math.min(
                           Math.max(
-                            Number(
-                              metricsData.overallAttendance
-                            ),
+                            Number(metricsData.overallAttendance),
                             0
                           ),
                           100
@@ -732,42 +656,32 @@ function Reports() {
 
           <div className="reports-overview-stat">
             <span className="reports-stat-dot present" />
-
             <div>
               <small>Present</small>
-
               <strong>
                 {loading
                   ? "..."
-                  : formatMetric(
-                      metricsData.totalPresent
-                    )}
+                  : formatMetric(metricsData.totalPresent)}
               </strong>
             </div>
           </div>
 
           <div className="reports-overview-stat">
             <span className="reports-stat-dot absent" />
-
             <div>
               <small>Absent</small>
-
               <strong>
                 {loading
                   ? "..."
-                  : formatMetric(
-                      metricsData.totalAbsent
-                    )}
+                  : formatMetric(metricsData.totalAbsent)}
               </strong>
             </div>
           </div>
 
           <div className="reports-overview-stat">
             <span className="reports-stat-dot late" />
-
             <div>
               <small>Late</small>
-
               <strong>N/A</strong>
             </div>
           </div>
@@ -778,11 +692,7 @@ function Reports() {
         <div className="reports-section-heading">
           <div>
             <h2>Student Attendance</h2>
-
-            <p>
-              Attendance summary for students in
-              your assigned classes.
-            </p>
+            <p>Attendance summary for students in your assigned classes.</p>
           </div>
         </div>
 
@@ -790,10 +700,7 @@ function Reports() {
           {loading ? (
             <div className="reports-empty-state">
               <div className="reports-empty-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path
                     d="M5 4h14v16H5z"
                     fill="none"
@@ -801,7 +708,6 @@ function Reports() {
                     strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
-
                   <path
                     d="M8 8h8M8 12h8M8 16h5"
                     fill="none"
@@ -811,23 +717,13 @@ function Reports() {
                   />
                 </svg>
               </div>
-
-              <h3>
-                Loading attendance reports
-              </h3>
-
-              <p>
-                Fetching attendance data from
-                the backend.
-              </p>
+              <h3>Loading attendance reports</h3>
+              <p>Fetching attendance data from the backend.</p>
             </div>
           ) : reportStudents.length === 0 ? (
             <div className="reports-empty-state">
               <div className="reports-empty-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path
                     d="M5 4h14v16H5z"
                     fill="none"
@@ -835,7 +731,6 @@ function Reports() {
                     strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
-
                   <path
                     d="M8 8h8M8 12h8M8 16h5"
                     fill="none"
@@ -845,23 +740,16 @@ function Reports() {
                   />
                 </svg>
               </div>
-
-              <h3>
-                No attendance reports available
-              </h3>
-
+              <h3>No attendance reports available</h3>
               <p>
-                No student attendance data was
-                returned for the selected filters.
+                No student attendance data was returned for the selected
+                filters.
               </p>
             </div>
           ) : filteredStudents.length === 0 ? (
             <div className="reports-empty-state compact">
               <div className="reports-empty-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
                   <circle
                     cx="11"
                     cy="11"
@@ -870,7 +758,6 @@ function Reports() {
                     stroke="currentColor"
                     strokeWidth="1.8"
                   />
-
                   <path
                     d="m20 20-4-4"
                     fill="none"
@@ -880,15 +767,8 @@ function Reports() {
                   />
                 </svg>
               </div>
-
-              <h3>
-                No matching reports
-              </h3>
-
-              <p>
-                Try changing your search or
-                filters.
-              </p>
+              <h3>No matching reports</h3>
+              <p>Try changing your search or filters.</p>
             </div>
           ) : (
             <div className="reports-table-wrapper">
@@ -908,74 +788,36 @@ function Reports() {
                 </thead>
 
                 <tbody>
-                  {filteredStudents.map(
-                    (student) => (
-                      <tr key={student.id}>
-                        <td>
-                          <div className="reports-student">
-                            <div className="reports-student-avatar">
-                              {getInitials(
-                                student.studentName
-                              )}
-                            </div>
-
-                            <strong>
-                              {student.studentName}
-                            </strong>
+                  {filteredStudents.map((student) => (
+                    <tr key={student.id}>
+                      <td>
+                        <div className="reports-student">
+                          <div className="reports-student-avatar">
+                            {getInitials(student.studentName)}
                           </div>
-                        </td>
+                          <strong>{student.studentName}</strong>
+                        </div>
+                      </td>
 
-                        <td>
-                          {student.studentId ||
-                            "N/A"}
-                        </td>
+                      <td>{student.studentId || "N/A"}</td>
+                      <td>{student.className || "N/A"}</td>
+                      <td>{student.sessions ?? "N/A"}</td>
+                      <td>{student.present ?? "N/A"}</td>
+                      <td>{student.absent ?? "N/A"}</td>
+                      <td>N/A</td>
+                      <td>{formatPercentage(student.attendanceRate)}</td>
 
-                        <td>
-                          {student.className ||
-                            "N/A"}
-                        </td>
-
-                        <td>
-                          {student.sessions ??
-                            "N/A"}
-                        </td>
-
-                        <td>
-                          {student.present ??
-                            "N/A"}
-                        </td>
-
-                        <td>
-                          {student.absent ??
-                            "N/A"}
-                        </td>
-
-                        <td>
-                          N/A
-                        </td>
-
-                        <td>
-                          {formatPercentage(
-                            student.attendanceRate
-                          )}
-                        </td>
-
-                        <td>
-                          <button
-                            type="button"
-                            className="reports-view-button"
-                            onClick={() =>
-                              setSelectedStudent(
-                                student
-                              )
-                            }
-                          >
-                            View
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  )}
+                      <td>
+                        <button
+                          type="button"
+                          className="reports-view-button"
+                          onClick={() => setSelectedStudent(student)}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -984,31 +826,18 @@ function Reports() {
 
         <div className="reports-list-footer">
           <span>
-            Showing{" "}
-            {filteredStudents.length} of{" "}
-            {reportStudents.length} students
+            Showing {filteredStudents.length} of {reportStudents.length}{" "}
+            students
           </span>
 
           <div className="reports-pagination">
-            <button
-              type="button"
-              disabled
-            >
+            <button type="button" disabled>
               ‹ Previous
             </button>
-
-            <button
-              type="button"
-              className="active"
-              disabled
-            >
+            <button type="button" className="active" disabled>
               1
             </button>
-
-            <button
-              type="button"
-              disabled
-            >
+            <button type="button" disabled>
               Next ›
             </button>
           </div>
@@ -1018,36 +847,21 @@ function Reports() {
       <section className="reports-section">
         <div className="reports-section-heading">
           <div>
-            <h2>
-              Class-wise Attendance
-            </h2>
-
-            <p>
-              Attendance summary across your
-              assigned classes.
-            </p>
+            <h2>Class-wise Attendance</h2>
+            <p>Attendance summary across your assigned classes.</p>
           </div>
         </div>
 
         <div className="reports-table-card class-report-card">
           {loading ? (
             <div className="reports-empty-state compact">
-              <h3>
-                Loading class reports
-              </h3>
-
-              <p>
-                Fetching class analytics from
-                the backend.
-              </p>
+              <h3>Loading class reports</h3>
+              <p>Fetching class analytics from the backend.</p>
             </div>
           ) : classReports.length === 0 ? (
             <div className="reports-empty-state compact">
               <div className="reports-empty-icon">
-                <svg
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path
                     d="M4 5h16v14H4z"
                     fill="none"
@@ -1055,7 +869,6 @@ function Reports() {
                     strokeWidth="1.8"
                     strokeLinejoin="round"
                   />
-
                   <path
                     d="M8 9h8M8 13h5"
                     fill="none"
@@ -1065,14 +878,9 @@ function Reports() {
                   />
                 </svg>
               </div>
-
-              <h3>
-                No class reports available
-              </h3>
-
+              <h3>No class reports available</h3>
               <p>
-                No class attendance summaries
-                were returned for the selected
+                No class attendance summaries were returned for the selected
                 filters.
               </p>
             </div>
@@ -1090,41 +898,28 @@ function Reports() {
                 </thead>
 
                 <tbody>
-                  {classReports.map(
-                    (report) => (
-                      <tr key={report.id}>
-                        <td>
-                          {report.className ||
-                            "N/A"}
-                        </td>
+                  {classReports.map((report) => (
+                    <tr key={report.id}>
+                      <td>{report.className || "N/A"}</td>
+                      <td>{report.students ?? "N/A"}</td>
+                      <td>{report.sessions ?? "N/A"}</td>
+                      <td>{formatPercentage(report.attendanceRate)}</td>
 
-                        <td>
-                          {report.students ??
-                            "N/A"}
-                        </td>
-
-                        <td>
-                          {report.sessions ??
-                            "N/A"}
-                        </td>
-
-                        <td>
-                          {formatPercentage(
-                            report.attendanceRate
-                          )}
-                        </td>
-
-                        <td>
-                          <button
-                            type="button"
-                            className="reports-view-button"
-                          >
-                            View
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  )}
+                      <td>
+                        <button
+                          type="button"
+                          className="reports-view-button"
+                          onClick={() => {
+                            setSelectedClass(String(report.offeringId));
+                            setStatus("All");
+                            setSearchTerm("");
+                          }}
+                        >
+                          View
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -1135,72 +930,55 @@ function Reports() {
       {showExportModal && (
         <div
           className="reports-modal-backdrop"
-          onMouseDown={() =>
-            setShowExportModal(false)
-          }
+          onMouseDown={() => setShowExportModal(false)}
         >
           <div
             className="reports-modal"
-            onMouseDown={(event) =>
-              event.stopPropagation()
-            }
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="reports-modal-header">
               <div>
-                <span className="reports-eyebrow">
-                  REPORTS
-                </span>
-
+                <span className="reports-eyebrow">REPORTS</span>
                 <h2>Export Report</h2>
               </div>
 
               <button
                 type="button"
                 className="reports-modal-close"
-                onClick={() =>
-                  setShowExportModal(false)
-                }
+                onClick={() => setShowExportModal(false)}
                 aria-label="Close"
               >
-                <FontAwesomeIcon
-                  icon={faXmark}
-                />
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
             <div className="reports-modal-body">
               <p>
-                Export functionality requires
-                a backend export endpoint.
+                Export the currently filtered attendance report as a CSV
+                file.
               </p>
 
               <div className="reports-export-options">
                 <button
                   type="button"
-                  disabled
+                  onClick={exportCSV}
+                  disabled={loading || filteredStudents.length === 0}
                 >
                   CSV
                 </button>
 
-                <button
-                  type="button"
-                  disabled
-                >
+                <button type="button" disabled>
                   Excel
                 </button>
 
-                <button
-                  type="button"
-                  disabled
-                >
+                <button type="button" disabled>
                   PDF
                 </button>
               </div>
 
               <div className="reports-export-pending">
-                Export endpoints are not
-                currently available in the
-                faculty reporting API.
+                CSV export is available. Excel and PDF export are not
+                implemented yet.
               </div>
             </div>
 
@@ -1208,9 +986,7 @@ function Reports() {
               <button
                 type="button"
                 className="reports-secondary-button"
-                onClick={() =>
-                  setShowExportModal(false)
-                }
+                onClick={() => setShowExportModal(false)}
               >
                 Close
               </button>
@@ -1222,127 +998,79 @@ function Reports() {
       {selectedStudent && (
         <div
           className="reports-modal-backdrop"
-          onMouseDown={() =>
-            setSelectedStudent(null)
-          }
+          onMouseDown={() => setSelectedStudent(null)}
         >
           <div
             className="reports-modal"
-            onMouseDown={(event) =>
-              event.stopPropagation()
-            }
+            onMouseDown={(event) => event.stopPropagation()}
           >
             <div className="reports-modal-header">
               <div>
-                <span className="reports-eyebrow">
-                  STUDENT REPORT
-                </span>
-
-                <h2>
-                  Attendance Report
-                </h2>
+                <span className="reports-eyebrow">STUDENT REPORT</span>
+                <h2>Attendance Report</h2>
               </div>
 
               <button
                 type="button"
                 className="reports-modal-close"
-                onClick={() =>
-                  setSelectedStudent(null)
-                }
+                onClick={() => setSelectedStudent(null)}
                 aria-label="Close"
               >
-                <FontAwesomeIcon
-                  icon={faXmark}
-                />
+                <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
             <div className="reports-student-detail">
               <div className="reports-detail-profile">
                 <div className="reports-detail-avatar">
-                  {getInitials(
-                    selectedStudent.studentName
-                  )}
+                  {getInitials(selectedStudent.studentName)}
                 </div>
 
                 <div>
-                  <strong>
-                    {selectedStudent.studentName ||
-                      "N/A"}
-                  </strong>
-
-                  <span>
-                    {selectedStudent.studentId ||
-                      "N/A"}
-                  </span>
+                  <strong>{selectedStudent.studentName || "N/A"}</strong>
+                  <span>{selectedStudent.studentId || "N/A"}</span>
                 </div>
               </div>
 
               <div className="reports-detail-grid">
                 <div>
                   <span>Class</span>
-
-                  <strong>
-                    {selectedStudent.className ||
-                      "N/A"}
-                  </strong>
+                  <strong>{selectedStudent.className || "N/A"}</strong>
                 </div>
 
                 <div>
-                  <span>
-                    Total Sessions
-                  </span>
-
-                  <strong>
-                    {selectedStudent.sessions ??
-                      "N/A"}
-                  </strong>
+                  <span>Total Sessions</span>
+                  <strong>{selectedStudent.sessions ?? "N/A"}</strong>
                 </div>
 
                 <div>
                   <span>Present</span>
-
-                  <strong>
-                    {selectedStudent.present ??
-                      "N/A"}
-                  </strong>
+                  <strong>{selectedStudent.present ?? "N/A"}</strong>
                 </div>
 
                 <div>
                   <span>Absent</span>
-
-                  <strong>
-                    {selectedStudent.absent ??
-                      "N/A"}
-                  </strong>
+                  <strong>{selectedStudent.absent ?? "N/A"}</strong>
                 </div>
 
                 <div>
                   <span>Late</span>
-
                   <strong>N/A</strong>
                 </div>
 
                 <div>
                   <span>Attendance</span>
-
                   <strong>
-                    {formatPercentage(
-                      selectedStudent.attendanceRate
-                    )}
+                    {formatPercentage(selectedStudent.attendanceRate)}
                   </strong>
                 </div>
               </div>
             </div>
 
             <div className="reports-history-placeholder">
-              <strong>
-                Attendance History
-              </strong>
-
+              <strong>Attendance History</strong>
               <p>
-                Detailed attendance history is
-                not provided by the current
+                Detailed attendance history is not provided by the current
                 faculty reports endpoint.
               </p>
             </div>
@@ -1351,9 +1079,7 @@ function Reports() {
               <button
                 type="button"
                 className="reports-secondary-button"
-                onClick={() =>
-                  setSelectedStudent(null)
-                }
+                onClick={() => setSelectedStudent(null)}
               >
                 Close
               </button>

@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import "./Settings.css";
 
+import { useState } from "react";
+import "./Settings.css";
 import useAppearance from "../../hooks/useAppearance";
 
 const SETTINGS_STORAGE_KEY = "sams-faculty-settings";
@@ -16,22 +16,50 @@ const DEFAULT_FACULTY_SETTINGS = {
 
 const loadFacultySettings = () => {
   try {
-    const storedSettings = localStorage.getItem(
-      SETTINGS_STORAGE_KEY,
-    );
+    const storedSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
 
     if (!storedSettings) {
-      return DEFAULT_FACULTY_SETTINGS;
+      return { ...DEFAULT_FACULTY_SETTINGS };
     }
 
     const parsedSettings = JSON.parse(storedSettings);
 
-    return {
-      ...DEFAULT_FACULTY_SETTINGS,
-      ...parsedSettings,
-    };
+    if (
+      !parsedSettings ||
+      typeof parsedSettings !== "object" ||
+      Array.isArray(parsedSettings)
+    ) {
+      return { ...DEFAULT_FACULTY_SETTINGS };
+    }
+
+    const validSettings = {};
+
+    Object.entries(DEFAULT_FACULTY_SETTINGS).forEach(
+      ([key, defaultValue]) => {
+        const value = parsedSettings[key];
+
+        validSettings[key] =
+          typeof value === typeof defaultValue
+            ? value
+            : defaultValue;
+      },
+    );
+
+    return validSettings;
   } catch {
-    return DEFAULT_FACULTY_SETTINGS;
+    return { ...DEFAULT_FACULTY_SETTINGS };
+  }
+};
+
+const saveFacultySettings = (settings) => {
+  try {
+    localStorage.setItem(
+      SETTINGS_STORAGE_KEY,
+      JSON.stringify(settings),
+    );
+    return true;
+  } catch {
+    return false;
   }
 };
 
@@ -45,21 +73,27 @@ function Settings() {
 
   const [settings, setSettings] = useState(loadFacultySettings);
   const [saveMessage, setSaveMessage] = useState("");
+  const [saveStatus, setSaveStatus] = useState("idle");
 
-  useEffect(() => {
-    localStorage.setItem(
-      SETTINGS_STORAGE_KEY,
-      JSON.stringify(settings),
+  const persistSettings = (nextSettings) => {
+    const saved = saveFacultySettings(nextSettings);
+
+    setSaveStatus(saved ? "saved" : "error");
+    setSaveMessage(
+      saved
+        ? "Faculty preferences saved locally."
+        : "Preferences could not be saved in this browser.",
     );
-  }, [settings]);
+  };
 
   const updateSetting = (key, value) => {
-    setSettings((current) => ({
-      ...current,
+    const nextSettings = {
+      ...settings,
       [key]: value,
-    }));
+    };
 
-    setSaveMessage("Settings saved.");
+    setSettings(nextSettings);
+    persistSettings(nextSettings);
   };
 
   const updateAppearance = (key, value) => {
@@ -71,14 +105,17 @@ function Settings() {
       setSidebarMode(value);
     }
 
-    setSaveMessage("Settings saved.");
+    setSaveStatus("pending");
+    setSaveMessage("Appearance preference updated.");
   };
 
   const handleReset = () => {
-    setSettings(DEFAULT_FACULTY_SETTINGS);
+    const defaultSettings = { ...DEFAULT_FACULTY_SETTINGS };
+
+    setSettings(defaultSettings);
+    persistSettings(defaultSettings);
     setTheme("light");
     setSidebarMode("expanded");
-    setSaveMessage("Settings restored to default.");
   };
 
   const renderRadioOption = (
@@ -88,7 +125,10 @@ function Settings() {
     currentValue,
     onChange,
   ) => (
-    <label className="faculty-settings-radio-option">
+    <label
+      className="faculty-settings-radio-option"
+      key={`${name}-${value}`}
+    >
       <input
         type="radio"
         name={name}
@@ -96,7 +136,6 @@ function Settings() {
         checked={currentValue === value}
         onChange={() => onChange(value)}
       />
-
       <span>{label}</span>
     </label>
   );
@@ -108,9 +147,7 @@ function Settings() {
           <span className="faculty-settings-eyebrow">
             FACULTY PORTAL
           </span>
-
           <h1>Settings</h1>
-
           <p>
             Manage your faculty portal preferences and attendance
             settings.
@@ -124,18 +161,26 @@ function Settings() {
       </section>
 
       {saveMessage && (
-        <div className="faculty-settings-save-message">
-          <span aria-hidden="true">✓</span>
+        <div
+          className="faculty-settings-save-message"
+          role="status"
+          aria-live="polite"
+          data-status={saveStatus}
+        >
+          <span aria-hidden="true">
+            {saveStatus === "error"
+              ? "!"
+              : saveStatus === "pending"
+                ? "…"
+                : "✓"}
+          </span>
           {saveMessage}
         </div>
       )}
 
-      {/* Appearance */}
-
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>Appearance</h2>
-
           <p>
             Customize how the faculty portal looks and behaves.
           </p>
@@ -145,7 +190,6 @@ function Settings() {
           <div className="faculty-settings-row">
             <div className="faculty-settings-row-content">
               <h3>Theme</h3>
-
               <p>
                 Choose the appearance used throughout the SAMS-FR
                 application.
@@ -160,7 +204,6 @@ function Settings() {
                 theme,
                 (value) => updateAppearance("theme", value),
               )}
-
               {renderRadioOption(
                 "theme",
                 "dark",
@@ -168,7 +211,6 @@ function Settings() {
                 theme,
                 (value) => updateAppearance("theme", value),
               )}
-
               {renderRadioOption(
                 "theme",
                 "system",
@@ -184,9 +226,8 @@ function Settings() {
           <div className="faculty-settings-row">
             <div className="faculty-settings-row-content">
               <h3>Sidebar</h3>
-
               <p>
-                Choose whether the Faculty sidebar starts expanded
+                Choose whether the faculty sidebar starts expanded
                 or compact.
               </p>
             </div>
@@ -197,29 +238,23 @@ function Settings() {
                 "expanded",
                 "Expanded",
                 sidebarMode,
-                (value) =>
-                  updateAppearance("sidebar", value),
+                (value) => updateAppearance("sidebar", value),
               )}
-
               {renderRadioOption(
                 "sidebar",
                 "compact",
                 "Compact",
                 sidebarMode,
-                (value) =>
-                  updateAppearance("sidebar", value),
+                (value) => updateAppearance("sidebar", value),
               )}
             </div>
           </div>
         </div>
       </section>
 
-      {/* Attendance Preferences */}
-
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>Attendance Preferences</h2>
-
           <p>
             Configure your preferred attendance workflow.
           </p>
@@ -229,7 +264,6 @@ function Settings() {
           <div className="faculty-settings-row">
             <div className="faculty-settings-row-content">
               <h3>Default Attendance View</h3>
-
               <p>
                 Select the preferred view when working with attendance
                 records.
@@ -242,17 +276,14 @@ function Settings() {
                 "list",
                 "List View",
                 settings.attendanceView,
-                (value) =>
-                  updateSetting("attendanceView", value),
+                (value) => updateSetting("attendanceView", value),
               )}
-
               {renderRadioOption(
                 "attendance-view",
                 "session",
                 "Session View",
                 settings.attendanceView,
-                (value) =>
-                  updateSetting("attendanceView", value),
+                (value) => updateSetting("attendanceView", value),
               )}
             </div>
           </div>
@@ -262,7 +293,6 @@ function Settings() {
           <div className="faculty-settings-toggle-row">
             <div className="faculty-settings-row-content">
               <h3>Confirmation Before Starting Attendance</h3>
-
               <p>
                 Ask for confirmation before starting an attendance
                 session.
@@ -292,10 +322,9 @@ function Settings() {
           <div className="faculty-settings-toggle-row">
             <div className="faculty-settings-row-content">
               <h3>Session Notifications</h3>
-
               <p>
-                Receive notifications related to your attendance
-                sessions.
+                Set your preference for notifications related to
+                attendance sessions.
               </p>
             </div>
 
@@ -319,114 +348,66 @@ function Settings() {
         </div>
       </section>
 
-      {/* Notifications */}
-
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>Notifications</h2>
-
-          <p>
-            Manage the types of faculty notifications you want to
-            receive.
-          </p>
+          <p>Manage your notification preferences.</p>
         </div>
 
         <div className="faculty-settings-card">
-          <div className="faculty-settings-toggle-row">
-            <div className="faculty-settings-row-content">
-              <h3>Attendance Session Alerts</h3>
+          {[
+            {
+              key: "attendanceAlerts",
+              title: "Attendance Session Alerts",
+              description:
+                "Set your preference for attendance session alerts.",
+            },
+            {
+              key: "reportAvailability",
+              title: "Report Availability",
+              description:
+                "Set your preference for report availability notifications.",
+            },
+            {
+              key: "systemAnnouncements",
+              title: "System Announcements",
+              description:
+                "Set your preference for system announcement notifications.",
+            },
+          ].map((item, index) => (
+            <div key={item.key}>
+              {index > 0 && (
+                <div className="faculty-settings-divider" />
+              )}
 
-              <p>
-                Notifications related to attendance sessions.
-              </p>
+              <div className="faculty-settings-toggle-row">
+                <div className="faculty-settings-row-content">
+                  <h3>{item.title}</h3>
+                  <p>{item.description}</p>
+                </div>
+
+                <button
+                  type="button"
+                  className={`faculty-settings-toggle ${
+                    settings[item.key] ? "active" : ""
+                  }`}
+                  onClick={() =>
+                    updateSetting(item.key, !settings[item.key])
+                  }
+                  aria-pressed={settings[item.key]}
+                  aria-label={`Toggle ${item.title}`}
+                >
+                  <span />
+                </button>
+              </div>
             </div>
-
-            <button
-              type="button"
-              className={`faculty-settings-toggle ${
-                settings.attendanceAlerts ? "active" : ""
-              }`}
-              onClick={() =>
-                updateSetting(
-                  "attendanceAlerts",
-                  !settings.attendanceAlerts,
-                )
-              }
-              aria-pressed={settings.attendanceAlerts}
-              aria-label="Toggle attendance session alerts"
-            >
-              <span />
-            </button>
-          </div>
-
-          <div className="faculty-settings-divider" />
-
-          <div className="faculty-settings-toggle-row">
-            <div className="faculty-settings-row-content">
-              <h3>Report Availability</h3>
-
-              <p>
-                Notifications when attendance reports become
-                available.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              className={`faculty-settings-toggle ${
-                settings.reportAvailability ? "active" : ""
-              }`}
-              onClick={() =>
-                updateSetting(
-                  "reportAvailability",
-                  !settings.reportAvailability,
-                )
-              }
-              aria-pressed={settings.reportAvailability}
-              aria-label="Toggle report availability notifications"
-            >
-              <span />
-            </button>
-          </div>
-
-          <div className="faculty-settings-divider" />
-
-          <div className="faculty-settings-toggle-row">
-            <div className="faculty-settings-row-content">
-              <h3>System Announcements</h3>
-
-              <p>
-                Receive important announcements from the SAMS-FR
-                system.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              className={`faculty-settings-toggle ${
-                settings.systemAnnouncements ? "active" : ""
-              }`}
-              onClick={() =>
-                updateSetting(
-                  "systemAnnouncements",
-                  !settings.systemAnnouncements,
-                )
-              }
-              aria-pressed={settings.systemAnnouncements}
-              aria-label="Toggle system announcements"
-            >
-              <span />
-            </button>
-          </div>
+          ))}
         </div>
       </section>
-
-      {/* System Information */}
 
       <section className="faculty-settings-section">
         <div className="faculty-settings-section-heading">
           <h2>System Information</h2>
-
           <p>
             Technical information about the SAMS-FR application.
           </p>
@@ -437,37 +418,30 @@ function Settings() {
             <span>Application</span>
             <strong>SAMS-FR</strong>
           </div>
-
           <div>
             <span>Version</span>
             <strong>1.0.0</strong>
           </div>
-
           <div>
             <span>Frontend</span>
             <strong>React + Vite</strong>
           </div>
-
           <div>
             <span>Backend</span>
             <strong>Flask</strong>
           </div>
-
           <div>
             <span>Database</span>
             <strong>MySQL</strong>
           </div>
-
           <div>
             <span>Recognition</span>
             <strong>Face Recognition</strong>
           </div>
-
           <div>
             <span>Environment</span>
             <strong>Development</strong>
           </div>
-
           <div>
             <span>Portal</span>
             <strong>Faculty</strong>
@@ -475,15 +449,11 @@ function Settings() {
         </div>
       </section>
 
-      {/* Restore Defaults */}
-
       <section className="faculty-settings-actions">
         <div>
           <strong>Restore default preferences</strong>
-
           <p>
-            Reset your faculty portal settings to their original
-            defaults.
+            Reset faculty preferences and appearance to their defaults.
           </p>
         </div>
 

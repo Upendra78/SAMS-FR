@@ -2,7 +2,7 @@ from datetime import date
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
-
+from sqlalchemy import func
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -12,6 +12,7 @@ from app.models import (
 )
 from app.utils.auth import faculty_required
 
+MINIMUM_ATTENDANCE_PERCENTAGE = 75.0
 
 analytics_bp = Blueprint(
     "analytics",
@@ -98,6 +99,7 @@ def get_attendance_analytics():
     total_students = 0
     total_present = 0
     total_absent = 0
+    low_attendance_students = 0
 
     for offering in offerings:
         session_query = AttendanceSession.query.filter(
@@ -139,6 +141,39 @@ def get_attendance_analytics():
         )
 
         student_count = len(enrollments)
+
+        low_attendance_count = 0
+
+        if session_count > 0 and enrollments:
+            student_ids = [
+                enrollment.student_id
+                for enrollment in enrollments
+            ]
+
+            present_counts = dict(
+                AttendanceRecord.query.with_entities(
+                    AttendanceRecord.student_id,
+                    func.count(AttendanceRecord.session_id),
+                )
+                .filter(
+                    AttendanceRecord.session_id.in_(session_ids),
+                    AttendanceRecord.student_id.in_(student_ids),
+                    AttendanceRecord.status == "PRESENT",
+                )
+                .group_by(AttendanceRecord.student_id)
+                .all()
+            )
+
+            low_attendance_count = sum(
+                1
+                for enrollment in enrollments
+                if (
+                    present_counts.get(enrollment.student_id, 0)
+                    / session_count
+                ) * 100 < MINIMUM_ATTENDANCE_PERCENTAGE
+            )
+
+        low_attendance_students += low_attendance_count
 
         present_count = 0
 
@@ -190,6 +225,7 @@ def get_attendance_analytics():
                 attendance_percentage,
                 2,
             ),
+            "low_attendance_students": low_attendance_count,
         })
 
     total_possible_attendance = total_present + total_absent
@@ -226,5 +262,9 @@ def get_attendance_analytics():
                 2,
             ),
             "courses": course_reports,
+            "minimum_attendance_percentage": (
+                MINIMUM_ATTENDANCE_PERCENTAGE
+            ),
+            "low_attendance_students": low_attendance_students,
         },
     }), 200

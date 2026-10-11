@@ -898,9 +898,7 @@ function Attendance() {
         setSelectedSession(closedSession);
       }
 
-      setAttendanceRecords((currentRecords) => [
-        ...currentRecords,
-      ]);
+      await loadAttendanceRecords(closedSession);
     } catch (requestError) {
       setCloseError(
         requestError?.response?.data?.message ||

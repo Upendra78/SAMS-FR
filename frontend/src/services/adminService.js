@@ -187,11 +187,41 @@ export async function getAdminDepartments() {
   return response.data;
 }
 
+export async function createAdminDepartment(departmentData) {
+  const response = await api.post(
+    "/admin/departments",
+    departmentData,
+  );
+  return response.data;
+}
+
+export async function updateAdminDepartment(
+  departmentId,
+  departmentData,
+) {
+  const response = await api.patch(
+    `/admin/departments/${departmentId}`,
+    departmentData,
+  );
+  return response.data;
+}
+
+export async function deleteAdminDepartment(departmentId) {
+  const response = await api.delete(
+    `/admin/departments/${departmentId}`,
+  );
+  return response.data;
+}
 
  // ==================== COURSE OFFERINGS ====================
 
 export async function getAdminCourses() {
   const response = await api.get("/admin/courses");
+  return response.data;
+}
+
+export async function createAdminCourse(courseData) {
+  const response = await api.post("/admin/courses", courseData);
   return response.data;
 }
 
@@ -226,3 +256,11 @@ export async function deleteAdminCourseOffering(offeringId) {
   return response.data;
 }
 
+
+export async function reactivateUser(userId) {
+  const response = await api.patch(
+    `/admin/users/${userId}/reactivate`
+  );
+
+  return response.data;
+}

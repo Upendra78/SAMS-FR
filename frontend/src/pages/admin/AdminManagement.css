@@ -443,6 +443,87 @@
 }
 
 /* =========================================================
+   USER ACCOUNT STATUS
+   ========================================================= */
+
+.admin-user-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-user-status-active {
+  background: #e3f8ec;
+  color: #16804a;
+}
+
+.admin-user-status-inactive {
+  background: #fff0f0;
+  color: #c0392b;
+}
+
+
+.admin-reactivate-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 11px;
+  border: 1px solid #b8e5cb;
+  border-radius: 7px;
+  background: #eaf8ef;
+  color: #167443;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.admin-reactivate-button:hover:not(:disabled) {
+  background: #d8f2e2;
+  border-color: #8bd1a8;
+}
+
+.admin-reactivate-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.admin-user-row-inactive {
+  background: #fafafa;
+}
+
+.admin-user-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.admin-user-status-active {
+  background: #e3f8ec;
+  color: #16804a;
+}
+
+.admin-user-status-inactive {
+  background: #fff0f0;
+  color: #c0392b;
+}
+
+
+/* =========================================================
    ACTIONS
    ========================================================= */
 
