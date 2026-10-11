@@ -4,7 +4,10 @@ from app.extensions import db
 class Faculty(db.Model):
     __tablename__ = "faculty"
 
-    faculty_id = db.Column(db.Integer, primary_key=True)
+    faculty_id = db.Column(
+        db.Integer,
+        primary_key=True,
+    )
 
     user_id = db.Column(
         db.Integer,
@@ -30,14 +33,18 @@ class Faculty(db.Model):
         nullable=False,
     )
 
+    # The user account associated with this faculty profile.
     user = db.relationship(
         "User",
         back_populates="faculty_profile",
     )
 
+    # The department this faculty member belongs to.
+    # Explicit foreign_keys avoids ambiguity with the HOD relationship.
     department = db.relationship(
         "Department",
         back_populates="faculty",
+        foreign_keys=[department_id],
     )
 
     course_offerings = db.relationship(

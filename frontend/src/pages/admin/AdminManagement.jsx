@@ -1,3 +1,4 @@
+
 import {
   useCallback,
   useContext,
@@ -21,6 +22,8 @@ import {
   faUsers,
   faUserTie,
   faXmark,
+  faRotateRight,
+  faPowerOff,
 } from "@fortawesome/free-solid-svg-icons";
 
 import {
@@ -28,10 +31,10 @@ import {
   getUsers,
   updateUser,
   deleteUser,
+  reactivateUser,
 } from "../../services/adminService";
 
 import AuthContext from "../../context/authContext";
-
 import "./AdminManagement.css";
 
 const PAGE_SIZE = 5;
@@ -53,45 +56,35 @@ const initialEditFormData = {
 };
 
 function getRoleLabel(role) {
-  const normalizedRole = String(role ?? "")
-    .trim()
-    .toUpperCase();
+  const normalized = String(role ?? "").trim().toUpperCase();
 
-  switch (normalizedRole) {
+  switch (normalized) {
     case "STUDENT":
       return "Student";
-
     case "FACULTY":
       return "Faculty";
-
     case "ADMIN":
       return "Admin";
-
     default:
-      return normalizedRole || "Unknown";
+      return normalized || "Unknown";
   }
 }
 
 function getRoleIcon(role) {
-  switch (role) {
+  switch (String(role ?? "").toUpperCase()) {
     case "STUDENT":
       return faUserGraduate;
-
     case "FACULTY":
       return faUserTie;
-
     case "ADMIN":
       return faShieldHalved;
-
     default:
       return faUser;
   }
 }
 
 function getInitials(name) {
-  if (!name) {
-    return "U";
-  }
+  if (!name?.trim()) return "U";
 
   return name
     .trim()
@@ -105,8 +98,15 @@ function getApiErrorMessage(error, fallback) {
   return (
     error?.response?.data?.message ||
     error?.response?.data?.error ||
+    error?.message ||
     fallback
   );
+}
+
+function isUserActive(user) {
+  // Treat only an explicit false as inactive, for compatibility
+  // with existing API responses that may omit is_active.
+  return user?.is_active !== false;
 }
 
 function AdminManagement() {
@@ -114,10 +114,11 @@ function AdminManagement() {
 
   const [users, setUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
+  const [refreshingUsers, setRefreshingUsers] = useState(false);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("ALL");
-
+  const [statusFilter, setStatusFilter] = useState("ALL");
   const [currentPage, setCurrentPage] = useState(1);
 
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -136,32 +137,28 @@ function AdminManagement() {
   const [submitting, setSubmitting] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState(null);
   const [deletingUserId, setDeletingUserId] = useState(null);
+  const [reactivatingUserId, setReactivatingUserId] = useState(null);
 
-  const loadUsers = useCallback(async () => {
-    setLoadingUsers(true);
+  const loadUsers = useCallback(async (showRefresh = false) => {
+    if (showRefresh) {
+      setRefreshingUsers(true);
+    } else {
+      setLoadingUsers(true);
+    }
 
     try {
       const result = await getUsers();
-      console.log("Users API response:", result);
-      console.log("First user object:", result?.data?.[0]);
 
       if (!result?.success) {
         setStatus({
           type: "error",
-          message:
-            result?.message || "Unable to load users.",
+          message: result?.message || "Unable to load users.",
         });
-
-        return;
+        return false;
       }
 
-      setUsers(
-        Array.isArray(result.data)
-          ? result.data
-          : []
-      );
-
-      setCurrentPage(1);
+      setUsers(Array.isArray(result.data) ? result.data : []);
+      return true;
     } catch (error) {
       setStatus({
         type: "error",
@@ -170,15 +167,36 @@ function AdminManagement() {
           "Unable to load users. Please try again."
         ),
       });
+      return false;
     } finally {
       setLoadingUsers(false);
+      setRefreshingUsers(false);
     }
   }, []);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadUsers();
+    let isMounted = true;
+
+    const fetchUsers = async () => {
+      try {
+        await loadUsers();
+      } catch (error) {
+        if (isMounted) {
+          console.error("Failed to load users:", error);
+        }
+      }
+    };
+
+    void fetchUsers();
+
+    return () => {
+      isMounted = false;
+    };
   }, [loadUsers]);
+
+  function showMessage(type, message) {
+    setStatus({ type, message });
+  }
 
   function handleSearchChange(event) {
     setSearchTerm(event.target.value);
@@ -187,6 +205,11 @@ function AdminManagement() {
 
   function handleRoleFilterChange(event) {
     setRoleFilter(event.target.value);
+    setCurrentPage(1);
+  }
+
+  function handleStatusFilterChange(event) {
+    setStatusFilter(event.target.value);
     setCurrentPage(1);
   }
 
@@ -209,19 +232,13 @@ function AdminManagement() {
   }
 
   function openCreateModal() {
-    setStatus({
-      type: "",
-      message: "",
-    });
-
+    setStatus({ type: "", message: "" });
     setFormData(initialFormData);
     setShowCreateModal(true);
   }
 
   function closeCreateModal() {
-    if (submitting) {
-      return;
-    }
+    if (submitting) return;
 
     setShowCreateModal(false);
     setFormData(initialFormData);
@@ -229,48 +246,23 @@ function AdminManagement() {
 
   async function handleCreateUser(event) {
     event.preventDefault();
-
-    setStatus({
-      type: "",
-      message: "",
-    });
+    setStatus({ type: "", message: "" });
 
     const name = formData.name.trim();
     const email = formData.email.trim();
 
-    if (!name) {
-      setStatus({
-        type: "error",
-        message: "Name cannot be empty.",
-      });
-
-      return;
-    }
-
-    if (!email) {
-      setStatus({
-        type: "error",
-        message: "Email cannot be empty.",
-      });
-
+    if (!name || !email) {
+      showMessage("error", "Name and email are required.");
       return;
     }
 
     if (formData.password.length < 8) {
-      setStatus({
-        type: "error",
-        message: "Password must be at least 8 characters.",
-      });
-
+      showMessage("error", "Password must be at least 8 characters.");
       return;
     }
 
     if (formData.password !== formData.confirmPassword) {
-      setStatus({
-        type: "error",
-        message: "Passwords do not match.",
-      });
-
+      showMessage("error", "Passwords do not match.");
       return;
     }
 
@@ -285,47 +277,37 @@ function AdminManagement() {
       });
 
       if (!result?.success) {
-        setStatus({
-          type: "error",
-          message:
-            result?.message || "Unable to create user.",
-        });
-
+        showMessage(
+          "error",
+          result?.message || "Unable to create user."
+        );
         return;
       }
-
-      const createdUserId = result?.data?.user_id;
 
       setShowCreateModal(false);
       setFormData(initialFormData);
 
-      setStatus({
-        type: "success",
-        message: createdUserId
-          ? `User account created successfully. User ID: ${createdUserId}`
-          : "User account created successfully.",
-      });
+      const userId = result?.data?.user_id;
+      showMessage(
+        "success",
+        userId
+          ? `User created successfully. User ID: ${userId}.`
+          : "User created successfully."
+      );
 
-      await loadUsers();
+      await loadUsers(true);
     } catch (error) {
-      setStatus({
-        type: "error",
-        message: getApiErrorMessage(
-          error,
-          "Unable to create user. Please try again."
-        ),
-      });
+      showMessage(
+        "error",
+        getApiErrorMessage(error, "Unable to create user.")
+      );
     } finally {
       setSubmitting(false);
     }
   }
 
   function openEditModal(user) {
-    setStatus({
-      type: "",
-      message: "",
-    });
-
+    setStatus({ type: "", message: "" });
     setEditingUser(user);
 
     setEditFormData({
@@ -338,9 +320,7 @@ function AdminManagement() {
   }
 
   function closeEditModal() {
-    if (updatingUserId !== null) {
-      return;
-    }
+    if (updatingUserId !== null) return;
 
     setEditingUser(null);
     setEditFormData(initialEditFormData);
@@ -349,33 +329,15 @@ function AdminManagement() {
   async function handleUpdateUser(event) {
     event.preventDefault();
 
-    if (!editingUser?.user_id) {
-      return;
-    }
+    if (!editingUser?.user_id) return;
 
-    setStatus({
-      type: "",
-      message: "",
-    });
+    setStatus({ type: "", message: "" });
 
     const name = editFormData.name.trim();
     const email = editFormData.email.trim();
 
-    if (!name) {
-      setStatus({
-        type: "error",
-        message: "Name cannot be empty.",
-      });
-
-      return;
-    }
-
-    if (!email) {
-      setStatus({
-        type: "error",
-        message: "Email cannot be empty.",
-      });
-
+    if (!name || !email) {
+      showMessage("error", "Name and email are required.");
       return;
     }
 
@@ -383,39 +345,23 @@ function AdminManagement() {
       editFormData.password &&
       editFormData.password.length < 8
     ) {
-      setStatus({
-        type: "error",
-        message: "Password must be at least 8 characters.",
-      });
-
+      showMessage("error", "Password must be at least 8 characters.");
       return;
     }
 
-    if (
-      editFormData.password !==
-      editFormData.confirmPassword
-    ) {
-      setStatus({
-        type: "error",
-        message: "Passwords do not match.",
-      });
-
+    if (editFormData.password !== editFormData.confirmPassword) {
+      showMessage("error", "Passwords do not match.");
       return;
     }
 
     const isCurrentUser =
       currentUser?.user_id === editingUser.user_id;
 
-    if (
-      isCurrentUser &&
-      editFormData.role !== "ADMIN"
-    ) {
-      setStatus({
-        type: "error",
-        message:
-          "Your current account must remain an administrator.",
-      });
-
+    if (isCurrentUser && editFormData.role !== "ADMIN") {
+      showMessage(
+        "error",
+        "Your current account must remain an administrator."
+      );
       return;
     }
 
@@ -438,171 +384,208 @@ function AdminManagement() {
       );
 
       if (!result?.success) {
-        setStatus({
-          type: "error",
-          message:
-            result?.message || "Unable to update user.",
-        });
-
+        showMessage(
+          "error",
+          result?.message || "Unable to update user."
+        );
         return;
       }
 
-      setUsers((currentUsers) =>
-        currentUsers.map((user) =>
+      setUsers((current) =>
+        current.map((user) =>
           user.user_id === editingUser.user_id
-            ? {
-                ...user,
-                ...result.data,
-              }
+            ? { ...user, ...result.data }
             : user
         )
       );
 
-      setStatus({
-        type: "success",
-        message: "User updated successfully.",
-      });
-
-      closeEditModal();
+      setEditingUser(null);
+      setEditFormData(initialEditFormData);
+      showMessage("success", "User updated successfully.");
     } catch (error) {
-      setStatus({
-        type: "error",
-        message: getApiErrorMessage(
-          error,
-          "Unable to update user. Please try again."
-        ),
-      });
+      showMessage(
+        "error",
+        getApiErrorMessage(error, "Unable to update user.")
+      );
     } finally {
       setUpdatingUserId(null);
     }
   }
 
   async function handleDeleteUser(user) {
-    if (!user?.user_id) {
-      return;
-    }
+    if (!user?.user_id) return;
 
-    if (
-      currentUser?.user_id &&
-      user.user_id === currentUser.user_id
-    ) {
-      setStatus({
-        type: "error",
-        message:
-          "You cannot delete your current account.",
-      });
-
+    if (currentUser?.user_id === user.user_id) {
+      showMessage("error", "You cannot delete your current account.");
       return;
     }
 
     const confirmed = window.confirm(
-      `Are you sure you want to delete "${user.name}"?`
+      `Remove access for "${user.name}"?\n\n` +
+        "If academic or attendance history exists, the account will " +
+        "be deactivated and that history will be preserved."
     );
 
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
-    setStatus({
-      type: "",
-      message: "",
-    });
-
+    setStatus({ type: "", message: "" });
     setDeletingUserId(user.user_id);
 
     try {
       const result = await deleteUser(user.user_id);
 
       if (!result?.success) {
-        setStatus({
-          type: "error",
-          message:
-            result?.message || "Unable to delete user.",
-        });
-
+        showMessage(
+          "error",
+          result?.message || "Unable to remove this user."
+        );
         return;
       }
 
-      setUsers((currentUsers) =>
-        currentUsers.filter(
-          (item) => item.user_id !== user.user_id
-        )
-      );
+      if (result.action === "deactivated") {
+        setUsers((current) =>
+          current.map((item) =>
+            item.user_id === user.user_id
+              ? { ...item, is_active: false }
+              : item
+          )
+        );
 
-      setStatus({
-        type: "success",
-        message: "User deleted successfully.",
-      });
+        showMessage(
+          "success",
+          result.message ||
+            "Account deactivated. Academic and attendance history has been preserved."
+        );
+      } else if (result.action === "deleted") {
+        setUsers((current) =>
+          current.filter((item) => item.user_id !== user.user_id)
+        );
+
+        showMessage(
+          "success",
+          result.message || "User permanently deleted."
+        );
+      } else {
+        await loadUsers(true);
+        showMessage(
+          "success",
+          result.message || "User operation completed."
+        );
+      }
     } catch (error) {
-      setStatus({
-        type: "error",
-        message: getApiErrorMessage(
-          error,
-          "Unable to delete user. Please try again."
-        ),
-      });
+      showMessage(
+        "error",
+        getApiErrorMessage(error, "Unable to remove this user.")
+      );
     } finally {
       setDeletingUserId(null);
     }
   }
 
-  const userCounts = useMemo(
-    () => ({
-      total: users.length,
+  async function handleReactivateUser(user) {
+    if (!user?.user_id || isUserActive(user)) return;
 
+    const confirmed = window.confirm(
+      `Reactivate "${user.name}"?\n\n` +
+        "This will restore login access to the existing account. " +
+        "Confirm that this person is authorized to return."
+    );
+
+    if (!confirmed) return;
+
+    setStatus({ type: "", message: "" });
+    setReactivatingUserId(user.user_id);
+
+    try {
+      const result = await reactivateUser(user.user_id);
+
+      if (!result?.success) {
+        showMessage(
+          "error",
+          result?.message || "Unable to reactivate this account."
+        );
+        return;
+      }
+
+      setUsers((current) =>
+        current.map((item) =>
+          item.user_id === user.user_id
+            ? {
+                ...item,
+                ...(result.data || {}),
+                is_active: true,
+              }
+            : item
+        )
+      );
+
+      showMessage(
+        "success",
+        result.message ||
+          `${user.name}'s account has been reactivated. Previous academic history remains preserved.`
+      );
+    } catch (error) {
+      showMessage(
+        "error",
+        getApiErrorMessage(
+          error,
+          "Unable to reactivate this account."
+        )
+      );
+    } finally {
+      setReactivatingUserId(null);
+    }
+  }
+
+  const userCounts = useMemo(() => {
+    const active = users.filter(isUserActive).length;
+
+    return {
+      total: users.length,
+      active,
+      inactive: users.length - active,
       students: users.filter(
         (user) => user.role === "STUDENT"
       ).length,
-
       faculty: users.filter(
         (user) => user.role === "FACULTY"
       ).length,
-
       admins: users.filter(
         (user) => user.role === "ADMIN"
       ).length,
-    }),
-    [users]
-  );
+    };
+  }, [users]);
 
   const filteredUsers = useMemo(() => {
-    const searchValue = searchTerm
-      .trim()
-      .toLowerCase();
+    const searchValue = searchTerm.trim().toLowerCase();
 
     return users.filter((user) => {
       const matchesSearch =
         !searchValue ||
-        user.name
-          ?.toLowerCase()
-          .includes(searchValue) ||
-        user.email
-          ?.toLowerCase()
-          .includes(searchValue) ||
-        String(user.user_id)
-          .toLowerCase()
-          .includes(searchValue) ||
-        user.role
-          ?.toLowerCase()
-          .includes(searchValue);
+        user.name?.toLowerCase().includes(searchValue) ||
+        user.email?.toLowerCase().includes(searchValue) ||
+        String(user.user_id).toLowerCase().includes(searchValue) ||
+        user.role?.toLowerCase().includes(searchValue);
 
       const matchesRole =
-        roleFilter === "ALL" ||
-        user.role === roleFilter;
+        roleFilter === "ALL" || user.role === roleFilter;
 
-      return matchesSearch && matchesRole;
+      const active = isUserActive(user);
+      const matchesStatus =
+        statusFilter === "ALL" ||
+        (statusFilter === "ACTIVE" && active) ||
+        (statusFilter === "INACTIVE" && !active);
+
+      return matchesSearch && matchesRole && matchesStatus;
     });
-  }, [users, searchTerm, roleFilter]);
+  }, [users, searchTerm, roleFilter, statusFilter]);
 
   const totalPages = Math.max(
     1,
     Math.ceil(filteredUsers.length / PAGE_SIZE)
   );
 
-  const safeCurrentPage = Math.min(
-    currentPage,
-    totalPages
-  );
+  const safeCurrentPage = Math.min(currentPage, totalPages);
 
   const paginatedUsers = filteredUsers.slice(
     (safeCurrentPage - 1) * PAGE_SIZE,
@@ -628,26 +611,19 @@ function AdminManagement() {
 
         <div>
           <h1>Users Management</h1>
-
-          <p>
-            Manage system login accounts and user access.
-          </p>
+          <p>Manage system accounts, access, and account status.</p>
         </div>
       </div>
 
       {status.message && (
         <div
           className={`admin-form-status admin-form-status-${status.type}`}
-          role="alert"
+          role={status.type === "error" ? "alert" : "status"}
+          aria-live="polite"
         >
           <FontAwesomeIcon
-            icon={
-              status.type === "success"
-                ? faCheck
-                : faXmark
-            }
+            icon={status.type === "success" ? faCheck : faXmark}
           />
-
           <span>{status.message}</span>
         </div>
       )}
@@ -657,11 +633,32 @@ function AdminManagement() {
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faUsers} />
           </div>
-
           <div>
             <span>Total Users</span>
             <strong>{userCounts.total}</strong>
-            <small>All system users</small>
+            <small>All system accounts</small>
+          </div>
+        </article>
+
+        <article className="admin-summary-card">
+          <div className="admin-summary-icon">
+            <FontAwesomeIcon icon={faCheck} />
+          </div>
+          <div>
+            <span>Active Accounts</span>
+            <strong>{userCounts.active}</strong>
+            <small>Login enabled</small>
+          </div>
+        </article>
+
+        <article className="admin-summary-card">
+          <div className="admin-summary-icon">
+            <FontAwesomeIcon icon={faPowerOff} />
+          </div>
+          <div>
+            <span>Inactive Accounts</span>
+            <strong>{userCounts.inactive}</strong>
+            <small>Login disabled</small>
           </div>
         </article>
 
@@ -669,7 +666,6 @@ function AdminManagement() {
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faUserGraduate} />
           </div>
-
           <div>
             <span>Students</span>
             <strong>{userCounts.students}</strong>
@@ -681,7 +677,6 @@ function AdminManagement() {
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faUserTie} />
           </div>
-
           <div>
             <span>Faculty</span>
             <strong>{userCounts.faculty}</strong>
@@ -693,7 +688,6 @@ function AdminManagement() {
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faShieldHalved} />
           </div>
-
           <div>
             <span>Admins</span>
             <strong>{userCounts.admins}</strong>
@@ -706,7 +700,6 @@ function AdminManagement() {
         <div className="admin-users-toolbar">
           <div className="admin-search-box">
             <FontAwesomeIcon icon={faMagnifyingGlass} />
-
             <input
               type="search"
               value={searchTerm}
@@ -717,33 +710,45 @@ function AdminManagement() {
           </div>
 
           <label className="admin-filter-select">
-            <span className="sr-only">
-              Filter by role
-            </span>
-
+            <span className="sr-only">Filter by role</span>
             <select
               value={roleFilter}
               onChange={handleRoleFilterChange}
             >
-              <option value="ALL">
-                All Roles
-              </option>
-
-              <option value="STUDENT">
-                Students
-              </option>
-
-              <option value="FACULTY">
-                Faculty
-              </option>
-
-              <option value="ADMIN">
-                Admins
-              </option>
+              <option value="ALL">All Roles</option>
+              <option value="STUDENT">Students</option>
+              <option value="FACULTY">Faculty</option>
+              <option value="ADMIN">Admins</option>
             </select>
-
             <FontAwesomeIcon icon={faChevronDown} />
           </label>
+
+          <label className="admin-filter-select">
+            <span className="sr-only">Filter by status</span>
+            <select
+              value={statusFilter}
+              onChange={handleStatusFilterChange}
+            >
+              <option value="ALL">All Statuses</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+            </select>
+            <FontAwesomeIcon icon={faChevronDown} />
+          </label>
+
+          <button
+            type="button"
+            className="admin-action-button"
+            onClick={() => loadUsers(true)}
+            disabled={loadingUsers || refreshingUsers}
+            title="Refresh user list"
+          >
+            <FontAwesomeIcon
+              icon={refreshingUsers ? faSpinner : faRotateRight}
+              spin={refreshingUsers}
+            />
+            Refresh
+          </button>
 
           <button
             type="button"
@@ -763,12 +768,7 @@ function AdminManagement() {
         ) : filteredUsers.length === 0 ? (
           <div className="admin-list-state">
             <FontAwesomeIcon icon={faUsers} />
-
-            <span>
-              {searchTerm
-                ? "No users match your search."
-                : "No users found."}
-            </span>
+            <span>No users match the selected filters.</span>
           </div>
         ) : (
           <>
@@ -781,6 +781,7 @@ function AdminManagement() {
                     <th>User ID</th>
                     <th>Email</th>
                     <th>Role</th>
+                    <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -788,20 +789,20 @@ function AdminManagement() {
                 <tbody>
                   {paginatedUsers.map((user, index) => {
                     const isCurrentUser =
-                      currentUser?.user_id ===
-                      user.user_id;
-
-                    const isDeleting =
-                      deletingUserId === user.user_id;
-
-                    const isUpdating =
-                      updatingUserId === user.user_id;
+                      currentUser?.user_id === user.user_id;
+                    const active = isUserActive(user);
+                    const busy =
+                      deletingUserId === user.user_id ||
+                      updatingUserId === user.user_id ||
+                      reactivatingUserId === user.user_id;
 
                     return (
-                      <tr key={user.user_id}>
+                      <tr
+                        key={user.user_id}
+                        className={!active ? "admin-user-row-inactive" : ""}
+                      >
                         <td>
-                          {(safeCurrentPage - 1) *
-                            PAGE_SIZE +
+                          {(safeCurrentPage - 1) * PAGE_SIZE +
                             index +
                             1}
                         </td>
@@ -813,16 +814,10 @@ function AdminManagement() {
                             >
                               {getInitials(user.name)}
                             </div>
-
                             <div>
-                              <strong>
-                                {user.name}
-                              </strong>
-
+                              <strong>{user.name}</strong>
                               {isCurrentUser && (
-                                <small>
-                                  Current account
-                                </small>
+                                <small>Current account</small>
                               )}
                             </div>
                           </div>
@@ -841,12 +836,21 @@ function AdminManagement() {
                             className={`admin-role-badge admin-role-${user.role?.toLowerCase()}`}
                           >
                             <FontAwesomeIcon
-                              icon={getRoleIcon(
-                                user.role
-                              )}
+                              icon={getRoleIcon(user.role)}
                             />
-
                             {getRoleLabel(user.role)}
+                          </span>
+                        </td>
+
+                        <td>
+                          <span
+                            className={`admin-user-status ${
+                              active
+                                ? "admin-user-status-active"
+                                : "admin-user-status-inactive"
+                            }`}
+                          >
+                            {active ? "Active" : "Inactive"}
                           </span>
                         </td>
 
@@ -855,51 +859,58 @@ function AdminManagement() {
                             <button
                               type="button"
                               className="admin-action-button"
-                              onClick={() =>
-                                openEditModal(user)
-                              }
-                              disabled={
-                                isDeleting ||
-                                isUpdating
-                              }
+                              onClick={() => openEditModal(user)}
+                              disabled={busy}
                               title="Edit user"
                             >
                               Edit
                             </button>
 
-                            <button
-                              type="button"
-                              className="admin-action-icon"
-                              onClick={() =>
-                                handleDeleteUser(user)
-                              }
-                              disabled={
-                                isCurrentUser ||
-                                isDeleting ||
-                                isUpdating
-                              }
-                              title={
-                                isCurrentUser
-                                  ? "You cannot delete your current account."
-                                  : "Delete user"
-                              }
-                              aria-label={
-                                isCurrentUser
-                                  ? "Delete disabled for current account"
-                                  : "Delete user"
-                              }
-                            >
-                              {isDeleting ? (
+                            {active ? (
+                              <button
+                                type="button"
+                                className="admin-action-icon"
+                                onClick={() => handleDeleteUser(user)}
+                                disabled={isCurrentUser || busy}
+                                title={
+                                  isCurrentUser
+                                    ? "You cannot remove your current account."
+                                    : "Deactivate or delete account"
+                                }
+                                aria-label={`Remove access for ${user.name}`}
+                              >
+                                {deletingUserId === user.user_id ? (
+                                  <FontAwesomeIcon
+                                    icon={faSpinner}
+                                    spin
+                                  />
+                                ) : (
+                                  <FontAwesomeIcon icon={faTrash} />
+                                )}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="admin-action-button admin-reactivate-button"
+                                onClick={() => handleReactivateUser(user)}
+                                disabled={busy}
+                                title="Restore login access"
+                              >
                                 <FontAwesomeIcon
-                                  icon={faSpinner}
-                                  spin
+                                  icon={
+                                    reactivatingUserId === user.user_id
+                                      ? faSpinner
+                                      : faRotateRight
+                                  }
+                                  spin={
+                                    reactivatingUserId === user.user_id
+                                  }
                                 />
-                              ) : (
-                                <FontAwesomeIcon
-                                  icon={faTrash}
-                                />
-                              )}
-                            </button>
+                                {reactivatingUserId === user.user_id
+                                  ? "Restoring..."
+                                  : "Reactivate"}
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -911,8 +922,7 @@ function AdminManagement() {
 
             <div className="admin-table-footer">
               <span>
-                Showing {firstVisibleUser} to{" "}
-                {lastVisibleUser} of{" "}
+                Showing {firstVisibleUser} to {lastVisibleUser} of{" "}
                 {filteredUsers.length} users
               </span>
 
@@ -920,17 +930,13 @@ function AdminManagement() {
                 <button
                   type="button"
                   onClick={() =>
-                    setCurrentPage((page) =>
-                      Math.max(1, page - 1)
-                    )
+                    setCurrentPage((page) => Math.max(1, page - 1))
                   }
                   disabled={safeCurrentPage === 1}
                   aria-label="Previous page"
                   title="Previous page"
                 >
-                  <FontAwesomeIcon
-                    icon={faChevronLeft}
-                  />
+                  <FontAwesomeIcon icon={faChevronLeft} />
                 </button>
 
                 {Array.from(
@@ -943,13 +949,9 @@ function AdminManagement() {
                       type="button"
                       key={page}
                       className={
-                        safeCurrentPage === page
-                          ? "active"
-                          : ""
+                        safeCurrentPage === page ? "active" : ""
                       }
-                      onClick={() =>
-                        setCurrentPage(page)
-                      }
+                      onClick={() => setCurrentPage(page)}
                     >
                       {page}
                     </button>
@@ -959,21 +961,14 @@ function AdminManagement() {
                   type="button"
                   onClick={() =>
                     setCurrentPage((page) =>
-                      Math.min(
-                        totalPages,
-                        page + 1
-                      )
+                      Math.min(totalPages, page + 1)
                     )
                   }
-                  disabled={
-                    safeCurrentPage === totalPages
-                  }
+                  disabled={safeCurrentPage === totalPages}
                   aria-label="Next page"
                   title="Next page"
                 >
-                  <FontAwesomeIcon
-                    icon={faChevronRight}
-                  />
+                  <FontAwesomeIcon icon={faChevronRight} />
                 </button>
               </div>
             </div>
@@ -991,15 +986,9 @@ function AdminManagement() {
           >
             <div className="admin-modal-header">
               <div>
-                <h2 id="create-user-title">
-                  Add User
-                </h2>
-
-                <p>
-                  Create a new system login account.
-                </p>
+                <h2 id="create-user-title">Add User</h2>
+                <p>Create a new system login account.</p>
               </div>
-
               <button
                 type="button"
                 className="admin-modal-close"
@@ -1016,26 +1005,20 @@ function AdminManagement() {
               onSubmit={handleCreateUser}
             >
               <div className="admin-form-field">
-                <label htmlFor="admin-user-name">
-                  Full Name
-                </label>
-
+                <label htmlFor="admin-user-name">Full Name</label>
                 <input
                   id="admin-user-name"
                   name="name"
-                  type="text"
                   value={formData.name}
                   onChange={handleCreateChange}
                   placeholder="Enter full name"
+                  autoComplete="name"
                   required
                 />
               </div>
 
               <div className="admin-form-field">
-                <label htmlFor="admin-user-email">
-                  Email
-                </label>
-
+                <label htmlFor="admin-user-email">Email</label>
                 <input
                   id="admin-user-email"
                   name="email"
@@ -1043,15 +1026,13 @@ function AdminManagement() {
                   value={formData.email}
                   onChange={handleCreateChange}
                   placeholder="Enter email address"
+                  autoComplete="email"
                   required
                 />
               </div>
 
               <div className="admin-form-field">
-                <label htmlFor="admin-user-password">
-                  Password
-                </label>
-
+                <label htmlFor="admin-user-password">Password</label>
                 <input
                   id="admin-user-password"
                   name="password"
@@ -1060,6 +1041,7 @@ function AdminManagement() {
                   onChange={handleCreateChange}
                   placeholder="Minimum 8 characters"
                   minLength={8}
+                  autoComplete="new-password"
                   required
                 />
               </div>
@@ -1068,7 +1050,6 @@ function AdminManagement() {
                 <label htmlFor="admin-user-confirm-password">
                   Confirm Password
                 </label>
-
                 <input
                   id="admin-user-confirm-password"
                   name="confirmPassword"
@@ -1077,32 +1058,22 @@ function AdminManagement() {
                   onChange={handleCreateChange}
                   placeholder="Re-enter password"
                   minLength={8}
+                  autoComplete="new-password"
                   required
                 />
               </div>
 
               <div className="admin-form-field">
-                <label htmlFor="admin-user-role">
-                  Role
-                </label>
-
+                <label htmlFor="admin-user-role">Role</label>
                 <select
                   id="admin-user-role"
                   name="role"
                   value={formData.role}
                   onChange={handleCreateChange}
                 >
-                  <option value="STUDENT">
-                    Student
-                  </option>
-
-                  <option value="FACULTY">
-                    Faculty
-                  </option>
-
-                  <option value="ADMIN">
-                    Admin
-                  </option>
+                  <option value="STUDENT">Student</option>
+                  <option value="FACULTY">Faculty</option>
+                  <option value="ADMIN">Admin</option>
                 </select>
               </div>
 
@@ -1115,7 +1086,6 @@ function AdminManagement() {
                 >
                   Cancel
                 </button>
-
                 <button
                   type="submit"
                   className="admin-add-user-button"
@@ -1123,10 +1093,7 @@ function AdminManagement() {
                 >
                   {submitting ? (
                     <>
-                      <FontAwesomeIcon
-                        icon={faSpinner}
-                        spin
-                      />
+                      <FontAwesomeIcon icon={faSpinner} spin />
                       Creating...
                     </>
                   ) : (
@@ -1152,22 +1119,14 @@ function AdminManagement() {
           >
             <div className="admin-modal-header">
               <div>
-                <h2 id="edit-user-title">
-                  Edit User
-                </h2>
-
-                <p>
-                  Update the selected user's account.
-                </p>
+                <h2 id="edit-user-title">Edit User</h2>
+                <p>Update the selected user's account.</p>
               </div>
-
               <button
                 type="button"
                 className="admin-modal-close"
                 onClick={closeEditModal}
-                disabled={
-                  updatingUserId !== null
-                }
+                disabled={updatingUserId !== null}
                 aria-label="Close"
               >
                 <FontAwesomeIcon icon={faXmark} />
@@ -1179,46 +1138,34 @@ function AdminManagement() {
               onSubmit={handleUpdateUser}
             >
               <div className="admin-form-field">
-                <label htmlFor="edit-user-name">
-                  Full Name
-                </label>
-
+                <label htmlFor="edit-user-name">Full Name</label>
                 <input
                   id="edit-user-name"
                   name="name"
-                  type="text"
                   value={editFormData.name}
                   onChange={handleEditChange}
-                  disabled={
-                    updatingUserId !== null
-                  }
+                  disabled={updatingUserId !== null}
+                  autoComplete="name"
                   required
                 />
               </div>
 
               <div className="admin-form-field">
-                <label htmlFor="edit-user-email">
-                  Email
-                </label>
-
+                <label htmlFor="edit-user-email">Email</label>
                 <input
                   id="edit-user-email"
                   name="email"
                   type="email"
                   value={editFormData.email}
                   onChange={handleEditChange}
-                  disabled={
-                    updatingUserId !== null
-                  }
+                  disabled={updatingUserId !== null}
+                  autoComplete="email"
                   required
                 />
               </div>
 
               <div className="admin-form-field">
-                <label htmlFor="edit-user-role">
-                  Role
-                </label>
-
+                <label htmlFor="edit-user-role">Role</label>
                 <select
                   id="edit-user-role"
                   name="role"
@@ -1226,21 +1173,12 @@ function AdminManagement() {
                   onChange={handleEditChange}
                   disabled={
                     updatingUserId !== null ||
-                    currentUser?.user_id ===
-                      editingUser.user_id
+                    currentUser?.user_id === editingUser.user_id
                   }
                 >
-                  <option value="STUDENT">
-                    Student
-                  </option>
-
-                  <option value="FACULTY">
-                    Faculty
-                  </option>
-
-                  <option value="ADMIN">
-                    Admin
-                  </option>
+                  <option value="STUDENT">Student</option>
+                  <option value="FACULTY">Faculty</option>
+                  <option value="ADMIN">Admin</option>
                 </select>
               </div>
 
@@ -1248,7 +1186,6 @@ function AdminManagement() {
                 <label htmlFor="edit-user-password">
                   New Password
                 </label>
-
                 <input
                   id="edit-user-password"
                   name="password"
@@ -1257,9 +1194,8 @@ function AdminManagement() {
                   onChange={handleEditChange}
                   placeholder="Leave blank to keep current"
                   minLength={8}
-                  disabled={
-                    updatingUserId !== null
-                  }
+                  autoComplete="new-password"
+                  disabled={updatingUserId !== null}
                 />
               </div>
 
@@ -1267,20 +1203,16 @@ function AdminManagement() {
                 <label htmlFor="edit-user-confirm-password">
                   Confirm New Password
                 </label>
-
                 <input
                   id="edit-user-confirm-password"
                   name="confirmPassword"
                   type="password"
-                  value={
-                    editFormData.confirmPassword
-                  }
+                  value={editFormData.confirmPassword}
                   onChange={handleEditChange}
                   placeholder="Re-enter new password"
                   minLength={8}
-                  disabled={
-                    updatingUserId !== null
-                  }
+                  autoComplete="new-password"
+                  disabled={updatingUserId !== null}
                 />
               </div>
 
@@ -1289,33 +1221,23 @@ function AdminManagement() {
                   type="button"
                   className="admin-modal-cancel"
                   onClick={closeEditModal}
-                  disabled={
-                    updatingUserId !== null
-                  }
+                  disabled={updatingUserId !== null}
                 >
                   Cancel
                 </button>
-
                 <button
                   type="submit"
                   className="admin-add-user-button"
-                  disabled={
-                    updatingUserId !== null
-                  }
+                  disabled={updatingUserId !== null}
                 >
                   {updatingUserId !== null ? (
                     <>
-                      <FontAwesomeIcon
-                        icon={faSpinner}
-                        spin
-                      />
+                      <FontAwesomeIcon icon={faSpinner} spin />
                       Saving...
                     </>
                   ) : (
                     <>
-                      <FontAwesomeIcon
-                        icon={faCheck}
-                      />
+                      <FontAwesomeIcon icon={faCheck} />
                       Save Changes
                     </>
                   )}

@@ -237,6 +237,128 @@ class TestAdminStudents(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
+    def test_delete_user_with_attendance_deactivates_account(self):
+        response = self.client.delete(
+            f"/api/admin/users/{self.student.user_id}",
+            headers=self.admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["action"], "deactivated")
+
+        with self.app.app_context():
+            user = db.session.get(User, self.student.user_id)
+            self.assertIsNotNone(user)
+            self.assertFalse(user.is_active)
+
+            # Academic and attendance history must remain intact.
+            self.assertIsNotNone(
+                db.session.get(Student, self.student_id)
+            )
+            self.assertIsNotNone(
+                AttendanceRecord.query.filter_by(
+                    student_id=self.student_id
+                ).first()
+            )
+            self.assertIsNotNone(
+                Enrollment.query.filter_by(
+                    student_id=self.student_id
+                ).first()
+            )
+
+    def test_delete_user_without_profile_permanently_deletes_account(self):
+        with self.app.app_context():
+            user = User(
+                name="Temporary User",
+                email="temporary@test.local",
+                password_hash="not-used",
+                role="STUDENT",
+            )
+            db.session.add(user)
+            db.session.commit()
+            user_id = user.user_id
+
+        response = self.client.delete(
+            f"/api/admin/users/{user_id}",
+            headers=self.admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["action"], "deleted")
+
+        with self.app.app_context():
+            self.assertIsNone(db.session.get(User, user_id))
+
+    def test_delete_current_admin_is_rejected(self):
+        with self.app.app_context():
+            admin = User.query.filter_by(role="ADMIN").first()
+            admin_id = admin.user_id
+
+        response = self.client.delete(
+            f"/api/admin/users/{admin_id}",
+            headers=self.admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+        with self.app.app_context():
+            admin = db.session.get(User, admin_id)
+            self.assertIsNotNone(admin)
+            self.assertTrue(admin.is_active)
+
+    def test_update_current_admin_cannot_be_deactivated(self):
+        with self.app.app_context():
+            admin = User.query.filter_by(role="ADMIN").first()
+            admin_id = admin.user_id
+
+        response = self.client.patch(
+            f"/api/admin/users/{admin_id}",
+            headers=self.admin_headers(),
+            json={"is_active": False},
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+        with self.app.app_context():
+            admin = db.session.get(User, admin_id)
+            self.assertTrue(admin.is_active)
+
+
+    def test_last_active_admin_cannot_be_deactivated(self):
+        with self.app.app_context():
+            # Make the token owner's account inactive and create
+            # one different, active administrator to protect.
+            token_owner = User.query.filter_by(
+                email="admin@test.local"
+            ).first()
+            token_owner.is_active = False
+
+            target_admin = User(
+                name="Only Active Admin",
+                email="only-admin@test.local",
+                password_hash="not-used",
+                role="ADMIN",
+                is_active=True,
+            )
+            db.session.add(target_admin)
+            db.session.commit()
+            target_admin_id = target_admin.user_id
+
+        response = self.client.patch(
+            f"/api/admin/users/{target_admin_id}",
+            headers=self.admin_headers(),
+            json={"is_active": False},
+        )
+
+        self.assertEqual(response.status_code, 409)
+
+        with self.app.app_context():
+            target_admin = db.session.get(User, target_admin_id)
+            self.assertIsNotNone(target_admin)
+            self.assertTrue(target_admin.is_active)
+
 
 if __name__ == "__main__":
     unittest.main()

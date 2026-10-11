@@ -232,23 +232,336 @@ def update_admin_profile():
 @admin_bp.get("/departments")
 @admin_required
 def get_departments():
-    departments = Department.query.order_by(
-        Department.department_id.asc()
-    ).all()
+    departments = (
+        Department.query
+        .order_by(Department.department_id.asc())
+        .all()
+    )
 
-    data = [
-        {
+    data = []
+
+    for department in departments:
+        faculty_count = Faculty.query.filter_by(
+            department_id=department.department_id
+        ).count()
+
+        student_count = Student.query.filter_by(
+            department_id=department.department_id
+        ).count()
+
+        head_faculty = department.head_faculty
+
+        data.append({
             "department_id": department.department_id,
             "department_name": department.department_name,
             "department_code": department.department_code,
-        }
-        for department in departments
-    ]
+            "head_faculty_id": department.head_faculty_id,
+            "head_name": (
+                head_faculty.user.name
+                if head_faculty and head_faculty.user
+                else None
+            ),
+            "head_employee_id": (
+                head_faculty.employee_id
+                if head_faculty
+                else None
+            ),
+            "faculty_count": faculty_count,
+            "student_count": student_count,
+            "is_active": department.is_active,
+        })
 
     return jsonify({
         "success": True,
         "data": data,
     }), 200
+
+
+@admin_bp.post("/departments")
+@admin_required
+def create_department():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "success": False,
+            "message": "A valid JSON object is required",
+        }), 400
+
+    name = data.get("department_name")
+    code = data.get("department_code")
+
+    if not isinstance(name, str) or not name.strip():
+        return jsonify({
+            "success": False,
+            "message": "Department name is required",
+        }), 400
+
+    if not isinstance(code, str) or not code.strip():
+        return jsonify({
+            "success": False,
+            "message": "Department code is required",
+        }), 400
+
+    name = name.strip()
+    code = code.strip().upper()
+
+    if len(name) > 100:
+        return jsonify({
+            "success": False,
+            "message": "Department name must not exceed 100 characters",
+        }), 400
+
+    if len(code) > 20:
+        return jsonify({
+            "success": False,
+            "message": "Department code must not exceed 20 characters",
+        }), 400
+
+    duplicate = Department.query.filter(
+        db.func.upper(Department.department_code) == code
+    ).first()
+
+    if duplicate:
+        return jsonify({
+            "success": False,
+            "message": "Department code already exists",
+        }), 409
+
+    department = Department(
+        department_name=name,
+        department_code=code,
+    )
+
+    try:
+        db.session.add(department)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Department could not be created; check for duplicate values",
+        }), 409
+
+    return jsonify({
+        "success": True,
+        "message": "Department created successfully",
+        "data": {
+            "department_id": department.department_id,
+            "department_name": department.department_name,
+            "department_code": department.department_code,
+        },
+    }), 201
+
+
+@admin_bp.patch("/departments/<int:department_id>")
+@admin_required
+def update_department(department_id):
+    department = db.session.get(Department, department_id)
+
+    if department is None:
+        return jsonify({
+            "success": False,
+            "message": "Department not found",
+        }), 404
+
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict) or not data:
+        return jsonify({
+            "success": False,
+            "message": "Provide department_name or department_code",
+        }), 400
+
+    if "department_name" in data:
+        name = data["department_name"]
+
+        if not isinstance(name, str) or not name.strip():
+            return jsonify({
+                "success": False,
+                "message": "Department name must not be empty",
+            }), 400
+
+        name = name.strip()
+
+        if len(name) > 100:
+            return jsonify({
+                "success": False,
+                "message": "Department name must not exceed 100 characters",
+            }), 400
+
+        department.department_name = name
+
+    if "department_code" in data:
+        code = data["department_code"]
+
+        if not isinstance(code, str) or not code.strip():
+            return jsonify({
+                "success": False,
+                "message": "Department code must not be empty",
+            }), 400
+
+        code = code.strip().upper()
+
+        if len(code) > 20:
+            return jsonify({
+                "success": False,
+                "message": "Department code must not exceed 20 characters",
+            }), 400
+
+        duplicate = Department.query.filter(
+            db.func.upper(Department.department_code) == code,
+            Department.department_id != department_id,
+        ).first()
+
+        if duplicate:
+            return jsonify({
+                "success": False,
+                "message": "Department code already exists",
+            }), 409
+
+        department.department_code = code
+
+    # -------------------------
+    # Department status
+    # -------------------------
+
+    if "is_active" in data:
+        if not isinstance(data["is_active"], bool):
+            return jsonify({
+                "success": False,
+                "message": "is_active must be a boolean",
+            }), 400
+
+        department.is_active = data["is_active"]
+
+    # -------------------------
+    # Head of Department
+    # -------------------------
+
+    if "head_faculty_id" in data:
+        value = data["head_faculty_id"]
+
+        # null or an empty value removes the current HOD.
+        if value is None or value == "":
+            department.head_faculty_id = None
+        else:
+            try:
+                head_faculty_id = int(value)
+            except (TypeError, ValueError):
+                return jsonify({
+                    "success": False,
+                    "message": "head_faculty_id must be an integer or null",
+                }), 400
+
+            head_faculty = db.session.get(
+                Faculty,
+                head_faculty_id,
+            )
+
+            if not head_faculty:
+                return jsonify({
+                    "success": False,
+                    "message": "Faculty member not found",
+                }), 404
+
+            if head_faculty.department_id != department.department_id:
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "HOD must belong to the same department"
+                    ),
+                }), 400
+
+            if not head_faculty.user or not head_faculty.user.is_active:
+                return jsonify({
+                    "success": False,
+                    "message": "HOD must have an active user account",
+                }), 400
+
+            department.head_faculty_id = head_faculty.faculty_id
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Department could not be updated; check for duplicate values",
+        }), 409
+
+    return jsonify({
+        "success": True,
+        "message": "Department updated successfully",
+        "data": {
+            "department_id": department.department_id,
+            "department_name": department.department_name,
+            "department_code": department.department_code,
+            "head_faculty_id": department.head_faculty_id,
+            "head_name": (
+                department.head_faculty.user.name
+                if department.head_faculty
+                and department.head_faculty.user
+                else None
+            ),
+            "faculty_count": Faculty.query.filter_by(
+                department_id=department.department_id
+            ).count(),
+            "student_count": Student.query.filter_by(
+                department_id=department.department_id
+            ).count(),
+            "is_active": department.is_active,
+        },
+    }), 200
+
+
+@admin_bp.delete("/departments/<int:department_id>")
+@admin_required
+def delete_department(department_id):
+    department = db.session.get(Department, department_id)
+
+    if department is None:
+        return jsonify({
+            "success": False,
+            "message": "Department not found",
+        }), 404
+
+    linked_counts = {
+        "students": Student.query.filter_by(
+            department_id=department_id
+        ).count(),
+        "faculty": Faculty.query.filter_by(
+            department_id=department_id
+        ).count(),
+        "courses": Course.query.filter_by(
+            department_id=department_id
+        ).count(),
+    }
+
+    if any(linked_counts.values()):
+        return jsonify({
+            "success": False,
+            "message": "Department cannot be deleted because it has linked records",
+            "data": {
+                "linked_counts": linked_counts,
+            },
+        }), 409
+
+    try:
+        db.session.delete(department)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Department cannot be deleted because related records exist",
+        }), 409
+
+    return jsonify({
+        "success": True,
+        "message": "Department deleted successfully",
+    }), 200
+
 
 # USER MANAGEMENT
 
@@ -370,16 +683,66 @@ def update_user(user_id):
 
     data = request.get_json(silent=True) or {}
 
-    if "is_active" in data:
-        is_active = data["is_active"]
+    # Validate the requested active status before changing the user.
+    if "is_active" in data and not isinstance(data["is_active"], bool):
+        return jsonify({
+            "success": False,
+            "message": "is_active must be a boolean",
+        }), 400
 
-        if not isinstance(is_active, bool):
+    # Validate the requested role before applying changes.
+    requested_role = data.get("role", user.role)
+    if not isinstance(requested_role, str):
+        return jsonify({
+            "success": False,
+            "message": "Invalid role",
+        }), 400
+
+    final_role = requested_role.upper().strip()
+    if final_role not in {"ADMIN", "FACULTY", "STUDENT"}:
+        return jsonify({
+            "success": False,
+            "message": "Invalid role",
+        }), 400
+
+    final_is_active = data.get("is_active", user.is_active)
+
+    # Prevent changing or disabling the current administrator account.
+    current_user_id = get_jwt_identity()
+    if str(current_user_id) == str(user.user_id):
+        if final_role != "ADMIN" or final_is_active is not True:
             return jsonify({
                 "success": False,
-                "message": "is_active must be a boolean",
-            }), 400
+                "message": (
+                    "You cannot deactivate your current account "
+                    "or change your own administrator role."
+                ),
+            }), 409
 
-        user.is_active = is_active
+    # Never leave the system without an active administrator.
+    if user.role == "ADMIN" and user.is_active:
+        removing_active_admin = (
+            final_role != "ADMIN" or final_is_active is not True
+        )
+        if removing_active_admin:
+            active_admin_count = User.query.filter_by(
+                role="ADMIN",
+                is_active=True,
+            ).count()
+
+            if active_admin_count <= 1:
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "The last active administrator cannot be "
+                        "deactivated or changed to another role."
+                    ),
+                }), 409
+
+    # Apply the validated active status only after the safeguards.
+    if "is_active" in data:
+        user.is_active = final_is_active
+
 
     if "name" in data:
         name = str(data["name"]).strip()
@@ -480,16 +843,106 @@ def delete_user(user_id):
             "message": "User not found",
         }), 404
 
+    # Prevent administrators from deleting their own account.
+    current_user_id = get_jwt_identity()
+
+    if str(current_user_id) == str(user.user_id):
+        return jsonify({
+            "success": False,
+            "message": "You cannot delete your current account.",
+        }), 409
+
     try:
+        # Preserve at least one active administrator.
+        if user.role == "ADMIN" and user.is_active:
+            active_admin_count = User.query.filter_by(
+                role="ADMIN",
+                is_active=True,
+            ).count()
+
+            if active_admin_count <= 1:
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        "The last active administrator cannot be deleted."
+                    ),
+                }), 409
+
+        student = Student.query.filter_by(
+            user_id=user.user_id
+        ).first()
+
+        faculty = Faculty.query.filter_by(
+            user_id=user.user_id
+        ).first()
+
+        has_history = False
+
+        if student:
+            has_history = (
+                AttendanceRecord.query.filter_by(
+                    student_id=student.student_id
+                ).first() is not None
+                or Enrollment.query.filter_by(
+                    student_id=student.student_id
+                ).first() is not None
+            )
+
+        if faculty:
+            has_history = has_history or (
+                CourseOffering.query.filter_by(
+                    faculty_id=faculty.faculty_id
+                ).first() is not None
+                or AttendanceSession.query.filter_by(
+                    faculty_id=faculty.faculty_id
+                ).first() is not None
+            )
+
+        if has_history:
+            user.is_active = False
+            db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "action": "deactivated",
+                "message": (
+                    "User deactivated because related academic or "
+                    "attendance records must be preserved."
+                ),
+                "data": {
+                    "user_id": user.user_id,
+                    "is_active": False,
+                },
+            }), 200
+
+        # No protected history exists. Remove the empty profile first.
+        if student:
+            db.session.delete(student)
+
+        if faculty:
+            db.session.delete(faculty)
+
         db.session.delete(user)
         db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "action": "deleted",
+            "message": "User deleted successfully.",
+            "data": {
+                "user_id": user_id,
+            },
+        }), 200
 
     except IntegrityError:
         db.session.rollback()
 
         return jsonify({
             "success": False,
-            "message": "User cannot be deleted because related records exist",
+            "message": (
+                "User could not be permanently deleted because "
+                "related records still exist. No records were deleted."
+            ),
         }), 409
 
     except Exception:
@@ -497,13 +950,67 @@ def delete_user(user_id):
 
         return jsonify({
             "success": False,
-            "message": "User could not be deleted",
+            "message": "User could not be deleted.",
         }), 500
 
-    return jsonify({
-        "success": True,
-        "message": "User deleted successfully",
-    }), 200
+@admin_bp.patch("/users/<int:user_id>/reactivate")
+@admin_required
+def reactivate_user(user_id):
+    """Reactivate an existing inactive user account."""
+    user = db.session.get(User, user_id)
+
+    if not user:
+        return jsonify({
+            "success": False,
+            "message": "User not found",
+        }), 404
+
+    if user.is_active:
+        return jsonify({
+            "success": True,
+            "action": "already_active",
+            "message": "User account is already active.",
+            "data": {
+                "user_id": user.user_id,
+                "is_active": True,
+            },
+        }), 200
+
+    try:
+        user.is_active = True
+        db.session.commit()
+
+        return jsonify({
+            "success": True,
+            "action": "reactivated",
+            "message": (
+                "User account reactivated successfully. "
+                "Existing academic and attendance history "
+                "has been preserved."
+            ),
+            "data": {
+                "user_id": user.user_id,
+                "is_active": True,
+            },
+        }), 200
+
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": (
+                "The account could not be reactivated "
+                "because of a database constraint."
+            ),
+        }), 409
+
+    except Exception:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "Unable to reactivate the user account.",
+        }), 500
+
 def get_student_attendance_summary(student_id):
     active_enrollments = Enrollment.query.filter_by(
         student_id=student_id,
@@ -1053,10 +1560,7 @@ def delete_student(student_id):
             "message": "Student not found",
         }), 404
 
-    # -------------------------
-    # Attendance safety check
-    # -------------------------
-
+    # Preserve attendance history.
     attendance_count = AttendanceRecord.query.filter_by(
         student_id=student.student_id
     ).count()
@@ -1065,39 +1569,53 @@ def delete_student(student_id):
         return jsonify({
             "success": False,
             "message": (
-                "Student cannot be deleted because "
-                "attendance records exist"
+                "Student cannot be deleted because attendance "
+                "records exist. Deactivate the student account "
+                "to preserve academic history."
+            ),
+        }), 409
+
+    # Preserve course enrollment history.
+    enrollment_count = Enrollment.query.filter_by(
+        student_id=student.student_id
+    ).count()
+
+    if enrollment_count > 0:
+        return jsonify({
+            "success": False,
+            "message": (
+                "Student cannot be deleted because course "
+                "enrollment records exist. Deactivate the "
+                "student account to preserve academic history."
             ),
         }), 409
 
     try:
-        # Delete ONLY the Student profile.
-        # The linked User account remains.
+        # Only delete the profile when no attendance or
+        # enrollment history exists. The linked User remains.
         db.session.delete(student)
         db.session.commit()
 
     except IntegrityError:
         db.session.rollback()
-
         return jsonify({
             "success": False,
             "message": (
-                "Student could not be deleted because "
-                "related records exist"
+                "Student could not be deleted because related "
+                "records exist."
             ),
         }), 409
 
     except Exception:
         db.session.rollback()
-
         return jsonify({
             "success": False,
-            "message": "Student could not be deleted",
+            "message": "Student could not be deleted.",
         }), 500
 
     return jsonify({
         "success": True,
-        "message": "Student profile deleted successfully",
+        "message": "Student profile deleted successfully.",
         "data": {
             "student_id": student_id,
         },

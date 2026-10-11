@@ -17,7 +17,7 @@ import {
   faUsers,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
-
+import { faTrash } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 import {
@@ -25,6 +25,7 @@ import {
   getAdminStudents,
   getUsers,
   getAdminDepartments,
+  deleteAdminStudent,
 } from "../../services/adminService";
 
 import {
@@ -77,6 +78,11 @@ function Student() {
   const [studentUsers, setStudentUsers] = useState([]);
   const [departmentOptions, setDepartmentOptions] = useState([]);
   const [departmentsLoading, setDepartmentsLoading] = useState(false);
+
+  // DELETE STUDENT
+  const [deletingStudentId, setDeletingStudentId] = useState(null);
+  const [deleteStudentMessage, setDeleteStudentMessage] = useState("");
+  const [deleteStudentError, setDeleteStudentError] = useState(false);
 
   // =========================================================
   // FACE REGISTRATION STATUS
@@ -772,6 +778,45 @@ function Student() {
     setSelectedStudent(null);
   }
 
+  async function handleDeleteStudent(student) {
+    const studentId = student.student_id;
+
+    const confirmed = window.confirm(
+      `Are you sure you want to delete ${student.user?.full_name || student.name || "this student"}? This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    setDeletingStudentId(studentId);
+    setDeleteStudentMessage("");
+    setDeleteStudentError(false);
+
+    try {
+      const response = await deleteAdminStudent(studentId);
+
+      if (!response?.success) {
+        throw new Error(
+          response?.message || "Failed to delete student."
+        );
+      }
+
+      setDeleteStudentMessage(
+        response.message || "Student deleted successfully."
+      );
+
+      await fetchStudentData();
+    } catch (error) {
+      setDeleteStudentError(true);
+      setDeleteStudentMessage(
+        error.response?.data?.message ||
+          error.message ||
+          "Unable to delete student."
+      );
+    } finally {
+      setDeletingStudentId(null);
+    }
+  }
+
   // =========================================================
   // FACE ENROLLMENT HANDLERS
   // =========================================================
@@ -1157,6 +1202,19 @@ function Student() {
         </button>
       </div>
 
+      {deleteStudentMessage && (
+        <div
+          className={
+            deleteStudentError
+              ? "student-delete-feedback error"
+              : "student-delete-feedback success"
+          }
+          role="status"
+        >
+          {deleteStudentMessage}
+        </div>
+      )}
+
       {/* =====================================================
           STUDENT TABLE
       ====================================================== */}
@@ -1337,17 +1395,32 @@ function Student() {
                           </td>
 
                           <td>
-                            <button
-                              type="button"
-                              className="student-view-button"
-                              onClick={() =>
-                                handleViewStudent(
-                                  student,
-                                )
-                              }
-                            >
-                              View
-                            </button>
+                            <div className="student-action-buttons">
+                              <button
+                                type="button"
+                                className="student-view-button"
+                                onClick={() => handleViewStudent(student)}
+                              >
+                                View
+                              </button>
+
+                              <button
+                                type="button"
+                                className="student-delete-button"
+                                onClick={() => handleDeleteStudent(student)}
+                                disabled={deletingStudentId === student.student_id}
+                                title="Delete student"
+                              >
+                                {deletingStudentId === student.student_id
+                                  ? "Deleting..."
+                                  : (
+                                    <>
+                                      <FontAwesomeIcon icon={faTrash} />
+                                      Delete
+                                    </>
+                                  )}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );

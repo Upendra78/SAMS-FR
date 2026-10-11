@@ -2,7 +2,6 @@ from datetime import date
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
-
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -12,6 +11,7 @@ from app.models import (
 )
 from app.utils.auth import faculty_required
 
+MINIMUM_ATTENDANCE_PERCENTAGE = 75.0
 
 reports_bp = Blueprint(
     "reports",
@@ -173,6 +173,7 @@ def get_attendance_report():
                 else 0
             )
 
+
             students.append({
                 "student_id": student.student_id,
                 "enrollment_no": student.enrollment_no,
@@ -184,6 +185,11 @@ def get_attendance_report():
                 "attendance_percentage": round(
                     attendance_percentage,
                     2,
+                ),
+                "is_low_attendance": (
+                    total_sessions > 0
+                    and attendance_percentage
+                    < MINIMUM_ATTENDANCE_PERCENTAGE
                 ),
             })
 
@@ -197,6 +203,9 @@ def get_attendance_report():
             "academic_year": offering.academic_year,
             "room": offering.room,
             "total_sessions": total_sessions,
+            "minimum_attendance_percentage": (
+                MINIMUM_ATTENDANCE_PERCENTAGE
+            ),
             "students": students,
         })
 

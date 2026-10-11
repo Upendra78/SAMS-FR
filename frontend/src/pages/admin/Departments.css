@@ -836,6 +836,23 @@
   }
 }
 
+.department-form-error {
+  color: #b42318;
+  font-size: 0.9rem;
+  margin: 12px 0;
+}
+
+.department-form-success {
+  color: #067647;
+  font-size: 0.9rem;
+  margin: 12px 0;
+}
+
+.department-primary-button:disabled,
+.department-secondary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
 
 /* Responsive */
 

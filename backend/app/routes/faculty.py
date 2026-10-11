@@ -230,6 +230,44 @@ def get_faculty_course(course_id):
         }), 404
 
     course = offerings[0].course
+    offering_data = []
+
+    for offering in offerings:
+        active_enrollments = (
+            Enrollment.query
+            .filter_by(
+                offering_id=offering.offering_id,
+                status="ACTIVE",
+            )
+            .order_by(Enrollment.student_id.asc())
+            .all()
+        )
+
+        students = []
+
+        for enrollment in active_enrollments:
+            student = enrollment.student
+
+            students.append({
+                "student_id": student.student_id,
+                "enrollment_no": student.enrollment_no,
+                "name": student.user.name,
+                "email": student.user.email,
+                "semester": student.semester,
+                "section": student.section,
+                "academic_year": student.academic_year,
+                "enrollment_status": enrollment.status,
+            })
+
+        offering_data.append({
+            "offering_id": offering.offering_id,
+            "semester": offering.semester,
+            "section": offering.section,
+            "academic_year": offering.academic_year,
+            "room": offering.room,
+            "student_count": len(students),
+            "students": students,
+        })
 
     return jsonify({
         "success": True,
@@ -238,16 +276,7 @@ def get_faculty_course(course_id):
             "course_code": course.course_code,
             "course_name": course.course_name,
             "credits": course.credits,
-            "offerings": [
-                {
-                    "offering_id": offering.offering_id,
-                    "semester": offering.semester,
-                    "section": offering.section,
-                    "academic_year": offering.academic_year,
-                    "room": offering.room,
-                }
-                for offering in offerings
-            ],
+            "offerings": offering_data,
         },
     }), 200
 
