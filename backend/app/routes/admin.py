@@ -1641,6 +1641,7 @@ def get_courses():
             "department_code": course.department.department_code,
             "semester": course.semester,
             "credits": course.credits,
+            "is_active": course.is_active,
         }
         for course in courses
     ]
@@ -1803,6 +1804,7 @@ def create_course():
             "department_code": course.department.department_code,
             "semester": course.semester,
             "credits": course.credits,
+            "is_active": course.is_active,
         },
     }), 201
 
@@ -1826,6 +1828,7 @@ def update_course(course_id):
         "department_id",
         "semester",
         "credits",
+        "is_active",
     }
 
     if not data or not set(data.keys()).issubset(allowed_fields):
@@ -1921,6 +1924,14 @@ def update_course(course_id):
                 }), 400
 
             setattr(course, field, value)
+    if "is_active" in data:
+        if not isinstance(data["is_active"], bool):
+            return jsonify({
+                "success": False,
+                "message": "is_active must be true or false",
+            }), 400
+
+        course.is_active = data["is_active"]        
 
     try:
         db.session.commit()
@@ -1952,6 +1963,7 @@ def update_course(course_id):
             "department_code": course.department.department_code,
             "semester": course.semester,
             "credits": course.credits,
+            "is_active": course.is_active,
         },
     }), 200
 

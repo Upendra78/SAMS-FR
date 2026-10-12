@@ -12,10 +12,12 @@ import {
   faCircleInfo,
   faXmark,
   faSpinner,
+  faPenToSquare,
   faTrash,
   faPen,
   faRotate,
 } from "@fortawesome/free-solid-svg-icons";
+
 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
@@ -28,20 +30,28 @@ import {
 import {
   getAdminCourses,
   createAdminCourse,
+  updateAdminCourse,
+  deleteAdminCourse,
   getAdminDepartments,
   getAdminCourseOfferings,
   getAdminFaculty,
+  getAdminStudents,
   createAdminCourseOffering,
   updateAdminCourseOffering,
   deleteAdminCourseOffering,
 } from "../../services/adminService";
+
+import coursesImage from "../../../image/Courses.png";
+import activeCoursesImage from "../../../image/ActiveCourses.png";
+import offeringsImage from "../../../image/Offerings.png";
+import enrollmentsImage from "../../../image/Enrollments.png";
 
 import "./AcademicManagement.css";
 
 const TABS = [
   { id: "courses", label: "Courses", icon: faBook },
   { id: "offerings", label: "Course Offerings", icon: faBookOpen },
-  { id: "enrollments", label: "Enrollments", icon: faGraduationCap },
+  { id: "enrollments", label: "Course Enrollments", icon: faGraduationCap },
   { id: "assignments", label: "Assignments", icon: faChalkboardTeacher },
 ];
 
@@ -59,7 +69,6 @@ const EMPTY_OFFERING_FORM = {
   academic_year: "",
   semester: "",
   section: "",
-  room: "",
 };
 
 const EMPTY_ENROLLMENT_FORM = {
@@ -97,10 +106,20 @@ function AcademicManagement() {
   const [departmentError, setDepartmentError] = useState("");
 
   const [showCourseModal, setShowCourseModal] = useState(false);
+  const [editingCourseId, setEditingCourseId] = useState(null);
+  const [deletingCourseId, setDeletingCourseId] = useState(null);
+  const [updatingCourseStatusId, setUpdatingCourseStatusId] = useState(null);
   const [savingCourse, setSavingCourse] = useState(false);
   const [courseActionError, setCourseActionError] = useState("");
   const [courseActionMessage, setCourseActionMessage] = useState("");
   const [courseForm, setCourseForm] = useState({ ...EMPTY_COURSE_FORM });
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 10;
+  const [offeringPage, setOfferingPage] = useState(1);
+  const OFFERINGS_PAGE_SIZE = 10;
+  const [enrollmentPage, setEnrollmentPage] = useState(1);
+  const ENROLLMENTS_PAGE_SIZE = 10;
 
   // Course offering data
   const [offerings, setOfferings] = useState([]);
@@ -123,6 +142,9 @@ function AcademicManagement() {
   const [enrollmentsLoading, setEnrollmentsLoading] = useState(false);
   const [enrollmentsLoaded, setEnrollmentsLoaded] = useState(false);
   const [enrollmentsError, setEnrollmentsError] = useState("");
+  const [students, setStudents] = useState([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+  const [studentsError, setStudentsError] = useState("");
 
   const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
   const [enrollmentForm, setEnrollmentForm] = useState({
@@ -132,7 +154,9 @@ function AcademicManagement() {
   const [deletingEnrollmentId, setDeletingEnrollmentId] = useState(null);
   const [enrollmentActionError, setEnrollmentActionError] = useState("");
   const [enrollmentActionMessage, setEnrollmentActionMessage] = useState("");
-
+  
+  const [studentSearch, setStudentSearch] = useState("");
+  const [offeringSearch, setOfferingSearch] = useState("");
   // Assignment API has not yet been verified.
   const [assignmentNotice, setAssignmentNotice] = useState("");
 
@@ -192,12 +216,52 @@ function AcademicManagement() {
   }, [activeTab]);
 
   // Load offerings, courses, and faculty together for the offering screen.
+  const loadOfferingData = useCallback(async () => {
+    setOfferingsLoading(true);
+    setOfferingsError("");
+    setOfferingActionError("");
+    setOfferingActionMessage("");
+
+    try {
+      const [offeringResult, courseResult, facultyResult] =
+        await Promise.all([
+          getAdminCourseOfferings(),
+          getAdminCourses(),
+          getAdminFaculty(),
+        ]);
+
+      if (!offeringResult?.success || !Array.isArray(offeringResult.data)) {
+        throw new Error(
+          offeringResult?.message || "Unable to load course offerings."
+        );
+      }
+
+      if (!courseResult?.success || !Array.isArray(courseResult.data)) {
+        throw new Error(courseResult?.message || "Unable to load courses.");
+      }
+
+      if (!facultyResult?.success || !Array.isArray(facultyResult.data)) {
+        throw new Error(facultyResult?.message || "Unable to load faculty.");
+      }
+
+      setOfferings(offeringResult.data);
+      setCourses(courseResult.data);
+      setFaculty(facultyResult.data);
+    } catch (error) {
+      setOfferingsError(
+        getErrorMessage(error, "Unable to load course offering data.")
+      );
+    } finally {
+      setOfferingsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (activeTab !== "offerings") return;
 
     let cancelled = false;
 
-    async function loadOfferingData() {
+    async function loadOfferingDataForTab() {
       setOfferingsLoading(true);
       setOfferingsError("");
       setOfferingActionError("");
@@ -237,18 +301,20 @@ function AcademicManagement() {
           );
         }
       } finally {
-        if (!cancelled) setOfferingsLoading(false);
+        if (!cancelled) {
+          setOfferingsLoading(false);
+        }
       }
     }
 
-    loadOfferingData();
+    void loadOfferingDataForTab();
 
     return () => {
       cancelled = true;
     };
   }, [activeTab]);
 
-  // Load enrollments when the Enrollments tab is opened.
+  // Load enrollment records and the data needed by the enrollment form.
   useEffect(() => {
     if (activeTab !== "enrollments") return;
 
@@ -257,30 +323,83 @@ function AcademicManagement() {
     async function loadEnrollments() {
       setEnrollmentsLoading(true);
       setEnrollmentsError("");
+      setStudentsLoading(true);
+      setStudentsError("");
       setEnrollmentActionError("");
       setEnrollmentActionMessage("");
 
       try {
-        const result = await getAdminEnrollments();
+        const [enrollmentResult, studentResult, offeringResult] =
+          await Promise.allSettled([
+            getAdminEnrollments(),
+            getAdminStudents(),
+            getAdminCourseOfferings(),
+          ]);
 
-        if (!result?.success || !Array.isArray(result.data)) {
-          throw new Error(result?.message || "Unable to load enrollments.");
-        }
+        if (cancelled) return;
 
-        if (!cancelled) {
-          setEnrollments(result.data);
+        if (
+          enrollmentResult.status === "fulfilled" &&
+          enrollmentResult.value?.success &&
+          Array.isArray(enrollmentResult.value.data)
+        ) {
+          setEnrollments(enrollmentResult.value.data);
           setEnrollmentsLoaded(true);
-        }
-      } catch (error) {
-        if (!cancelled) {
+        } else {
+          const error =
+            enrollmentResult.status === "rejected"
+              ? enrollmentResult.reason
+              : new Error(
+                  enrollmentResult.value?.message ||
+                    "Unable to load enrollments."
+                );
+
           setEnrollments([]);
           setEnrollmentsLoaded(true);
           setEnrollmentsError(
             getErrorMessage(error, "Unable to load enrollments.")
           );
         }
+
+        if (
+          studentResult.status === "fulfilled" &&
+          studentResult.value?.success &&
+          Array.isArray(studentResult.value.data)
+        ) {
+          setStudents(studentResult.value.data);
+        } else {
+          const error =
+            studentResult.status === "rejected"
+              ? studentResult.reason
+              : new Error(
+                  studentResult.value?.message ||
+                    "Unable to load students."
+                );
+
+          setStudents([]);
+          setStudentsError(
+            getErrorMessage(error, "Unable to load students.")
+          );
+        }
+
+        if (
+          offeringResult.status === "fulfilled" &&
+          offeringResult.value?.success &&
+          Array.isArray(offeringResult.value.data)
+        ) {
+          setOfferings(offeringResult.value.data);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setEnrollmentsError(
+            getErrorMessage(error, "Unable to load enrollment data.")
+          );
+        }
       } finally {
-        if (!cancelled) setEnrollmentsLoading(false);
+        if (!cancelled) {
+          setEnrollmentsLoading(false);
+          setStudentsLoading(false);
+        }
       }
     }
 
@@ -307,6 +426,54 @@ function AcademicManagement() {
     [courses, offerings, enrollments, enrollmentsLoaded]
   );
 
+  const handleToggleCourseStatus = async (course) => {
+    const courseId = course.course_id;
+
+    if (!courseId || updatingCourseStatusId !== null) return;
+
+    const nextIsActive = !(
+      course.is_active === true ||
+      course.is_active === 1 ||
+      course.status?.toLowerCase() === "active"
+    );
+
+    setUpdatingCourseStatusId(courseId);
+    setCourseActionError("");
+    setCourseActionMessage("");
+
+    try {
+      const result = await updateAdminCourse(courseId, {
+        is_active: nextIsActive,
+      });
+
+      if (!result?.success) {
+        throw new Error(
+          result?.message || "Unable to update course status."
+        );
+      }
+
+      setCourses((currentCourses) =>
+        currentCourses.map((item) =>
+          item.course_id === courseId
+            ? { ...item, is_active: nextIsActive }
+            : item
+        )
+      );
+
+      setCourseActionMessage(
+        `${course.course_code || "Course"} ${
+          nextIsActive ? "activated" : "deactivated"
+        } successfully.`
+      );
+    } catch (error) {
+      setCourseActionError(
+        getErrorMessage(error, "Unable to update course status.")
+      );
+    } finally {
+      setUpdatingCourseStatusId(null);
+    }
+  };
+
   const handleTabChange = (tabId) => {
     setActiveTab(tabId);
     setAssignmentNotice("");
@@ -316,11 +483,25 @@ function AcademicManagement() {
 
   // Open the course modal even if department loading fails.
   // The error is displayed inside the modal and the admin can retry.
-  const handleOpenCourseModal = async () => {
+  const handleOpenCourseModal = async (course = null) => {
     setCourseActionError("");
     setCourseActionMessage("");
     setDepartmentError("");
-    setCourseForm({ ...EMPTY_COURSE_FORM });
+
+    setEditingCourseId(course?.course_id ?? null);
+
+    setCourseForm(
+      course
+        ? {
+            course_code: course.course_code || "",
+            course_name: course.course_name || "",
+            department_id: String(course.department_id ?? ""),
+            semester: String(course.semester ?? ""),
+            credits: String(course.credits ?? ""),
+          }
+        : { ...EMPTY_COURSE_FORM }
+    );
+
     setShowCourseModal(true);
     setDepartmentsLoading(true);
 
@@ -328,7 +509,9 @@ function AcademicManagement() {
       const result = await getAdminDepartments();
 
       if (!result?.success || !Array.isArray(result.data)) {
-        throw new Error(result?.message || "Unable to load departments.");
+        throw new Error(
+          result?.message || "Unable to load departments."
+        );
       }
 
       setDepartments(result.data);
@@ -342,16 +525,72 @@ function AcademicManagement() {
     }
   };
 
+  const handleDeleteCourse = async (course) => {
+    if (savingCourse || deletingCourseId !== null) return;
+
+    const courseId = course.course_id;
+
+    if (!courseId) {
+      setCourseActionError("Unable to identify the course to delete.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete course "${course.course_code} — ${course.course_name}"?\n\n` +
+        "Courses with existing course offerings cannot be deleted."
+    );
+
+    if (!confirmed) return;
+
+    setDeletingCourseId(courseId);
+    setCourseActionError("");
+    setCourseActionMessage("");
+
+    try {
+      const result = await deleteAdminCourse(courseId);
+
+      if (!result?.success) {
+        throw new Error(result?.message || "Unable to delete course.");
+      }
+
+      setCourses((current) =>
+        current.filter((item) => item.course_id !== courseId)
+      );
+
+      setCourseActionMessage(
+        result.message || "Course deleted successfully."
+      );
+
+      // Re-fetch to keep the table synchronized with the backend.
+      await loadCourses();
+    } catch (error) {
+      setCourseActionError(
+        getErrorMessage(error, "Unable to delete course.")
+      );
+    } finally {
+      setDeletingCourseId(null);
+    }
+  };
+
   const handleSaveCourse = async (event) => {
     event.preventDefault();
 
     const semester = Number(courseForm.semester);
     const credits = Number(courseForm.credits);
     const departmentId = Number(courseForm.department_id);
+    const isEditing = editingCourseId !== null;
+
+    const payload = {
+      course_code: courseForm.course_code.trim(),
+      course_name: courseForm.course_name.trim(),
+      department_id: departmentId,
+      semester,
+      credits,
+    };
 
     if (
-      !courseForm.course_code.trim() ||
-      !courseForm.course_name.trim() ||
+      !payload.course_code ||
+      !payload.course_name ||
       !Number.isInteger(departmentId) ||
       departmentId <= 0 ||
       !Number.isInteger(semester) ||
@@ -359,7 +598,9 @@ function AcademicManagement() {
       !Number.isInteger(credits) ||
       credits < 1
     ) {
-      setCourseActionError("Complete all course fields with valid values.");
+      setCourseActionError(
+        "Complete all course fields with valid values."
+      );
       return;
     }
 
@@ -368,27 +609,39 @@ function AcademicManagement() {
     setCourseActionMessage("");
 
     try {
-      const result = await createAdminCourse({
-        course_code: courseForm.course_code.trim(),
-        course_name: courseForm.course_name.trim(),
-        department_id: departmentId,
-        semester,
-        credits,
-      });
+      const result = isEditing
+        ? await updateAdminCourse(editingCourseId, payload)
+        : await createAdminCourse(payload);
 
       if (!result?.success) {
-        throw new Error(result?.message || "Unable to create course.");
+        throw new Error(
+          result?.message ||
+            (isEditing
+              ? "Unable to update course."
+              : "Unable to create course.")
+        );
       }
 
-      setCourseActionMessage(result.message || "Course created successfully.");
       setShowCourseModal(false);
+      setEditingCourseId(null);
       setCourseForm({ ...EMPTY_COURSE_FORM });
 
-      // Refresh the list after successful creation.
+      setCourseActionMessage(
+        result.message ||
+          (isEditing
+            ? "Course updated successfully."
+            : "Course created successfully.")
+      );
+
       await loadCourses();
     } catch (error) {
       setCourseActionError(
-        getErrorMessage(error, "Unable to create course.")
+        getErrorMessage(
+          error,
+          isEditing
+            ? "Unable to update course."
+            : "Unable to create course."
+        )
       );
     } finally {
       setSavingCourse(false);
@@ -408,7 +661,6 @@ function AcademicManagement() {
             academic_year: offering.academic_year || "",
             semester: String(offering.semester ?? ""),
             section: offering.section || "",
-            room: offering.room || "",
           }
         : { ...EMPTY_OFFERING_FORM }
     );
@@ -425,7 +677,6 @@ function AcademicManagement() {
       academic_year: offeringForm.academic_year.trim(),
       semester: Number(offeringForm.semester),
       section: offeringForm.section.trim(),
-      room: offeringForm.room.trim() || null,
     };
 
     if (
@@ -523,7 +774,33 @@ function AcademicManagement() {
     setEnrollmentActionError("");
     setEnrollmentActionMessage("");
     setEnrollmentForm({ ...EMPTY_ENROLLMENT_FORM });
+    setStudentSearch("");
+    setOfferingSearch("");
     setShowEnrollmentModal(true);
+  };
+
+  const handleRefreshEnrollments = async () => {
+    setEnrollmentsLoading(true);
+    setEnrollmentsError("");
+    setEnrollmentActionError("");
+
+    try {
+      const result = await getAdminEnrollments();
+
+      if (!result?.success || !Array.isArray(result.data)) {
+        throw new Error(result?.message || "Unable to refresh enrollments.");
+      }
+
+      setEnrollments(result.data);
+      setEnrollmentsLoaded(true);
+      setEnrollmentPage(1);
+    } catch (error) {
+      setEnrollmentsError(
+        getErrorMessage(error, "Unable to refresh enrollments.")
+      );
+    } finally {
+      setEnrollmentsLoading(false);
+    }
   };
 
   const handleCreateEnrollment = async (event) => {
@@ -532,13 +809,23 @@ function AcademicManagement() {
     const studentId = Number(enrollmentForm.studentId);
     const offeringId = Number(enrollmentForm.offeringId);
 
-    if (!Number.isInteger(studentId) || studentId <= 0) {
-      setEnrollmentActionError("Enter a valid Student ID.");
+    if (
+      !Number.isInteger(studentId) ||
+      studentId <= 0 ||
+      !students.some((student) => student.student_id === studentId)
+    ) {
+      setEnrollmentActionError("Select a valid student from the suggestions.");
       return;
     }
 
-    if (!Number.isInteger(offeringId) || offeringId <= 0) {
-      setEnrollmentActionError("Enter a valid Offering ID.");
+    if (
+      !Number.isInteger(offeringId) ||
+      offeringId <= 0 ||
+      !offerings.some((offering) => offering.offering_id === offeringId)
+    ) {
+      setEnrollmentActionError(
+        "Select a valid course offering from the suggestions."
+      );
       return;
     }
 
@@ -568,6 +855,7 @@ function AcademicManagement() {
       if (refreshed?.success && Array.isArray(refreshed.data)) {
         setEnrollments(refreshed.data);
         setEnrollmentsLoaded(true);
+        setEnrollmentPage(1);
       }
     } catch (error) {
       setEnrollmentActionError(
@@ -576,6 +864,21 @@ function AcademicManagement() {
     } finally {
       setCreatingEnrollment(false);
     }
+  };
+
+  const handleEditEnrollment = (enrollment) => {
+    setEnrollmentActionError("");
+    setEnrollmentActionMessage("");
+
+    // Open the enrollment form with the selected record.
+    setEnrollmentForm({
+      student_id: String(enrollment.student_id),
+      offering_id: String(enrollment.offering_id),
+    });
+
+    setStudentSearch("");
+    setOfferingSearch("");
+    setShowEnrollmentModal(true);
   };
 
   const handleDeleteEnrollment = async (enrollmentId) => {
@@ -597,6 +900,7 @@ function AcademicManagement() {
           (enrollment) => enrollment.enrollment_id !== enrollmentId
         )
       );
+      setEnrollmentPage(1);
 
       setEnrollmentActionMessage(
         result.message || "Enrollment removed successfully."
@@ -628,6 +932,56 @@ function AcademicManagement() {
       </div>
     );
   };
+
+  const totalCourses = courses.length;
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(totalCourses / PAGE_SIZE)
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedCourses = useMemo(() => {
+    const startIndex = (safeCurrentPage - 1) * PAGE_SIZE;
+
+    return courses.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [courses, safeCurrentPage]);
+
+  const totalOfferingPages = Math.max(
+    1,
+    Math.ceil(offerings.length / OFFERINGS_PAGE_SIZE)
+  );
+
+  const safeOfferingPage = Math.min(
+    offeringPage,
+    totalOfferingPages
+  );
+
+  const paginatedOfferings = useMemo(() => {
+    const startIndex =
+      (safeOfferingPage - 1) * OFFERINGS_PAGE_SIZE;
+
+    return offerings.slice(
+      startIndex,
+      startIndex + OFFERINGS_PAGE_SIZE
+    );
+  }, [offerings, safeOfferingPage]);
+
+  const totalEnrollmentPages = Math.max(
+    1,
+    Math.ceil(enrollments.length / ENROLLMENTS_PAGE_SIZE)
+  );
+
+  const safeEnrollmentPage = Math.min(
+    enrollmentPage,
+    totalEnrollmentPages
+  );
+
+  const paginatedEnrollments = enrollments.slice(
+    (safeEnrollmentPage - 1) * ENROLLMENTS_PAGE_SIZE,
+    safeEnrollmentPage * ENROLLMENTS_PAGE_SIZE
+  );
 
   return (
     <section className="academic-management-page">
@@ -669,7 +1023,7 @@ function AcademicManagement() {
             onClick={handleOpenEnrollmentModal}
           >
             <FontAwesomeIcon icon={faPlus} />
-            Add Enrollment
+            Add Course Enrollment
           </button>
         )}
 
@@ -697,36 +1051,136 @@ function AcademicManagement() {
       )}
 
       <div className="academic-summary-grid">
-        <article className="academic-summary-card academic-summary-blue">
-          <div className="academic-summary-icon" aria-hidden="true">
-            <FontAwesomeIcon icon={faBook} />
+        <article
+          className="academic-summary-card academic-summary-blue"
+          onClick={() => handleTabChange("courses")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleTabChange("courses");
+            }
+          }}
+        >
+          <div className="academic-summary-content">
+            <div className="academic-summary-top">
+              <div className="academic-summary-icon" aria-hidden="true">
+                <FontAwesomeIcon icon={faBookOpen} />
+              </div>
+              <span className="academic-summary-badge">All Courses</span>
+            </div>
+            <strong>{metrics.totalCourses}</strong>
+            <span>Total Courses</span>
+            <span className="academic-summary-link">
+              View all courses <span aria-hidden="true">→</span>
+            </span>
           </div>
-          <span>Total Courses</span>
-          <strong>{metrics.totalCourses}</strong>
+          <img
+            className="academic-summary-art"
+            src={coursesImage}
+            alt=""
+            aria-hidden="true"
+          />
         </article>
 
-        <article className="academic-summary-card academic-summary-green">
-          <div className="academic-summary-icon" aria-hidden="true">
-            <FontAwesomeIcon icon={faCheck} />
+        <article
+          className="academic-summary-card academic-summary-green"
+          onClick={() => handleTabChange("courses")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleTabChange("courses");
+            }
+          }}
+        >
+          <div className="academic-summary-content">
+            <div className="academic-summary-top">
+              <div className="academic-summary-icon" aria-hidden="true">
+                <FontAwesomeIcon icon={faCheck} />
+              </div>
+              <span className="academic-summary-badge">Active</span>
+            </div>
+            <strong>{metrics.activeCourses}</strong>
+            <span>Active Courses</span>
+            <span className="academic-summary-link">
+              View active courses <span aria-hidden="true">→</span>
+            </span>
           </div>
-          <span>Active Courses</span>
-          <strong>{metrics.activeCourses}</strong>
+          <img
+            className="academic-summary-art"
+            src={activeCoursesImage}
+            alt=""
+            aria-hidden="true"
+          />
         </article>
 
-        <article className="academic-summary-card academic-summary-purple">
-          <div className="academic-summary-icon" aria-hidden="true">
-            <FontAwesomeIcon icon={faBookOpen} />
+        <article
+          className="academic-summary-card academic-summary-purple"
+          onClick={() => handleTabChange("offerings")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleTabChange("offerings");
+            }
+          }}
+        >
+          <div className="academic-summary-content">
+            <div className="academic-summary-top">
+              <div className="academic-summary-icon" aria-hidden="true">
+                <FontAwesomeIcon icon={faBookOpen} />
+              </div>
+              <span className="academic-summary-badge">Schedule</span>
+            </div>
+            <strong>{metrics.offerings}</strong>
+            <span>Course Offerings</span>
+            <span className="academic-summary-link">
+              Manage offerings <span aria-hidden="true">→</span>
+            </span>
           </div>
-          <span>Course Offerings</span>
-          <strong>{metrics.offerings}</strong>
+          <img
+            className="academic-summary-art"
+            src={offeringsImage}
+            alt=""
+            aria-hidden="true"
+          />
         </article>
 
-        <article className="academic-summary-card academic-summary-orange">
-          <div className="academic-summary-icon" aria-hidden="true">
-            <FontAwesomeIcon icon={faGraduationCap} />
+        <article
+          className="academic-summary-card academic-summary-orange"
+          onClick={() => handleTabChange("enrollments")}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              handleTabChange("enrollments");
+            }
+          }}
+        >
+          <div className="academic-summary-content">
+            <div className="academic-summary-top">
+              <div className="academic-summary-icon" aria-hidden="true">
+                <FontAwesomeIcon icon={faGraduationCap} />
+              </div>
+              <span className="academic-summary-badge">Students</span>
+            </div>
+            <strong>{metrics.enrollments ?? "N/A"}</strong>
+            <span>Enrollments</span>
+            <span className="academic-summary-link">
+              View enrollments <span aria-hidden="true">→</span>
+            </span>
           </div>
-          <span>Enrollments</span>
-          <strong>{metrics.enrollments ?? "N/A"}</strong>
+          <img
+            className="academic-summary-art"
+            src={enrollmentsImage}
+            alt=""
+            aria-hidden="true"
+          />
         </article>
       </div>
 
@@ -751,19 +1205,31 @@ function AcademicManagement() {
       {/* COURSES */}
       {activeTab === "courses" && (
         <div className="academic-table-card">
-          <div className="academic-enrollment-toolbar">
-            <div>
+          <div className="academic-section-header">
+            <div className="academic-section-heading">
+              <span className="academic-section-eyebrow">
+                ACADEMIC MANAGEMENT
+              </span>
+
               <h2>Courses</h2>
-              <p>Manage course details and academic structure.</p>
+
+              <p>
+                Manage course details, departments, credits, and
+                academic structure.
+              </p>
             </div>
+
             <button
               type="button"
-              className="academic-secondary-button"
+              className="academic-refresh-button"
               onClick={loadCourses}
               disabled={coursesLoading}
             >
-              <FontAwesomeIcon icon={coursesLoading ? faSpinner : faRotate} spin={coursesLoading} />
-              Refresh
+              <FontAwesomeIcon
+                icon={faRotate}
+                spin={coursesLoading}
+              />
+              <span>{coursesLoading ? "Refreshing..." : "Refresh"}</span>
             </button>
           </div>
 
@@ -818,32 +1284,153 @@ function AcademicManagement() {
                     <th>Department</th>
                     <th>Semester</th>
                     <th>Credits</th>
+                    <th>Status</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {courses.map((course, index) => (
-                    <tr
-                      key={
-                        course.course_id ??
-                        course.id ??
-                        `${course.course_code}-${index}`
-                      }
-                    >
-                      <td>{course.course_id ?? course.id ?? "—"}</td>
-                      <td><strong>{course.course_code || "—"}</strong></td>
-                      <td>{course.course_name || "—"}</td>
-                      <td>
-                        {course.department_code ||
-                          course.department_name ||
-                          course.department_id ||
-                          "—"}
-                      </td>
-                      <td>{course.semester ?? "—"}</td>
-                      <td>{course.credits ?? "—"}</td>
-                    </tr>
-                  ))}
+                  {paginatedCourses.map((course, index) => {
+                    const courseId = course.course_id;
+                    const isDeleting = deletingCourseId === courseId;
+                    const actionsDisabled =
+                      savingCourse || deletingCourseId !== null;
+
+                    return (
+                      <tr
+                        key={
+                          courseId ??
+                          course.id ??
+                          `${course.course_code}-${index}`
+                        }
+                      >
+                        <td>{courseId ?? course.id ?? "—"}</td>
+                        <td>
+                          <strong>{course.course_code || "—"}</strong>
+                        </td>
+                        <td>{course.course_name || "—"}</td>
+                        <td>
+                          {course.department_code ||
+                            course.department_name ||
+                            course.department_id ||
+                            "—"}
+                        </td>
+                        <td>{course.semester ?? "—"}</td>
+                        <td>{course.credits ?? "—"}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className={`academic-course-status-toggle ${
+                              course.is_active === true ||
+                              course.is_active === 1 ||
+                              course.status?.toLowerCase() === "active"
+                                ? "is-active"
+                                : "is-inactive"
+                            }`}
+                            onClick={() => handleToggleCourseStatus(course)}
+                            disabled={
+                              savingCourse ||
+                              deletingCourseId !== null ||
+                              updatingCourseStatusId !== null
+                            }
+                            aria-label={`Change status of ${course.course_code}`}
+                          >
+                            {updatingCourseStatusId === course.course_id
+                              ? "Updating..."
+                              : course.is_active === true ||
+                                  course.is_active === 1 ||
+                                  course.status?.toLowerCase() === "active"
+                                ? "Deactivate"
+                                : "Activate"}
+                          </button>
+                        </td>
+                        <td>
+                          <div className="academic-action-group">
+                            <button
+                              type="button"
+                              className="academic-action-button"
+                              title="Edit course"
+                              aria-label={`Edit ${course.course_name}`}
+                              onClick={() => handleOpenCourseModal(course)}
+                              disabled={savingCourse || deletingCourseId !== null}
+                            >
+                              <FontAwesomeIcon icon={faPen} />
+                            </button>
+
+                            <button
+                              type="button"
+                              className="academic-action-button danger"
+                              title="Delete course"
+                              aria-label={`Delete ${course.course_name}`}
+                              onClick={() => handleDeleteCourse(course)}
+                              disabled={actionsDisabled}
+                            >
+                              <FontAwesomeIcon
+                                icon={isDeleting ? faSpinner : faTrash}
+                                spin={isDeleting}
+                              />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+              <div className="academic-pagination">
+                <div className="academic-pagination-info">
+                  Showing{" "}
+                  {totalCourses === 0
+                    ? 0
+                    : (safeCurrentPage - 1) * PAGE_SIZE + 1}
+                  {"–"}
+                  {Math.min(safeCurrentPage * PAGE_SIZE, totalCourses)}
+                  {" of "}
+                  {totalCourses} courses
+                </div>
+
+                <div className="academic-pagination-controls">
+                  <button
+                    type="button"
+                    className="academic-page-button"
+                    disabled={safeCurrentPage === 1}
+                    onClick={() =>
+                      setCurrentPage((page) => Math.max(1, page - 1))
+                    }
+                  >
+                    Previous
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, index) => index + 1)
+                    .map((page) => (
+                      <button
+                        type="button"
+                        key={page}
+                        className={`academic-page-button ${
+                          safeCurrentPage === page ? "active" : ""
+                        }`}
+                        aria-current={
+                          safeCurrentPage === page ? "page" : undefined
+                        }
+                        onClick={() => setCurrentPage(page)}
+                      >
+                        {page}
+                      </button>
+                    ))}
+
+                  <button
+                    type="button"
+                    className="academic-page-button"
+                    disabled={safeCurrentPage === totalPages}
+                    onClick={() =>
+                      setCurrentPage((page) =>
+                        Math.min(totalPages, page + 1)
+                      )
+                    }
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -852,11 +1439,34 @@ function AcademicManagement() {
       {/* COURSE OFFERINGS */}
       {activeTab === "offerings" && (
         <div className="academic-table-card">
-          <div className="academic-enrollment-toolbar">
-            <div>
+          <div className="academic-section-header">
+            <div className="academic-section-heading">
+              <span className="academic-section-eyebrow">
+                ACADEMIC MANAGEMENT
+              </span>
+
               <h2>Course Offerings</h2>
-              <p>Assign courses to faculty for a semester and section.</p>
+
+              <p>
+                Assign courses to faculty for an academic year,
+                semester, and section.
+              </p>
             </div>
+
+            <button
+              type="button"
+              className="academic-refresh-button"
+              onClick={loadOfferingData}
+              disabled={offeringsLoading}
+            >
+              <FontAwesomeIcon
+                icon={faRotate}
+                spin={offeringsLoading}
+              />
+              <span>
+                {offeringsLoading ? "Refreshing..." : "Refresh"}
+              </span>
+            </button>
           </div>
 
           {offeringsLoading ? (
@@ -897,13 +1507,12 @@ function AcademicManagement() {
                     <th>Academic Year</th>
                     <th>Semester</th>
                     <th>Section</th>
-                    <th>Room</th>
                     <th>Enrollments</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {offerings.map((offering) => (
+                  {paginatedOfferings.map((offering) => (
                     <tr key={offering.offering_id}>
                       <td>{offering.offering_id}</td>
                       <td>
@@ -918,41 +1527,102 @@ function AcademicManagement() {
                       <td>{offering.academic_year || "—"}</td>
                       <td>{offering.semester ?? "—"}</td>
                       <td>{offering.section || "—"}</td>
-                      <td>{offering.room || "—"}</td>
                       <td>{offering.enrollment_count ?? 0}</td>
                       <td>
-                        <button
-                          type="button"
-                          className="academic-action-button"
-                          title="Edit offering"
-                          aria-label={`Edit offering ${offering.offering_id}`}
-                          onClick={() => handleOpenOfferingModal(offering)}
-                          disabled={deletingOfferingId !== null}
-                        >
-                          <FontAwesomeIcon icon={faPen} />
-                        </button>
-                        <button
-                          type="button"
-                          className="academic-action-button"
-                          title="Delete offering"
-                          aria-label={`Delete offering ${offering.offering_id}`}
-                          onClick={() => handleDeleteOffering(offering)}
-                          disabled={deletingOfferingId === offering.offering_id}
-                        >
-                          <FontAwesomeIcon
-                            icon={
-                              deletingOfferingId === offering.offering_id
-                                ? faSpinner
-                                : faTrash
-                            }
-                            spin={deletingOfferingId === offering.offering_id}
-                          />
-                        </button>
+                        <div className="academic-action-group">
+                          <button
+                            type="button"
+                            className="academic-action-button"
+                            title="Edit offering"
+                            aria-label="Edit offering"
+                            onClick={() => handleOpenOfferingModal(offering)}
+                          >
+                            <FontAwesomeIcon icon={faPen} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="academic-action-button danger"
+                            title="Delete offering"
+                            aria-label="Delete offering"
+                            disabled={deletingOfferingId === offering.offering_id}
+                            onClick={() => handleDeleteOffering(offering)}
+                          >
+                            <FontAwesomeIcon
+                              icon={
+                                deletingOfferingId === offering.offering_id
+                                  ? faSpinner
+                                  : faTrash
+                              }
+                              spin={deletingOfferingId === offering.offering_id}
+                            />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <div className="academic-pagination">
+                <div className="academic-pagination-info">
+                  Showing{" "}
+                  {offerings.length === 0
+                    ? 0
+                    : (safeOfferingPage - 1) * OFFERINGS_PAGE_SIZE + 1}
+                  {"–"}
+                  {Math.min(
+                    safeOfferingPage * OFFERINGS_PAGE_SIZE,
+                    offerings.length
+                  )}
+                  {" of "}
+                  {offerings.length} offerings
+                </div>
+
+                <div className="academic-pagination-controls">
+                  <button
+                    type="button"
+                    className="academic-page-button"
+                    disabled={safeOfferingPage === 1}
+                    onClick={() =>
+                      setOfferingPage((page) => Math.max(1, page - 1))
+                    }
+                  >
+                    Previous
+                  </button>
+
+                  {Array.from(
+                    { length: totalOfferingPages },
+                    (_, index) => index + 1
+                  ).map((page) => (
+                    <button
+                      type="button"
+                      key={page}
+                      className={`academic-page-button ${
+                        safeOfferingPage === page ? "active" : ""
+                      }`}
+                      aria-current={
+                        safeOfferingPage === page ? "page" : undefined
+                      }
+                      onClick={() => setOfferingPage(page)}
+                    >
+                      {page}
+                    </button>
+                  ))}
+
+                  <button
+                    type="button"
+                    className="academic-page-button"
+                    disabled={safeOfferingPage === totalOfferingPages}
+                    onClick={() =>
+                      setOfferingPage((page) =>
+                        Math.min(totalOfferingPages, page + 1)
+                      )
+                    }
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
@@ -964,11 +1634,25 @@ function AcademicManagement() {
       {/* ENROLLMENTS */}
       {activeTab === "enrollments" && (
         <div className="academic-table-card">
-          <div className="academic-enrollment-toolbar">
-            <div>
-              <h2>Enrollments</h2>
-              <p>Manage student enrollment records.</p>
+          <div className="enrollments-section-header">
+            <div className="enrollments-section-title">
+              <h2>Course Enrollments</h2>
+              <p>
+                Manage student enrollments, update records, and monitor enrollment status.
+              </p>
             </div>
+
+            <button
+              type="button"
+              className="enrollments-refresh-btn"
+              onClick={handleRefreshEnrollments}
+              disabled={enrollmentsLoading}
+            >
+              <span className={enrollmentsLoading ? "refresh-icon spinning" : "refresh-icon"}>
+                ↻
+              </span>
+              {enrollmentsLoading ? "Refreshing..." : "Refresh"}
+            </button>
           </div>
 
           {enrollmentsLoading ? (
@@ -982,85 +1666,153 @@ function AcademicManagement() {
               <h2>Unable to load enrollments</h2>
               <p>{enrollmentsError}</p>
             </div>
-          ) : enrollments.length === 0 ? (
-            <div className="academic-empty-state">
-              <div className="academic-empty-icon" aria-hidden="true">
-                <FontAwesomeIcon icon={faGraduationCap} />
-              </div>
-              <h2>No enrollments yet</h2>
-              <p>Enrollment records will appear here when students are enrolled.</p>
-              <button
-                type="button"
-                className="academic-primary-button"
-                onClick={handleOpenEnrollmentModal}
-              >
-                <FontAwesomeIcon icon={faPlus} />
-                Add Enrollment
-              </button>
-            </div>
           ) : (
-            <div className="academic-table-wrapper">
-              <table className="academic-table">
-                <thead>
-                  <tr>
-                    <th>Enrollment ID</th>
-                    <th>Student ID</th>
-                    <th>Offering ID</th>
-                    <th>Status</th>
-                    <th>Enrolled At</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {enrollments.map((enrollment) => (
-                    <tr key={enrollment.enrollment_id}>
-                      <td>{enrollment.enrollment_id}</td>
-                      <td>{enrollment.student_id}</td>
-                      <td>{enrollment.offering_id}</td>
-                      <td>
-                        <span
-                          className={`academic-status academic-status-${(
-                            enrollment.status || "unknown"
-                          ).toLowerCase()}`}
-                        >
-                          {enrollment.status || "N/A"}
-                        </span>
-                      </td>
-                      <td>{formatDate(enrollment.enrolled_at)}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="academic-action-button"
-                          title="Remove enrollment"
-                          aria-label={`Remove enrollment ${enrollment.enrollment_id}`}
-                          disabled={
-                            deletingEnrollmentId === enrollment.enrollment_id
-                          }
-                          onClick={() =>
-                            handleDeleteEnrollment(enrollment.enrollment_id)
-                          }
-                        >
-                          <FontAwesomeIcon
-                            icon={
-                              deletingEnrollmentId === enrollment.enrollment_id
-                                ? faSpinner
-                                : faTrash
-                            }
-                            spin={
-                              deletingEnrollmentId === enrollment.enrollment_id
-                            }
-                          />
-                        </button>
-                      </td>
+            <>
+              <div className="academic-table-wrapper">
+                <table className="academic-table">
+                  <thead>
+                    <tr>
+                      <th>Enrollment ID</th>
+                      <th>Student ID</th>
+                      <th>Offering ID</th>
+                      <th>Status</th>
+                      <th>Enrolled At</th>
+                      <th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {paginatedEnrollments.length > 0 ? (
+                      paginatedEnrollments.map((enrollment) => (
+                        <tr key={enrollment.enrollment_id}>
+                          <td>{enrollment.enrollment_id}</td>
+                          <td>{enrollment.student_id}</td>
+                          <td>{enrollment.offering_id}</td>
+                          <td>
+                            <span
+                              className={`academic-status academic-status-${(
+                                enrollment.status || "unknown"
+                              ).toLowerCase()}`}
+                            >
+                              {enrollment.status || "N/A"}
+                            </span>
+                          </td>
+                          <td>{formatDate(enrollment.enrolled_at)}</td>
+                          <td className="enrollment-actions">
+                            <button
+                              type="button"
+                              className="academic-action-button enrollment-edit-button"
+                              title="Edit enrollment"
+                              aria-label={`Edit enrollment ${enrollment.enrollment_id}`}
+                              onClick={() => handleEditEnrollment(enrollment)}
+                            >
+                              <FontAwesomeIcon icon={faPenToSquare} />
+                            </button>
+
+                            <button
+                              type="button"
+                              className="academic-action-button enrollment-delete-button"
+                              title="Remove enrollment"
+                              aria-label={`Remove enrollment ${enrollment.enrollment_id}`}
+                              disabled={
+                                deletingEnrollmentId === enrollment.enrollment_id
+                              }
+                              onClick={() =>
+                                handleDeleteEnrollment(enrollment.enrollment_id)
+                              }
+                            >
+                              <FontAwesomeIcon
+                                icon={
+                                  deletingEnrollmentId === enrollment.enrollment_id
+                                    ? faSpinner
+                                    : faTrash
+                                }
+                                spin={
+                                  deletingEnrollmentId === enrollment.enrollment_id
+                                }
+                              />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={6} className="academic-no-records">
+                          No course enrollments found.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {enrollments.length > 0 && (
+                <div className="academic-pagination">
+                  <div className="academic-pagination-info">
+                    Showing{" "}
+                    {(safeEnrollmentPage - 1) * ENROLLMENTS_PAGE_SIZE + 1}
+                    {"–"}
+                    {Math.min(
+                      safeEnrollmentPage * ENROLLMENTS_PAGE_SIZE,
+                      enrollments.length
+                    )}{" "}
+                    of {enrollments.length} enrollments
+                  </div>
+
+                  <div className="academic-pagination-controls">
+                    <button
+                      type="button"
+                      className="academic-page-button"
+                      disabled={safeEnrollmentPage === 1}
+                      onClick={() =>
+                        setEnrollmentPage((page) => Math.max(1, page - 1))
+                      }
+                    >
+                      Previous
+                    </button>
+
+                    {Array.from(
+                      { length: totalEnrollmentPages },
+                      (_, index) => index + 1
+                    ).map((page) => (
+                      <button
+                        type="button"
+                        key={page}
+                        className={`academic-page-button ${
+                          safeEnrollmentPage === page ? "active" : ""
+                        }`}
+                        aria-current={
+                          safeEnrollmentPage === page ? "page" : undefined
+                        }
+                        onClick={() => setEnrollmentPage(page)}
+                      >
+                        {page}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      className="academic-page-button"
+                      disabled={safeEnrollmentPage === totalEnrollmentPages}
+                      onClick={() =>
+                        setEnrollmentPage((page) =>
+                          Math.min(totalEnrollmentPages, page + 1)
+                        )
+                      }
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
           )}
 
-          {renderNotice("Enrollment updated", enrollmentActionMessage)}
-          {renderNotice("Enrollment action failed", enrollmentActionError, true)}
+          {renderNotice("Enrollment created", enrollmentActionMessage)}
+          {renderNotice(
+            "Enrollment action failed",
+            enrollmentActionError,
+            true
+          )}
         </div>
       )}
 
@@ -1104,13 +1856,19 @@ function AcademicManagement() {
             <div className="academic-modal-header">
               <div>
                 <span className="academic-eyebrow">Academic Management</span>
-                <h2 id="course-modal-title">Add Course</h2>
+                <h2 id="course-modal-title">
+                  {editingCourseId ? "Edit Course" : "Add Course"}
+                </h2>
                 <p>Enter the course information below.</p>
               </div>
               <button
                 type="button"
                 className="academic-modal-close"
-                onClick={() => setShowCourseModal(false)}
+                onClick={() => {
+                  setShowCourseModal(false);
+                  setEditingCourseId(null);
+                  setCourseActionError("");
+                }}
                 disabled={savingCourse}
                 aria-label="Close course dialog"
               >
@@ -1119,8 +1877,15 @@ function AcademicManagement() {
             </div>
 
             <form onSubmit={handleSaveCourse}>
-              {renderNotice("Unable to create course", courseActionError, true)}
-              {renderNotice("Course created", courseActionMessage)}
+              {renderNotice(
+                editingCourseId ? "Unable to update course" : "Unable to create course",
+                courseActionError,
+                true
+              )}
+              {renderNotice(
+                editingCourseId ? "Course updated" : "Course created",
+                courseActionMessage
+              )}
 
               <div className="academic-form-section">
                 <h3>Course Information</h3>
@@ -1291,6 +2056,7 @@ function AcademicManagement() {
                   className="academic-primary-button"
                   disabled={
                     savingCourse ||
+                    deletingCourseId !== null ||
                     departmentsLoading ||
                     departments.length === 0
                   }
@@ -1299,7 +2065,11 @@ function AcademicManagement() {
                     icon={savingCourse ? faSpinner : faCheck}
                     spin={savingCourse}
                   />
-                  {savingCourse ? "Saving..." : "Create Course"}
+                  {savingCourse
+                    ? "Saving..."
+                    : editingCourseId !== null
+                      ? "Update Course"
+                      : "Create Course"}
                 </button>
               </div>
             </form>
@@ -1459,22 +2229,6 @@ function AcademicManagement() {
                       disabled={savingOffering}
                     />
                   </div>
-
-                  <div className="academic-form-field">
-                    <label htmlFor="offering-room">Room</label>
-                    <input
-                      id="offering-room"
-                      value={offeringForm.room}
-                      onChange={(event) =>
-                        setOfferingForm((current) => ({
-                          ...current,
-                          room: event.target.value,
-                        }))
-                      }
-                      placeholder="e.g. Lab 2"
-                      disabled={savingOffering}
-                    />
-                  </div>
                 </div>
               </div>
 
@@ -1537,7 +2291,7 @@ function AcademicManagement() {
             <div className="academic-modal-header">
               <div>
                 <span className="academic-eyebrow">Academic Management</span>
-                <h2 id="enrollment-modal-title">Add Enrollment</h2>
+                <h2 id="enrollment-modal-title">Add Course Enrollment</h2>
                 <p>Enter the student and course offering IDs.</p>
               </div>
               <button
@@ -1557,41 +2311,93 @@ function AcademicManagement() {
 
                 <div className="academic-form-grid">
                   <div className="academic-form-field">
-                    <label htmlFor="enrollment-student-id">Student ID *</label>
+                    <label htmlFor="enrollment-student-search">Student *</label>
                     <input
-                      id="enrollment-student-id"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={enrollmentForm.studentId}
-                      onChange={(event) =>
+                      id="enrollment-student-search"
+                      list="enrollment-student-options"
+                      value={studentSearch}
+                      onChange={(event) => {
+                        const search = event.target.value;
+                        setStudentSearch(search);
+
+                        const selectedStudent = students.find((student) => {
+                          const label =
+                            `${student.name} — ${student.enrollment_no || "No enrollment number"} — Sem ${student.semester ?? "N/A"} ${student.section || ""} (ID: ${student.student_id})`;
+                          return label === search;
+                        });
+
                         setEnrollmentForm((current) => ({
                           ...current,
-                          studentId: event.target.value,
-                        }))
+                          studentId: selectedStudent
+                            ? String(selectedStudent.student_id)
+                            : "",
+                        }));
+                      }}
+                      placeholder={
+                        studentsLoading
+                          ? "Loading students..."
+                          : "Search student by name or enrollment number"
                       }
+                      autoComplete="off"
                       required
-                      disabled={creatingEnrollment}
+                      disabled={creatingEnrollment || studentsLoading}
                     />
+                    <datalist id="enrollment-student-options">
+                      {students.map((student) => (
+                        <option
+                          key={student.student_id}
+                          value={`${student.name} — ${student.enrollment_no || "No enrollment number"} — Sem ${student.semester ?? "N/A"} ${student.section || ""} (ID: ${student.student_id})`}
+                        />
+                      ))}
+                    </datalist>
+                    {studentsError && (
+                      <p className="academic-field-hint" role="alert">
+                        {studentsError}
+                      </p>
+                    )}
                   </div>
 
                   <div className="academic-form-field">
-                    <label htmlFor="enrollment-offering-id">Offering ID *</label>
+                    <label htmlFor="enrollment-offering-search">Course offering *</label>
                     <input
-                      id="enrollment-offering-id"
-                      type="number"
-                      min="1"
-                      step="1"
-                      value={enrollmentForm.offeringId}
-                      onChange={(event) =>
+                      id="enrollment-offering-search"
+                      list="enrollment-offering-options"
+                      value={offeringSearch}
+                      onChange={(event) => {
+                        const search = event.target.value;
+                        setOfferingSearch(search);
+
+                        const selectedOffering = offerings.find((offering) => {
+                          const label =
+                            `${offering.course_code} — ${offering.course_name} — ${offering.faculty_name} — ${offering.academic_year} — Sem ${offering.semester} — Section ${offering.section} (ID: ${offering.offering_id})`;
+                          return label === search;
+                        });
+
                         setEnrollmentForm((current) => ({
                           ...current,
-                          offeringId: event.target.value,
-                        }))
-                      }
+                          offeringId: selectedOffering
+                            ? String(selectedOffering.offering_id)
+                            : "",
+                        }));
+                      }}
+                      placeholder="Search course, faculty, semester, or section"
+                      autoComplete="off"
                       required
-                      disabled={creatingEnrollment}
+                      disabled={creatingEnrollment || offeringsLoading}
                     />
+                    <datalist id="enrollment-offering-options">
+                      {offerings.map((offering) => (
+                        <option
+                          key={offering.offering_id}
+                          value={`${offering.course_code} — ${offering.course_name} — ${offering.faculty_name} — ${offering.academic_year} — Sem ${offering.semester} — Section ${offering.section} (ID: ${offering.offering_id})`}
+                        />
+                      ))}
+                    </datalist>
+                    {offeringsError && (
+                      <p className="academic-field-hint" role="alert">
+                        {offeringsError}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>
