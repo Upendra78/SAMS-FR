@@ -35,6 +35,13 @@ class Course(db.Model):
         db.Integer,
         nullable=False,
     )
+    
+    is_active = db.Column(
+        db.Boolean,
+        nullable=False,
+        default=False,
+        server_default=db.false(),
+    )
 
     department = db.relationship(
         "Department",

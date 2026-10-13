@@ -225,6 +225,20 @@ export async function createAdminCourse(courseData) {
   return response.data;
 }
 
+export async function updateAdminCourse(courseId, courseData) {
+  const response = await api.patch(
+    `/admin/courses/${courseId}`,
+    courseData
+  );
+
+  return response.data;
+}
+
+export async function deleteAdminCourse(courseId) {
+  const response = await api.delete(`/admin/courses/${courseId}`);
+  return response.data;
+}
+
 export async function getAdminCourseOfferings() {
   const response = await api.get("/admin/course-offerings");
   return response.data;
