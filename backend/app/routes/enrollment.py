@@ -1,10 +1,9 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity
+
 
 from app.extensions import db
 from app.models import Enrollment, Student, CourseOffering
-from app.utils.auth import admin_required, student_required
-
+from app.utils.auth import admin_required
 
 enrollment_bp = Blueprint(
     "enrollment",
@@ -125,52 +124,4 @@ def delete_enrollment(enrollment_id):
     return jsonify({
         "success": True,
         "message": "Enrollment removed successfully",
-    }), 200
-
-
-@enrollment_bp.get("/student/courses")
-@student_required
-def get_student_courses():
-    user_id = int(get_jwt_identity())
-
-    student = Student.query.filter_by(
-        user_id=user_id
-    ).first()
-
-    if not student:
-        return jsonify({
-            "success": False,
-            "message": "Student profile not found",
-        }), 404
-
-    enrollments = (
-        Enrollment.query
-        .filter_by(
-            student_id=student.student_id,
-            status="ACTIVE",
-        )
-        .all()
-    )
-
-    data = []
-
-    for enrollment in enrollments:
-        offering = enrollment.offering
-        course = offering.course
-
-        data.append({
-            "enrollment_id": enrollment.enrollment_id,
-            "offering_id": offering.offering_id,
-            "course_id": course.course_id,
-            "course_code": course.course_code,
-            "course_name": course.course_name,
-            "semester": offering.semester,
-            "section": offering.section,
-            "academic_year": offering.academic_year,
-            "room": offering.room,
-        })
-
-    return jsonify({
-        "success": True,
-        "data": data,
     }), 200
