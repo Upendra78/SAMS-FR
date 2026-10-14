@@ -28,3 +28,13 @@ export async function deleteAdminEnrollment(
 
   return response.data;
 }
+export async function bulkEnrollStudents(offeringId) {
+  const response = await api.post(
+    "/admin/enrollments/bulk",
+    {
+      offering_id: Number(offeringId),
+    }
+  );
+
+  return response.data;
+}

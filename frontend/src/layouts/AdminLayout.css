@@ -394,11 +394,22 @@
 
   box-sizing: border-box;
 
-  border-bottom: 1px solid #e5eaf2;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.7);
+  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.03);
+  background: rgba(255, 255, 255, 0.72);
+  border-bottom: 1px solid #E2E8F0;
+  backdrop-filter: blur(12px) saturate(180%);
+}
 
-  background: rgba(255, 255, 255, 0.96);
+/* Header text */
+.admin-header h1,
+.admin-header h2 {
+  color: #64748B;
+}
 
-  backdrop-filter: blur(10px);
+.admin-header p,
+.admin-header span {
+  color: #0F172A;
 }
 
 .admin-header-brand {
@@ -408,7 +419,7 @@
 .admin-header-label {
   display: block;
 
-  color: #8491a5;
+  color: #64748B;
 
   font-size: 9px;
   font-weight: 800;

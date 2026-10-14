@@ -257,20 +257,48 @@ function AdminLayout() {
 
               {academicOpen && (
                 <div className="admin-subnav">
-                  <NavLink
-                    to="/admin/academic-management"
-                    className={({ isActive }) =>
-                      `admin-subnav-link ${
-                        isActive ? "active" : ""
-                      }`
-                    }
-                  >
-                    <span className="admin-subnav-icon">
-                      <FontAwesomeIcon icon={faBookOpen} />
-                    </span>
+                  {[
+                    {
+                      label: "Courses",
+                      path: "/admin/academic-management/courses",
+                      icon: faBookOpen,
+                    },
+                    {
+                      label: "Course Offerings",
+                      path: "/admin/academic-management/course-offerings",
+                      icon: faBookOpen,
+                    },
+                    {
+                      label: "Course Enrollments",
+                      path: "/admin/academic-management/course-enrollments",
+                      icon: faGraduationCap,
+                    },
+                    {
+                      label: "Batches",
+                      path: "/admin/academic-management/batches",
+                      icon: faSchool,
+                    },
+                    {
+                      label: "Assignments",
+                      path: "/admin/academic-management/assignments",
+                      icon: faBookOpen,
+                    },
+                  ].map((item) => (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      end
+                      className={({ isActive }) =>
+                        `admin-subnav-link ${isActive ? "active" : ""}`
+                      }
+                    >
+                      <span className="admin-subnav-icon">
+                        <FontAwesomeIcon icon={item.icon} />
+                      </span>
 
-                    <span>Academic Management</span>
-                  </NavLink>
+                      <span>{item.label}</span>
+                    </NavLink>
+                  ))}
                 </div>
               )}
             </div>

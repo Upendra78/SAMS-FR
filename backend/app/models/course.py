@@ -35,7 +35,12 @@ class Course(db.Model):
         db.Integer,
         nullable=False,
     )
-    
+
+    batch = db.Column(
+        db.String(20),
+        nullable=True,
+    )
+
     is_active = db.Column(
         db.Boolean,
         nullable=False,

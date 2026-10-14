@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
-
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from app.extensions import db
 from app.models import Enrollment, Student, CourseOffering
 from app.utils.auth import admin_required, student_required
@@ -127,6 +128,148 @@ def delete_enrollment(enrollment_id):
         "message": "Enrollment removed successfully",
     }), 200
 
+@enrollment_bp.post("/admin/enrollments/bulk")
+@admin_required
+def bulk_enroll_students():
+    data = request.get_json(silent=True)
+
+    if not isinstance(data, dict):
+        return jsonify({
+            "success": False,
+            "message": "A valid JSON object is required",
+        }), 400
+
+    offering_id = data.get("offering_id")
+
+    try:
+        offering_id = int(offering_id)
+    except (TypeError, ValueError):
+        return jsonify({
+            "success": False,
+            "message": "offering_id must be a valid integer",
+        }), 400
+
+    if offering_id < 1:
+        return jsonify({
+            "success": False,
+            "message": "offering_id must be greater than 0",
+        }), 400
+
+    offering = db.session.get(CourseOffering, offering_id)
+
+    if not offering:
+        return jsonify({
+            "success": False,
+            "message": "Course offering not found",
+        }), 404
+
+    # Find active students eligible for this offering.
+    eligible_students = (
+        Student.query
+        .join(Student.user)
+        .filter(
+            Student.department_id == offering.course.department_id,
+            Student.semester == offering.semester,
+            Student.section == offering.section,
+            db.func.replace(Student.academic_year, " ", "")
+            == db.func.replace(offering.academic_year, " ", ""),
+            Student.user.has(is_active=True),
+        )
+        .order_by(Student.student_id.asc())
+        .all()
+    )
+
+    if not eligible_students:
+        return jsonify({
+            "success": True,
+            "message": "No eligible students were found",
+            "data": {
+                "offering_id": offering.offering_id,
+                "eligible_students": 0,
+                "created": 0,
+                "already_enrolled": 0,
+            },
+        }), 200
+
+    student_ids = [
+        student.student_id
+        for student in eligible_students
+    ]
+
+    # Identify existing enrollments before inserting.
+    existing_student_ids = set(
+        db.session.scalars(
+            select(Enrollment.student_id).where(
+                Enrollment.offering_id == offering_id,
+                Enrollment.student_id.in_(student_ids),
+            )
+        ).all()
+    )
+
+    new_student_ids = [
+        student_id
+        for student_id in student_ids
+        if student_id not in existing_student_ids
+    ]
+
+    if not new_student_ids:
+        return jsonify({
+            "success": True,
+            "message": "All eligible students are already enrolled",
+            "data": {
+                "offering_id": offering.offering_id,
+                "eligible_students": len(student_ids),
+                "created": 0,
+                "already_enrolled": len(existing_student_ids),
+            },
+        }), 200
+
+    enrollment_rows = [
+        {
+            "student_id": student_id,
+            "offering_id": offering_id,
+            "status": "ACTIVE",
+        }
+        for student_id in new_student_ids
+    ]
+
+    try:
+        # Insert many records without creating one ORM object per row.
+        db.session.execute(
+            db.insert(Enrollment),
+            enrollment_rows,
+        )
+        db.session.commit()
+
+    except IntegrityError:
+        db.session.rollback()
+
+        return jsonify({
+            "success": False,
+            "message": (
+                "Bulk enrollment conflicted with a database constraint. "
+                "No changes from this transaction were committed."
+            ),
+        }), 409
+
+    except Exception:
+        db.session.rollback()
+
+        return jsonify({
+            "success": False,
+            "message": "Bulk enrollment failed",
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": "Bulk enrollment completed successfully",
+        "data": {
+            "offering_id": offering.offering_id,
+            "eligible_students": len(student_ids),
+            "created": len(new_student_ids),
+            "already_enrolled": len(existing_student_ids),
+        },
+    }), 201
 
 @enrollment_bp.get("/student/courses")
 @student_required

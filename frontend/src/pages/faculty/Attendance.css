@@ -843,3 +843,123 @@
     width: 100%;
   }
 }
+
+/* =========================================================
+   ACCESSIBILITY, CAMERA & INTERACTION REFINEMENTS
+   ========================================================= */
+
+/* Visible keyboard focus */
+.faculty-attendance-page button:focus-visible,
+.faculty-attendance-page input:focus-visible,
+.faculty-attendance-page select:focus-visible,
+.faculty-attendance-page tr[tabindex]:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.4);
+  outline-offset: 2px;
+}
+
+/* Disabled actions */
+.attendance-outline-button:disabled,
+.attendance-secondary-button:disabled,
+.attendance-primary-button:disabled,
+.attendance-modal-close:disabled,
+.attendance-view-button:disabled,
+.attendance-clear-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Selected session or record */
+.attendance-table tbody tr.selected {
+  background: #eff6ff;
+}
+
+.attendance-table tbody tr[tabindex] {
+  transition: background-color 140ms ease;
+}
+
+/* Attendance action buttons */
+.attendance-action-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* Camera preview */
+.attendance-camera-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 220px;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.attendance-camera-video {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: contain;
+}
+
+.attendance-camera-canvas {
+  display: none;
+}
+
+.attendance-camera-help {
+  margin: 12px 0 0;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Error messages */
+.attendance-error-text {
+  color: #b42318 !important;
+}
+
+/* Modal footer buttons */
+.attendance-modal-footer button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+/* Better small-screen camera and action layout */
+@media (max-width: 650px) {
+  .attendance-metric-card {
+    min-height: 82px;
+  }
+
+  .attendance-table th,
+  .attendance-table td {
+    padding-right: 12px;
+    padding-left: 12px;
+  }
+
+  .active-attendance-empty {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .attendance-action-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .attendance-camera-video {
+    max-height: 320px;
+  }
+}
+
+/* Respect the user's motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .attendance-table tbody tr[tabindex] {
+    transition: none;
+  }
+}

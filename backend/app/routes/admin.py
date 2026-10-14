@@ -7,6 +7,7 @@ from app.extensions import bcrypt, db
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
+    Batch,
     Course,
     CourseOffering,
     Department,
@@ -57,6 +58,73 @@ def get_admin_dashboard():
             },
         },
     }), 200
+
+# BATCH MANAGEMENT
+
+@admin_bp.get("/batches")
+@admin_required
+def get_batches():
+    batches = Batch.query.order_by(Batch.batch_name.asc()).all()
+
+    return jsonify({
+        "success": True,
+        "data": [
+            {
+                "batch_id": batch.batch_id,
+                "batch_name": batch.batch_name,
+                "is_active": batch.is_active,
+            }
+            for batch in batches
+        ],
+    }), 200
+
+
+@admin_bp.post("/batches")
+@admin_required
+def create_batch():
+    data = request.get_json(silent=True) or {}
+    batch_name = str(data.get("batch_name") or "").strip()
+
+    if not batch_name:
+        return jsonify({
+            "success": False,
+            "message": "Batch name is required",
+        }), 400
+
+    if len(batch_name) > 20:
+        return jsonify({
+            "success": False,
+            "message": "Batch name cannot exceed 20 characters",
+        }), 400
+
+    if Batch.query.filter_by(batch_name=batch_name).first():
+        return jsonify({
+            "success": False,
+            "message": "This batch already exists",
+        }), 409
+
+    batch = Batch(batch_name=batch_name)
+
+    try:
+        db.session.add(batch)
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": "This batch already exists",
+        }), 409
+
+    return jsonify({
+        "success": True,
+        "message": "Batch created successfully",
+        "data": {
+            "batch_id": batch.batch_id,
+            "batch_name": batch.batch_name,
+            "is_active": batch.is_active,
+        },
+    }), 201
+
 
 # ADMIN PROFILE
 
@@ -1156,6 +1224,7 @@ def create_student():
 
     semester = data.get("semester")
     department_id = data.get("department_id")
+    batch_id = data.get("batch_id")
 
     # -------------------------
     # Required fields
@@ -1277,6 +1346,35 @@ def create_student():
         department_id,
     )
 
+     # -------------------------
+    # Optional Batch validation
+    # -------------------------
+
+    batch = None
+
+    if batch_id not in (None, ""):
+        try:
+            batch_id = int(batch_id)
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "message": "Batch ID must be an integer",
+            }), 400
+
+        batch = db.session.get(Batch, batch_id)
+
+        if not batch:
+            return jsonify({
+                "success": False,
+                "message": "Batch not found",
+            }), 404
+
+        if not batch.is_active:
+            return jsonify({
+                "success": False,
+                "message": "Selected batch is inactive",
+            }), 400
+
     if not department:
         return jsonify({
             "success": False,
@@ -1290,6 +1388,7 @@ def create_student():
     student = Student(
         user_id=user.user_id,
         department_id=department.department_id,
+        batch_id=batch.batch_id if batch else None,
         enrollment_no=enrollment_no,
         semester=semester,
         section=section,
@@ -1334,6 +1433,8 @@ def create_student():
             "semester": student.semester,
             "section": student.section,
             "academic_year": student.academic_year,
+            "batch_id": student.batch_id,
+            "batch_name": batch.batch_name if batch else None,
             "department_id": department.department_id,
             "department_name": department.department_name,
             "department_code": department.department_code,
@@ -1641,6 +1742,7 @@ def get_courses():
             "department_code": course.department.department_code,
             "semester": course.semester,
             "credits": course.credits,
+            "batch": course.batch,
             "is_active": course.is_active,
         }
         for course in courses
@@ -1688,10 +1790,12 @@ def create_course():
     department_id = data.get("department_id")
     semester = data.get("semester")
     credits = data.get("credits")
+    batch = str(data.get("batch") or "").strip()
 
     if (
         not course_code
         or not course_name
+        or not batch
         or department_id is None
         or semester is None
         or credits is None
@@ -1699,7 +1803,7 @@ def create_course():
         return jsonify({
             "success": False,
             "message": (
-                "course_code, course_name, department_id, "
+                "course_code, course_name, batch, department_id, "
                 "semester and credits are required"
             ),
         }), 400
@@ -1747,6 +1851,12 @@ def create_course():
             "message": "Course name cannot exceed 150 characters",
         }), 400
 
+    if len(batch) > 20:
+        return jsonify({
+            "success": False,
+            "message": "Batch cannot exceed 20 characters",
+        }), 400
+
     department = db.session.get(Department, department_id)
 
     if not department:
@@ -1771,6 +1881,7 @@ def create_course():
         department_id=department_id,
         semester=semester,
         credits=credits,
+        batch=batch,
     )
 
     try:
@@ -1829,6 +1940,7 @@ def update_course(course_id):
         "semester",
         "credits",
         "is_active",
+        "batch",
     }
 
     if not data or not set(data.keys()).issubset(allowed_fields):
@@ -1882,6 +1994,23 @@ def update_course(course_id):
 
         course.course_name = course_name
 
+    if "batch" in data:
+        batch = str(data.get("batch") or "").strip()
+
+        if not batch:
+            return jsonify({
+                "success": False,
+                "message": "Batch cannot be empty",
+            }), 400
+
+        if len(batch) > 20:
+            return jsonify({
+                "success": False,
+                "message": "Batch cannot exceed 20 characters",
+            }), 400
+
+        course.batch = batch
+
     if "department_id" in data:
         try:
             department_id = int(data["department_id"])
@@ -1931,7 +2060,7 @@ def update_course(course_id):
                 "message": "is_active must be true or false",
             }), 400
 
-        course.is_active = data["is_active"]        
+        course.is_active = data["is_active"]
 
     try:
         db.session.commit()

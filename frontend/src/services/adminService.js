@@ -278,3 +278,14 @@ export async function reactivateUser(userId) {
 
   return response.data;
 }
+
+
+export async function getAdminBatches() {
+  const response = await api.get("/admin/batches");
+  return response.data;
+}
+
+export async function createAdminBatch(batchData) {
+  const response = await api.post("/admin/batches", batchData);
+  return response.data;
+}
