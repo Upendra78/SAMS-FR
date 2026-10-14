@@ -2,10 +2,11 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+
+
 from app.extensions import db
 from app.models import Enrollment, Student, CourseOffering
-from app.utils.auth import admin_required, student_required
-
+from app.utils.auth import admin_required
 
 enrollment_bp = Blueprint(
     "enrollment",
