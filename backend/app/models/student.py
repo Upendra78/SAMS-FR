@@ -19,6 +19,12 @@ class Student(db.Model):
         nullable=False,
     )
 
+    batch_id = db.Column(
+        db.Integer,
+        db.ForeignKey("batches.batch_id"),
+        nullable=True,
+    )
+
     enrollment_no = db.Column(
         db.String(50),
         unique=True,
@@ -37,6 +43,11 @@ class Student(db.Model):
     department = db.relationship(
         "Department",
         back_populates="students",
+    )
+
+    batch = db.relationship(
+        "Batch",
+        backref="students",
     )
 
     face_profiles = db.relationship(

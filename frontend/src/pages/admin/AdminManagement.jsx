@@ -24,6 +24,7 @@ import {
   faXmark,
   faRotateRight,
   faPowerOff,
+  faCircleCheck,
 } from "@fortawesome/free-solid-svg-icons";
 
 import {
@@ -35,6 +36,12 @@ import {
 } from "../../services/adminService";
 
 import AuthContext from "../../context/authContext";
+import totalUserImage from "../../../image/Total User.png";
+import activeAccountImage from "../../../image/Active Account.png";
+import inactiveAccountImage from "../../../image/InActive Account.png";
+import studentImage from "../../../image/Student.png";
+import facultyImage from "../../../image/Faculty.png";
+import adminsImage from "../../../image/Admins.png";
 import "./AdminManagement.css";
 
 const PAGE_SIZE = 5;
@@ -605,14 +612,25 @@ function AdminManagement() {
   return (
     <section className="admin-management">
       <div className="admin-management-page-header">
-        <div className="admin-management-title-icon">
-          <FontAwesomeIcon icon={faUsers} />
+        <div className="admin-management-heading">
+          <div className="admin-management-title-icon">
+            <FontAwesomeIcon icon={faUsers} />
+          </div>
+
+          <div>
+            <h1>Users Management</h1>
+            <p>Manage system accounts, access, and account status.</p>
+          </div>
         </div>
 
-        <div>
-          <h1>Users Management</h1>
-          <p>Manage system accounts, access, and account status.</p>
-        </div>
+        <button
+          type="button"
+          className="admin-add-user-button admin-add-user-header-button"
+          onClick={openCreateModal}
+        >
+          <FontAwesomeIcon icon={faPlus} />
+          <span>Add User</span>
+        </button>
       </div>
 
       {status.message && (
@@ -629,7 +647,10 @@ function AdminManagement() {
       )}
 
       <section className="admin-user-summary">
-        <article className="admin-summary-card admin-summary-total">
+        <article
+          className="admin-summary-card admin-summary-total"
+          style={{ "--summary-bg-image": `url("${totalUserImage}")` }}
+        >
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faUsers} />
           </div>
@@ -640,9 +661,12 @@ function AdminManagement() {
           </div>
         </article>
 
-        <article className="admin-summary-card">
+        <article
+          className="admin-summary-card admin-summary-active"
+          style={{ "--summary-bg-image": `url("${activeAccountImage}")` }}
+        >
           <div className="admin-summary-icon">
-            <FontAwesomeIcon icon={faCheck} />
+            <FontAwesomeIcon icon={faCircleCheck} />
           </div>
           <div>
             <span>Active Accounts</span>
@@ -651,7 +675,10 @@ function AdminManagement() {
           </div>
         </article>
 
-        <article className="admin-summary-card">
+        <article
+          className="admin-summary-card admin-summary-inactive"
+          style={{ "--summary-bg-image": `url("${inactiveAccountImage}")` }}
+        >
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faPowerOff} />
           </div>
@@ -662,7 +689,10 @@ function AdminManagement() {
           </div>
         </article>
 
-        <article className="admin-summary-card admin-summary-students">
+        <article
+          className="admin-summary-card admin-summary-students"
+          style={{ "--summary-bg-image": `url("${studentImage}")` }}
+        >
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faUserGraduate} />
           </div>
@@ -673,7 +703,10 @@ function AdminManagement() {
           </div>
         </article>
 
-        <article className="admin-summary-card admin-summary-faculty">
+        <article
+          className="admin-summary-card admin-summary-faculty"
+          style={{ "--summary-bg-image": `url("${facultyImage}")` }}
+        >
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faUserTie} />
           </div>
@@ -684,7 +717,10 @@ function AdminManagement() {
           </div>
         </article>
 
-        <article className="admin-summary-card admin-summary-admins">
+        <article
+          className="admin-summary-card admin-summary-admins"
+          style={{ "--summary-bg-image": `url("${adminsImage}")` }}
+        >
           <div className="admin-summary-icon">
             <FontAwesomeIcon icon={faShieldHalved} />
           </div>
@@ -749,15 +785,6 @@ function AdminManagement() {
             />
             Refresh
           </button>
-
-          <button
-            type="button"
-            className="admin-add-user-button"
-            onClick={openCreateModal}
-          >
-            <FontAwesomeIcon icon={faPlus} />
-            <span>Add User</span>
-          </button>
         </div>
 
         {loadingUsers ? (
@@ -776,7 +803,7 @@ function AdminManagement() {
               <table className="admin-management-table">
                 <thead>
                   <tr>
-                    <th>#</th>
+                    <th>S.N.</th>
                     <th>Name</th>
                     <th>User ID</th>
                     <th>Email</th>

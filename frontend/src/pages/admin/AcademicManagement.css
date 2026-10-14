@@ -1508,3 +1508,60 @@ button.enrollment-delete-btn:hover:not(:disabled),
   cursor: not-allowed;
   opacity: 0.65;
 }
+
+
+/* Bulk enrollment controls */
+.enrollments-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.bulk-enrollment-select {
+  min-width: 220px;
+  max-width: 100%;
+  min-height: 42px;
+  padding: 9px 12px;
+  border: 1px solid var(--academic-border);
+  border-radius: 8px;
+  background: #fff;
+  color: #172b4d;
+  font: inherit;
+}
+
+.bulk-enrollment-select:focus-visible {
+  outline: 3px solid rgba(37, 99, 235, 0.25);
+  outline-offset: 2px;
+}
+
+.bulk-enrollment-select:disabled,
+.enrollments-header-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+@media (max-width: 900px) {
+  .enrollments-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .enrollments-header-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 600px) {
+  .enrollments-header-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .bulk-enrollment-select,
+  .enrollments-header-actions button {
+    width: 100%;
+  }
+}
