@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
 from app.models import Enrollment, Student, CourseOffering
-from app.utils.auth import admin_required
+from app.utils.auth import admin_required, student_required
 
 enrollment_bp = Blueprint(
     "enrollment",

@@ -1,4 +1,3 @@
-
 import {
   useCallback,
   useEffect,
@@ -12,6 +11,7 @@ import {
   faArrowRight,
   faBookOpen,
   faCalendar,
+  faCamera,
   faChartLine,
   faCircleCheck,
   faCircleExclamation,
@@ -22,7 +22,10 @@ import {
   faSpinner,
   faUserCheck,
   faUserGraduate,
+  faUsers,
   faXmark,
+  faBolt,
+  faFileLines,
 } from "@fortawesome/free-solid-svg-icons";
 
 import "./Attendance.css";
@@ -39,52 +42,39 @@ import {
   startFacultyAttendanceSession,
 } from "../../services/facultyService";
 
-const EMPTY_METRICS = {
-  todaySessions: null,
-  activeSession: null,
-  studentsPresent: null,
-  attendanceRate: null,
-};
-
 const getErrorMessage = (error, fallback) =>
-  error?.response?.data?.message ||
-  error?.message ||
-  fallback;
+  error?.response?.data?.message || error?.message || fallback;
 
 const getList = (result) =>
   Array.isArray(result?.data) ? result.data : [];
 
-const formatMetric = (value) =>
-  value === null || value === undefined ? "N/A" : value;
+const isSameId = (left, right) =>
+  left != null && right != null && String(left) === String(right);
 
 const formatDate = (value) => {
   if (!value) return "N/A";
 
-  // Handle date-only values without timezone shifts.
-  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(String(value));
-
-  const date = dateOnly
-    ? new Date(`${value}T12:00:00`)
-    : new Date(value);
+  const text = String(value);
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(text)
+    ? new Date(`${text}T12:00:00`)
+    : new Date(text);
 
   return Number.isNaN(date.getTime())
-    ? String(value)
+    ? text
     : date.toLocaleDateString();
 };
 
 const formatTime = (value) => {
   if (!value) return "N/A";
 
-  // Flask may return a time-only string such as 10:12:00.
-  const timeOnly = String(value).match(
-    /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/
-  );
+  const text = String(value);
+  const timeOnly = text.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
 
   if (timeOnly) {
     const hours = Number(timeOnly[1]);
     const minutes = Number(timeOnly[2]);
 
-    if (hours > 23 || minutes > 59) return String(value);
+    if (hours > 23 || minutes > 59) return text;
 
     return new Date(2000, 0, 1, hours, minutes).toLocaleTimeString(
       [],
@@ -92,10 +82,10 @@ const formatTime = (value) => {
     );
   }
 
-  const date = new Date(value);
+  const date = new Date(text);
 
   return Number.isNaN(date.getTime())
-    ? String(value)
+    ? text
     : date.toLocaleTimeString([], {
         hour: "2-digit",
         minute: "2-digit",
@@ -104,21 +94,19 @@ const formatTime = (value) => {
 
 const getTodayDate = () => {
   const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, "0");
-  const day = String(today.getDate()).padStart(2, "0");
 
-  return `${year}-${month}-${day}`;
+  return [
+    today.getFullYear(),
+    String(today.getMonth() + 1).padStart(2, "0"),
+    String(today.getDate()).padStart(2, "0"),
+  ].join("-");
 };
 
 const getCourseLabel = (course) => {
   const code = course?.course_code || "";
-  const name =
-    course?.course_name ||
-    course?.name ||
-    "";
+  const name = course?.course_name || course?.name || "";
 
-  if (code && name) return `${code} - ${name}`;
+  if (code && name) return `${code} – ${name}`;
 
   return code || name || `Offering ${course?.offering_id ?? "N/A"}`;
 };
@@ -132,8 +120,13 @@ const getStudentName = (student) =>
 const getAttendanceStatus = (record) =>
   record?.status || "NOT MARKED";
 
-const isSameId = (left, right) =>
-  left != null && right != null && String(left) === String(right);
+const getInitials = (name) =>
+  String(name || "?")
+    .trim()
+    .split(/\s+/)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("") || "?";
 
 function Attendance() {
   const [sessions, setSessions] = useState([]);
@@ -155,17 +148,28 @@ function Attendance() {
   const [startError, setStartError] = useState("");
   const [closeError, setCloseError] = useState("");
   const [markAttendanceError, setMarkAttendanceError] = useState("");
+  const [faceAttendanceError, setFaceAttendanceError] = useState("");
 
   const [markingStudentId, setMarkingStudentId] = useState(null);
   const [showStartModal, setShowStartModal] = useState(false);
   const [selectedOfferingId, setSelectedOfferingId] = useState("");
-  const [closingSession, setClosingSession] = useState(false);
   const [startingSession, setStartingSession] = useState(false);
+  const [closingSession, setClosingSession] = useState(false);
 
   const [showFaceAttendance, setShowFaceAttendance] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [recognizingFace, setRecognizingFace] = useState(false);
-  const [faceAttendanceError, setFaceAttendanceError] = useState("");
+
+  const [searchTerm, setSearchTerm] = useState("");
+  const [studentSearch, setStudentSearch] = useState("");
+  const [selectedClass, setSelectedClass] = useState("All Classes");
+  const [date, setDate] = useState("");
+  const [status, setStatus] = useState("All");
+  const [activeTab, setActiveTab] = useState("attendance");
+  const [scheduleExpanded, setScheduleExpanded] = useState(true);
+  const [page, setPage] = useState(1);
+
+  const pageSize = 5;
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -173,12 +177,6 @@ function Attendance() {
   const recordsRequestRef = useRef(0);
   const recognitionRequestRef = useRef(false);
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedClass, setSelectedClass] = useState("All Classes");
-  const [date, setDate] = useState("");
-  const [status, setStatus] = useState("All");
-
-  // Stop the camera if this component unmounts.
   const stopCamera = useCallback(() => {
     if (cameraStreamRef.current) {
       cameraStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -193,23 +191,24 @@ function Attendance() {
     setCameraReady(false);
   }, []);
 
-  useEffect(() => {
-    return () => {
+  useEffect(
+    () => () => {
       if (cameraStreamRef.current) {
         cameraStreamRef.current.getTracks().forEach((track) => track.stop());
         cameraStreamRef.current = null;
       }
-    };
-  }, []);
+    },
+    []
+  );
 
-  // Attach the active media stream to the video when the modal opens.
   useEffect(() => {
-    if (!showFaceAttendance || !cameraStreamRef.current) return;
+    if (!showFaceAttendance || !cameraStreamRef.current || !videoRef.current) {
+      return undefined;
+    }
 
     const video = videoRef.current;
-    if (!video) return;
-
     video.srcObject = cameraStreamRef.current;
+
     let cancelled = false;
 
     const startVideo = async () => {
@@ -224,10 +223,7 @@ function Attendance() {
         if (!cancelled) {
           setCameraReady(false);
           setFaceAttendanceError(
-            getErrorMessage(
-              playError,
-              "Unable to start the camera preview."
-            )
+            getErrorMessage(playError, "Unable to start the camera preview.")
           );
         }
       }
@@ -245,7 +241,6 @@ function Attendance() {
     };
   }, [showFaceAttendance]);
 
-  // Load session history and active session.
   const refreshSessions = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -274,7 +269,6 @@ function Attendance() {
       setSessions(sessionList);
       setActiveSession(active);
 
-      // Keep the selected session status in sync with refreshed session data.
       setSelectedSession((current) => {
         if (!current) return active;
 
@@ -294,14 +288,13 @@ function Attendance() {
   }, []);
 
   useEffect(() => {
-  const timerId = setTimeout(() => {
-    refreshSessions();
-  }, 0);
+    const timerId = setTimeout(() => {
+      void refreshSessions();
+    }, 0);
 
-  return () => clearTimeout(timerId);
-}, [refreshSessions]);
+    return () => clearTimeout(timerId);
+  }, [refreshSessions]);
 
-  // Load course offerings.
   useEffect(() => {
     let mounted = true;
 
@@ -320,6 +313,7 @@ function Attendance() {
         if (!mounted) return;
 
         setCourses(courseList);
+
         setSelectedOfferingId((current) => {
           if (
             current &&
@@ -336,6 +330,7 @@ function Attendance() {
         });
       } catch (requestError) {
         if (!mounted) return;
+
         setCourses([]);
         setCoursesError(
           getErrorMessage(requestError, "Unable to load faculty courses.")
@@ -352,7 +347,6 @@ function Attendance() {
     };
   }, []);
 
-  // Load faculty students.
   useEffect(() => {
     let mounted = true;
 
@@ -405,7 +399,7 @@ function Attendance() {
 
   const classOptions = useMemo(() => {
     const labels = sessions
-      .map((session) => getSessionClassName(session))
+      .map(getSessionClassName)
       .filter(Boolean);
 
     return ["All Classes", ...Array.from(new Set(labels)).sort()];
@@ -424,7 +418,14 @@ function Attendance() {
         (status === "All" || session.status === status)
       );
     });
-  }, [sessions, searchTerm, selectedClass, date, status, getSessionClassName]);
+  }, [
+    sessions,
+    searchTerm,
+    selectedClass,
+    date,
+    status,
+    getSessionClassName,
+  ]);
 
   const todaySessions = useMemo(
     () =>
@@ -459,14 +460,13 @@ function Attendance() {
   );
 
   const attendanceRate = useMemo(() => {
-    const totalRecorded = studentsPresent + studentsAbsent;
+    const total = studentsPresent + studentsAbsent;
 
-    if (!selectedSession || totalRecorded === 0) return null;
+    if (!selectedSession || total === 0) return null;
 
-    return Math.round((studentsPresent / totalRecorded) * 100);
+    return Math.round((studentsPresent / total) * 100);
   }, [selectedSession, studentsPresent, studentsAbsent]);
 
-  // The faculty students API must include offering_id for safe course filtering.
   const sessionStudents = useMemo(() => {
     if (!selectedSession) return [];
 
@@ -478,12 +478,40 @@ function Attendance() {
   }, [students, selectedSession]);
 
   const studentEnrollmentScopeAvailable = useMemo(
-    () =>
-      students.some((student) => student.offering_id != null),
+    () => students.some((student) => student.offering_id != null),
     [students]
   );
 
-  // Load records. Request IDs prevent older responses overwriting newer selections.
+  const filteredStudents = useMemo(() => {
+    const query = studentSearch.trim().toLowerCase();
+
+    return sessionStudents.filter((student) => {
+      const record = attendanceRecordMap.get(String(student.student_id));
+      const name = getStudentName(student).toLowerCase();
+      const enrollment = String(student.enrollment_no || "").toLowerCase();
+
+      return (
+        !query ||
+        name.includes(query) ||
+        enrollment.includes(query) ||
+        String(student.student_id).includes(query) ||
+        String(record?.status || "").toLowerCase().includes(query)
+      );
+    });
+  }, [sessionStudents, studentSearch, attendanceRecordMap]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredStudents.length / pageSize)
+  );
+
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedStudents = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+
+    return filteredStudents.slice(start, start + pageSize);
+  }, [filteredStudents, currentPage]);
   const loadAttendanceRecords = useCallback(async (session) => {
     const requestId = ++recordsRequestRef.current;
 
@@ -529,6 +557,7 @@ function Attendance() {
 
   const handleSessionSelect = (session) => {
     loadAttendanceRecords(session);
+    setActiveTab("history");
   };
 
   const handleMarkAttendance = async (studentId) => {
@@ -603,7 +632,9 @@ function Attendance() {
       return;
     }
 
-    if (selectedSession?.session_id !== session.session_id) {
+    if (
+      !isSameId(selectedSession?.session_id, session.session_id)
+    ) {
       await loadAttendanceRecords(session);
     }
 
@@ -662,7 +693,9 @@ function Attendance() {
       !canvasRef.current
     ) {
       if (!cameraReady) {
-        setFaceAttendanceError("Camera is not ready. Please wait and try again.");
+        setFaceAttendanceError(
+          "Camera is not ready. Please wait and try again."
+        );
       }
       return;
     }
@@ -671,7 +704,9 @@ function Attendance() {
     const canvas = canvasRef.current;
 
     if (!video.videoWidth || !video.videoHeight) {
-      setFaceAttendanceError("The camera has not produced a usable frame yet.");
+      setFaceAttendanceError(
+        "The camera has not produced a usable frame yet."
+      );
       return;
     }
 
@@ -684,7 +719,10 @@ function Attendance() {
       canvas.height = video.videoHeight;
 
       const context = canvas.getContext("2d");
-      if (!context) throw new Error("Unable to capture the camera frame.");
+
+      if (!context) {
+        throw new Error("Unable to capture the camera frame.");
+      }
 
       context.drawImage(video, 0, 0, canvas.width, canvas.height);
 
@@ -693,7 +731,9 @@ function Attendance() {
           (blob) =>
             blob
               ? resolve(blob)
-              : reject(new Error("Unable to create an image from the camera frame.")),
+              : reject(
+                  new Error("Unable to create an image from the camera frame.")
+                ),
           "image/jpeg",
           0.9
         );
@@ -704,7 +744,6 @@ function Attendance() {
         imageBlob
       );
 
-      // Recognition may return HTTP 200 with success:false.
       if (!result?.success || !result.data) {
         const detail = result?.data?.status
           ? ` (${result.data.status})`
@@ -732,7 +771,10 @@ function Attendance() {
       handleCloseFaceAttendance();
     } catch (requestError) {
       setFaceAttendanceError(
-        getErrorMessage(requestError, "Face recognition failed. Please try again.")
+        getErrorMessage(
+          requestError,
+          "Face recognition failed. Please try again."
+        )
       );
     } finally {
       recognitionRequestRef.current = false;
@@ -755,7 +797,9 @@ function Attendance() {
       );
 
       if (!result?.success || !result.data) {
-        throw new Error(result?.message || "Unable to start attendance session.");
+        throw new Error(
+          result?.message || "Unable to start attendance session."
+        );
       }
 
       const newSession = result.data;
@@ -794,7 +838,9 @@ function Attendance() {
       );
 
       if (!result?.success) {
-        throw new Error(result?.message || "Unable to close attendance session.");
+        throw new Error(
+          result?.message || "Unable to close attendance session."
+        );
       }
 
       const closedSession = result.data || {
@@ -812,7 +858,6 @@ function Attendance() {
 
       setActiveSession(null);
 
-      // Reload after closing so backend-generated ABSENT records are included.
       await loadAttendanceRecords({
         ...closedSession,
         status: "CLOSED",
@@ -852,547 +897,767 @@ function Attendance() {
   const metrics = [
     {
       label: "Today's Sessions",
-      value: formatMetric(loading ? EMPTY_METRICS.todaySessions : todaySessions),
-      tone: "blue",
+      value: loading ? "…" : todaySessions,
+      note: "From session history",
       icon: faCalendar,
-    },
-    {
-      label: "Active Session",
-      value: formatMetric(
-        loading
-          ? EMPTY_METRICS.activeSession
-          : activeSession
-            ? 1
-            : 0
-      ),
-      tone: "purple",
-      icon: faClock,
+      tone: "blue",
     },
     {
       label: "Students Present",
-      value: formatMetric(
-        recordsLoading
-          ? null
-          : selectedSession
-            ? studentsPresent
-            : EMPTY_METRICS.studentsPresent
-      ),
-      tone: "green",
-      icon: faUserCheck,
-    },
-    {
-      label: "Attendance Rate",
       value: recordsLoading
         ? "…"
-        : attendanceRate === null
-          ? "N/A"
-          : `${attendanceRate}%`,
-      tone: "orange",
-      icon: faChartLine,
+        : selectedSession
+          ? studentsPresent
+          : "N/A",
+      note: selectedSession
+        ? "Selected session"
+        : "Select a session",
+      icon: faCircleCheck,
+      tone: "green",
+    },
+    {
+      label: "Students Absent",
+      value: recordsLoading
+        ? "…"
+        : selectedSession
+          ? studentsAbsent
+          : "N/A",
+      note: selectedSession
+        ? "Selected session"
+        : "Select a session",
+      icon: faUsers,
+      tone: "pink",
+    },
+    {
+      label: "Active Sessions",
+      value: loading ? "…" : activeSession ? 1 : 0,
+      note: activeSession ? "Currently active" : "No active session",
+      icon: faClock,
+      tone: "purple",
     },
   ];
 
+  const displayStudents = activeTab === "attendance"
+    ? paginatedStudents
+    : [];
+
   return (
-    <div className="faculty-attendance-page">
-      <section className="attendance-page-header">
-        <div>
-          <span className="attendance-eyebrow">FACULTY PORTAL</span>
-          <h1>Attendance</h1>
-          <p>
-            Conduct attendance sessions, monitor attendance records and review
-            attendance for your assigned classes.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="attendance-primary-button"
-          onClick={handleOpenStartModal}
-          disabled={
-            coursesLoading ||
-            courses.length === 0 ||
-            Boolean(activeSession)
-          }
-          title={
-            activeSession
-              ? "Close the active session before starting another session"
-              : courses.length === 0
-                ? "No faculty course offerings are available"
-                : "Start attendance"
-          }
-        >
-          <FontAwesomeIcon icon={faCalendar} />
-          Start Attendance
-        </button>
-      </section>
-
-      <section className="attendance-metrics-grid">
-        {metrics.map((metric) => (
-          <article className="attendance-metric-card" key={metric.label}>
-            <div className={`attendance-metric-icon ${metric.tone}`}>
-              <FontAwesomeIcon icon={metric.icon} />
-            </div>
-            <div className="attendance-metric-content">
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-            </div>
-          </article>
-        ))}
-      </section>
-
-      {error && (
-        <section className="attendance-integration-notice" role="alert">
-          <div className="attendance-notice-icon">
-            <FontAwesomeIcon icon={faCircleExclamation} />
-          </div>
+    <div className="faculty-attendance-page attendance-dashboard-layout">
+      <main className="attendance-main-column">
+        <header className="attendance-page-header">
           <div>
-            <strong>Unable to load attendance sessions</strong>
-            <p>{error}</p>
-            <button
-              type="button"
-              className="attendance-outline-button"
-              onClick={refreshSessions}
-            >
-              <FontAwesomeIcon icon={faRotateRight} />
-              Retry
-            </button>
-          </div>
-        </section>
-      )}
-
-      <section className="active-attendance-card">
-        <div className="active-attendance-heading">
-          <div>
-            <h2>Active Attendance</h2>
-            <p>Current attendance session status.</p>
-          </div>
-          <span className={`session-status ${activeSession ? "active" : "pending"}`}>
-            {activeSession ? "Active Session" : "No Active Session"}
-          </span>
-        </div>
-
-        {activeSession ? (
-          <div className="active-attendance-empty">
-            <div className="active-attendance-icon">
-              <FontAwesomeIcon icon={faClock} />
-            </div>
-            <h3>{getSessionClassName(activeSession)}</h3>
+            <span className="attendance-eyebrow">FACULTY WORKSPACE</span>
+            <h1>Attendance</h1>
             <p>
-              Session started at {formatTime(activeSession.start_time)} on{" "}
-              {formatDate(activeSession.session_date)}.
+              Mark attendance, view session details and track student presence
+              in real time.
             </p>
-
-            {closeError && <p className="attendance-error-text">{closeError}</p>}
-            {faceAttendanceError && !showFaceAttendance && (
-              <p className="attendance-error-text">{faceAttendanceError}</p>
-            )}
-
-            <div className="attendance-action-row">
-              <button
-                type="button"
-                className="attendance-outline-button"
-                onClick={handleCloseAttendance}
-                disabled={closingSession}
-              >
-                {closingSession ? (
-                  <>
-                    <FontAwesomeIcon icon={faSpinner} spin />
-                    Closing Session...
-                  </>
-                ) : (
-                  <>
-                    <FontAwesomeIcon icon={faXmark} />
-                    Close Attendance
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                className="attendance-primary-button"
-                onClick={handleStartFaceAttendance}
-                disabled={closingSession || showFaceAttendance}
-              >
-                <FontAwesomeIcon icon={faUserCheck} />
-                Face Attendance
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="active-attendance-empty">
-            <div className="active-attendance-icon">
-              <FontAwesomeIcon icon={faBookOpen} />
-            </div>
-            <h3>No attendance session is currently active</h3>
-            <p>Start an attendance session for one of your assigned course offerings.</p>
-            <button
-              type="button"
-              className="attendance-outline-button"
-              onClick={handleOpenStartModal}
-              disabled={coursesLoading || courses.length === 0}
-            >
-              <FontAwesomeIcon icon={faCalendar} />
-              Start Attendance
-            </button>
-          </div>
-        )}
-      </section>
-
-      <section className="attendance-records-section">
-        <div className="attendance-section-heading">
-          <div>
-            <h2>Attendance Records</h2>
-            <p>Select a session to view and manage student attendance records.</p>
-          </div>
-        </div>
-
-        <div className="attendance-filters-card">
-          <div className="attendance-filter search-filter">
-            <label htmlFor="attendance-search">Search Course</label>
-            <div className="attendance-search-wrapper">
-              <FontAwesomeIcon icon={faMagnifyingGlass} aria-hidden="true" />
-              <input
-                id="attendance-search"
-                type="search"
-                value={searchTerm}
-                onChange={(event) => setSearchTerm(event.target.value)}
-                placeholder="Search by course..."
-              />
-            </div>
-          </div>
-
-          <div className="attendance-filter">
-            <label htmlFor="attendance-class">Class</label>
-            <select
-              id="attendance-class"
-              value={selectedClass}
-              onChange={(event) => setSelectedClass(event.target.value)}
-            >
-              {classOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="attendance-filter">
-            <label htmlFor="attendance-date">Date</label>
-            <input
-              id="attendance-date"
-              type="date"
-              value={date}
-              onChange={(event) => setDate(event.target.value)}
-            />
-          </div>
-
-          <div className="attendance-filter">
-            <label htmlFor="attendance-status">Status</label>
-            <select
-              id="attendance-status"
-              value={status}
-              onChange={(event) => setStatus(event.target.value)}
-            >
-              <option value="All">All</option>
-              <option value="ACTIVE">Active</option>
-              <option value="CLOSED">Closed</option>
-            </select>
           </div>
 
           <button
             type="button"
-            className="attendance-clear-button"
-            onClick={clearFilters}
-            disabled={!hasFilters}
+            className="attendance-primary-button"
+            onClick={handleOpenStartModal}
+            disabled={
+              coursesLoading ||
+              courses.length === 0 ||
+              Boolean(activeSession)
+            }
+            title={
+              activeSession
+                ? "Close the active session before starting another session"
+                : courses.length === 0
+                  ? "No course offerings are available"
+                  : "Start attendance"
+            }
           >
-            <FontAwesomeIcon icon={faRotateRight} />
-            Clear Filters
+            <FontAwesomeIcon icon={faCalendar} />
+            Start Attendance
           </button>
-        </div>
+        </header>
 
-        <div className="attendance-table-card">
-          {loading ? (
-            <div className="attendance-empty-state">
-              <div className="attendance-empty-icon">
-                <FontAwesomeIcon icon={faSpinner} spin />
-              </div>
-              <h3>Loading attendance sessions...</h3>
-              <p>Session information is being loaded from the faculty backend.</p>
+        {error && (
+          <section className="attendance-integration-notice" role="alert">
+            <div className="attendance-notice-icon">
+              <FontAwesomeIcon icon={faCircleExclamation} />
             </div>
-          ) : sessions.length === 0 ? (
-            <div className="attendance-empty-state">
-              <div className="attendance-empty-icon">
-                <FontAwesomeIcon icon={faBookOpen} />
-              </div>
-              <h3>No attendance sessions available</h3>
-              <p>Start an attendance session to create the first session record.</p>
-            </div>
-          ) : filteredSessions.length === 0 ? (
-            <div className="attendance-empty-state compact">
-              <div className="attendance-empty-icon">
-                <FontAwesomeIcon icon={faMagnifyingGlass} />
-              </div>
-              <h3>No matching sessions</h3>
-              <p>Try changing your search or filters.</p>
-            </div>
-          ) : (
-            <div className="attendance-table-wrapper">
-              <table className="attendance-table">
-                <thead>
-                  <tr>
-                    <th>Course</th>
-                    <th>Date</th>
-                    <th>Start Time</th>
-                    <th>End Time</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSessions.map((session) => (
-                    <tr
-                      key={session.session_id}
-                      onClick={() => handleSessionSelect(session)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          handleSessionSelect(session);
-                        }
-                      }}
-                      tabIndex={0}
-                      aria-selected={isSameId(
-                        selectedSession?.session_id,
-                        session.session_id
-                      )}
-                      className={
-                        isSameId(selectedSession?.session_id, session.session_id)
-                          ? "selected"
-                          : ""
-                      }
-                      style={{ cursor: "pointer" }}
-                    >
-                      <td>{getSessionClassName(session)}</td>
-                      <td>{formatDate(session.session_date)}</td>
-                      <td>{formatTime(session.start_time)}</td>
-                      <td>{formatTime(session.end_time)}</td>
-                      <td>
-                        <span
-                          className={`attendance-status ${
-                            session.status?.toLowerCase() || "unknown"
-                          }`}
-                        >
-                          {session.status || "N/A"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
-        <div className="attendance-list-footer">
-          <span>
-            Showing {filteredSessions.length} of {sessions.length} sessions
-          </span>
-          <div className="attendance-pagination">
-            <button type="button" disabled aria-label="Previous page">
-              <FontAwesomeIcon icon={faArrowLeft} />
-              Previous
-            </button>
-            <button type="button" className="active" disabled>
-              1
-            </button>
-            <button type="button" disabled aria-label="Next page">
-              Next
-              <FontAwesomeIcon icon={faArrowRight} />
-            </button>
-          </div>
-        </div>
-      </section>
-
-      {selectedSession && (
-        <section className="attendance-records-section">
-          <div className="attendance-section-heading">
             <div>
-              <h2>Student Attendance</h2>
+              <strong>Unable to load attendance sessions</strong>
+              <p>{error}</p>
+              <button
+                type="button"
+                className="attendance-outline-button"
+                onClick={refreshSessions}
+              >
+                <FontAwesomeIcon icon={faRotateRight} />
+                Retry
+              </button>
+            </div>
+          </section>
+        )}
+
+        <section className="attendance-metrics-grid">
+          {metrics.map((metric) => (
+            <article className="attendance-metric-card" key={metric.label}>
+              <div className={`attendance-metric-icon ${metric.tone}`}>
+                <FontAwesomeIcon icon={metric.icon} />
+              </div>
+              <div className="attendance-metric-content">
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+                <small>{metric.note}</small>
+              </div>
+            </article>
+          ))}
+        </section>
+
+        <section className="active-attendance-card">
+          <div className="active-attendance-heading">
+            <div>
+              <h2>
+                <FontAwesomeIcon icon={faCalendar} />
+                Live Attendance Session
+              </h2>
               <p>
-                {getSessionClassName(selectedSession)} •{" "}
-                {formatDate(selectedSession.session_date)}
+                {activeSession
+                  ? getSessionClassName(activeSession)
+                  : "No active attendance session"}
               </p>
             </div>
+
             <span
               className={`session-status ${
-                selectedSession.status === "ACTIVE" ? "active" : "pending"
+                activeSession ? "active" : "pending"
               }`}
             >
-              {selectedSession.status || "N/A"}
+              {activeSession ? "Active" : "Inactive"}
             </span>
           </div>
 
-          {recordsError && (
-            <section className="attendance-integration-notice" role="alert">
-              <div className="attendance-notice-icon">
-                <FontAwesomeIcon icon={faCircleExclamation} />
+          {activeSession ? (
+            <>
+              <div className="attendance-session-meta">
+                <span>{formatDate(activeSession.session_date)}</span>
+                <span>
+                  {formatTime(activeSession.start_time)} –{" "}
+                  {formatTime(activeSession.end_time)}
+                </span>
+                <span>
+                  {activeSession.session_id
+                    ? `Session #${activeSession.session_id}`
+                    : "Session details"}
+                </span>
               </div>
-              <div>
-                <strong>Unable to load attendance records</strong>
-                <p>{recordsError}</p>
+
+              {closeError && (
+                <p className="attendance-error-text" role="alert">
+                  {closeError}
+                </p>
+              )}
+
+              {faceAttendanceError && !showFaceAttendance && (
+                <p className="attendance-error-text" role="alert">
+                  {faceAttendanceError}
+                </p>
+              )}
+
+              <div className="attendance-live-grid">
+                <div className="attendance-live-camera">
+                  {showFaceAttendance ? (
+                    <>
+                      <video
+                        ref={videoRef}
+                        autoPlay
+                        playsInline
+                        muted
+                        className="attendance-camera-video"
+                      />
+                      <canvas
+                        ref={canvasRef}
+                        className="attendance-camera-canvas"
+                        aria-hidden="true"
+                      />
+                      <span className="attendance-live-badge">
+                        <span /> Camera
+                      </span>
+                    </>
+                  ) : (
+                    <div className="attendance-camera-placeholder">
+                      <FontAwesomeIcon icon={faCamera} />
+                      <strong>Camera preview</strong>
+                      <span>
+                        Start face attendance to activate the camera.
+                      </span>
+                      <button
+                        type="button"
+                        className="attendance-primary-button"
+                        onClick={handleStartFaceAttendance}
+                        disabled={closingSession}
+                      >
+                        <FontAwesomeIcon icon={faCamera} />
+                        Start Camera
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="attendance-recognition-panel">
+                  <h3>Recognition Result</h3>
+                  <div className="attendance-recognition-symbol">
+                    <FontAwesomeIcon
+                      icon={recognizingFace ? faSpinner : faUserCheck}
+                      spin={recognizingFace}
+                    />
+                  </div>
+                  <strong>
+                    {recognizingFace
+                      ? "Recognizing…"
+                      : showFaceAttendance && cameraReady
+                        ? "Camera Ready"
+                        : "Waiting for Camera"}
+                  </strong>
+                  <p>
+                    {showFaceAttendance
+                      ? "Capture a frame to send it to the face-recognition API."
+                      : "Face recognition requires an active session and camera access."}
+                  </p>
+
+                  {showFaceAttendance && (
+                    <button
+                      type="button"
+                      className="attendance-primary-button"
+                      onClick={handleRecognizeFace}
+                      disabled={!cameraReady || recognizingFace}
+                    >
+                      {recognizingFace ? (
+                        <>
+                          <FontAwesomeIcon icon={faSpinner} spin />
+                          Recognizing…
+                        </>
+                      ) : (
+                        <>
+                          <FontAwesomeIcon icon={faUserCheck} />
+                          Capture & Recognize
+                        </>
+                      )}
+                    </button>
+                  )}
+
+                  {showFaceAttendance && (
+                    <button
+                      type="button"
+                      className="attendance-secondary-button"
+                      onClick={handleCloseFaceAttendance}
+                      disabled={recognizingFace}
+                    >
+                      <FontAwesomeIcon icon={faXmark} />
+                      Stop Camera
+                    </button>
+                  )}
+
+                  {faceAttendanceError && (
+                    <p className="attendance-error-text" role="alert">
+                      {faceAttendanceError}
+                    </p>
+                  )}
+                </div>
+
+                <div className="attendance-session-stats">
+                  <h3>Session Stats</h3>
+                  {[
+                    {
+                      label: "Total Recorded",
+                      value: recordsLoading
+                        ? "…"
+                        : attendanceRecords.length,
+                      icon: faUsers,
+                      tone: "blue",
+                    },
+                    {
+                      label: "Marked Present",
+                      value: recordsLoading ? "…" : studentsPresent,
+                      icon: faCircleCheck,
+                      tone: "green",
+                    },
+                    {
+                      label: "Marked Absent",
+                      value: recordsLoading ? "…" : studentsAbsent,
+                      icon: faCircleExclamation,
+                      tone: "orange",
+                    },
+                    {
+                      label: "Attendance Rate",
+                      value: attendanceRate === null
+                        ? "N/A"
+                        : `${attendanceRate}%`,
+                      icon: faChartLine,
+                      tone: "purple",
+                    },
+                  ].map((item) => (
+                    <div className="attendance-stat-row" key={item.label}>
+                      <span className={`attendance-stat-icon ${item.tone}`}>
+                        <FontAwesomeIcon icon={item.icon} />
+                      </span>
+                      <div>
+                        <small>{item.label}</small>
+                        <strong>{item.value}</strong>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="attendance-action-row">
                 <button
                   type="button"
                   className="attendance-outline-button"
-                  onClick={() => loadAttendanceRecords(selectedSession)}
+                  onClick={() => loadAttendanceRecords(activeSession)}
+                  disabled={recordsLoading}
                 >
-                  <FontAwesomeIcon icon={faRotateRight} />
-                  Retry
+                  <FontAwesomeIcon
+                    icon={recordsLoading ? faSpinner : faRotateRight}
+                    spin={recordsLoading}
+                  />
+                  Refresh Records
+                </button>
+
+                <button
+                  type="button"
+                  className="attendance-danger-button"
+                  onClick={handleCloseAttendance}
+                  disabled={closingSession}
+                >
+                  {closingSession ? (
+                    <FontAwesomeIcon icon={faSpinner} spin />
+                  ) : (
+                    <FontAwesomeIcon icon={faXmark} />
+                  )}
+                  {closingSession ? "Ending Session…" : "End Session"}
                 </button>
               </div>
-            </section>
-          )}
-
-          {markAttendanceError && (
-            <section className="attendance-integration-notice" role="alert">
-              <div className="attendance-notice-icon">
-                <FontAwesomeIcon icon={faCircleExclamation} />
+            </>
+          ) : (
+            <div className="active-attendance-empty">
+              <div className="active-attendance-icon">
+                <FontAwesomeIcon icon={faBookOpen} />
               </div>
-              <div>
-                <strong>Unable to mark attendance</strong>
-                <p>{markAttendanceError}</p>
-              </div>
-            </section>
+              <h3>No active attendance session</h3>
+              <p>
+                Start a session for one of your assigned course offerings to
+                mark or recognize attendance.
+              </p>
+              <button
+                type="button"
+                className="attendance-primary-button"
+                onClick={handleOpenStartModal}
+                disabled={coursesLoading || courses.length === 0}
+              >
+                <FontAwesomeIcon icon={faCalendar} />
+                Start Attendance
+              </button>
+            </div>
           )}
+        </section>
 
+        <section className="attendance-records-section">
           <div className="attendance-table-card">
-            {recordsLoading || studentsLoading ? (
-              <div className="attendance-empty-state">
-                <div className="attendance-empty-icon">
-                  <FontAwesomeIcon icon={faSpinner} spin />
-                </div>
-                <h3>
-                  {recordsLoading
-                    ? "Loading student attendance..."
-                    : "Loading students..."}
-                </h3>
-                <p>Information is being loaded from the faculty backend.</p>
+            <div className="attendance-table-toolbar">
+              <div className="attendance-tabs" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "attendance"}
+                  className={activeTab === "attendance" ? "active" : ""}
+                  onClick={() => setActiveTab("attendance")}
+                >
+                  Recent Attendance
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={activeTab === "history"}
+                  className={activeTab === "history" ? "active" : ""}
+                  onClick={() => setActiveTab("history")}
+                >
+                  Session History
+                </button>
               </div>
-            ) : studentsError ? (
-              <div className="attendance-empty-state">
-                <div className="attendance-empty-icon">
-                  <FontAwesomeIcon icon={faCircleExclamation} />
-                </div>
-                <h3>Student data unavailable</h3>
-                <p>{studentsError}</p>
-              </div>
-            ) : !studentEnrollmentScopeAvailable ? (
-              <div className="attendance-empty-state">
-                <div className="attendance-empty-icon">
-                  <FontAwesomeIcon icon={faUserGraduate} />
-                </div>
-                <h3>Course enrollment data is required</h3>
-                <p>
-                  The faculty students endpoint does not provide offering IDs.
-                  To safely display students for this course, update the backend
-                  to return students enrolled in this specific offering. The
-                  component will not assume every faculty student is enrolled
-                  in every course.
-                </p>
-              </div>
-            ) : sessionStudents.length === 0 ? (
-              <div className="attendance-empty-state">
-                <div className="attendance-empty-icon">
-                  <FontAwesomeIcon icon={faUserGraduate} />
-                </div>
-                <h3>No enrolled students found</h3>
-                <p>
-                  No students with this course offering ID were returned by the
-                  faculty students endpoint.
-                </p>
-              </div>
-            ) : (
-              <div className="attendance-table-wrapper">
-                <table className="attendance-table">
-                  <thead>
-                    <tr>
-                      <th>Student</th>
-                      <th>Enrollment No.</th>
-                      <th>Section</th>
-                      <th>Status</th>
-                      <th>Marked At</th>
-                      <th>Method</th>
-                      <th>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sessionStudents.map((student) => {
-                      const record = attendanceRecordMap.get(
-                        String(student.student_id)
-                      );
-                      const isPresent = record?.status === "PRESENT";
-                      const hasRecord = Boolean(record);
-                      const isMarking = isSameId(
-                        markingStudentId,
-                        student.student_id
-                      );
 
-                      return (
-                        <tr key={student.student_id}>
-                          <td>{getStudentName(student)}</td>
-                          <td>{student.enrollment_no || "N/A"}</td>
-                          <td>{student.section || "N/A"}</td>
-                          <td>
-                            <span
-                              className={`attendance-status ${
-                                record?.status?.toLowerCase() || "unknown"
-                              }`}
-                            >
-                              {getAttendanceStatus(record)}
-                            </span>
-                          </td>
-                          <td>{formatTime(record?.marked_at)}</td>
-                          <td>{record?.recognition_method || "N/A"}</td>
-                          <td>
-                            <button
-                              type="button"
-                              className="attendance-outline-button"
-                              onClick={() =>
-                                handleMarkAttendance(student.student_id)
-                              }
-                              disabled={
-                                hasRecord ||
-                                selectedSession.status !== "ACTIVE" ||
-                                isMarking
-                              }
-                            >
-                              {isMarking ? (
-                                <>
-                                  <FontAwesomeIcon icon={faSpinner} spin />
-                                  Marking...
-                                </>
-                              ) : isPresent ? (
-                                <>
-                                  <FontAwesomeIcon icon={faCircleCheck} />
-                                  Present
-                                </>
-                              ) : hasRecord ? (
-                                "Already Recorded"
-                              ) : (
-                                <>
-                                  <FontAwesomeIcon icon={faUserCheck} />
-                                  Mark Present
-                                </>
-                              )}
-                            </button>
-                          </td>
+              {activeTab === "attendance" && selectedSession && (
+                <div className="attendance-search-wrapper">
+                  <FontAwesomeIcon
+                    icon={faMagnifyingGlass}
+                    aria-hidden="true"
+                  />
+                  <input
+                    type="search"
+                    aria-label="Search students"
+                    value={studentSearch}
+                    onChange={(event) => setStudentSearch(event.target.value)}
+                    placeholder="Search students…"
+                  />
+                </div>
+              )}
+            </div>
+
+            {activeTab === "history" && (
+              <>
+                <div className="attendance-filters-card">
+                  <div className="attendance-filter search-filter">
+                    <label htmlFor="attendance-search">Search course</label>
+                    <div className="attendance-search-wrapper">
+                      <FontAwesomeIcon icon={faMagnifyingGlass} />
+                      <input
+                        id="attendance-search"
+                        type="search"
+                        value={searchTerm}
+                        onChange={(event) => {
+                          setSearchTerm(event.target.value);
+                          setPage(1);
+                        }}
+                        placeholder="Search courses…"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="attendance-filter">
+                    <label htmlFor="attendance-class">Class</label>
+                    <select
+                      id="attendance-class"
+                      value={selectedClass}
+                      onChange={(event) => setSelectedClass(event.target.value)}
+                    >
+                      {classOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="attendance-filter">
+                    <label htmlFor="attendance-date">Date</label>
+                    <input
+                      id="attendance-date"
+                      type="date"
+                      value={date}
+                      onChange={(event) => setDate(event.target.value)}
+                    />
+                  </div>
+
+                  <div className="attendance-filter">
+                    <label htmlFor="attendance-status">Status</label>
+                    <select
+                      id="attendance-status"
+                      value={status}
+                      onChange={(event) => setStatus(event.target.value)}
+                    >
+                      <option value="All">All</option>
+                      <option value="ACTIVE">Active</option>
+                      <option value="CLOSED">Closed</option>
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    className="attendance-clear-button"
+                    onClick={clearFilters}
+                    disabled={!hasFilters}
+                  >
+                    <FontAwesomeIcon icon={faRotateRight} />
+                    Clear
+                  </button>
+                </div>
+
+                {loading ? (
+                  <div className="attendance-empty-state">
+                    <FontAwesomeIcon icon={faSpinner} spin />
+                    <h3>Loading sessions…</h3>
+                  </div>
+                ) : filteredSessions.length === 0 ? (
+                  <div className="attendance-empty-state">
+                    <FontAwesomeIcon icon={faBookOpen} />
+                    <h3>
+                      {sessions.length
+                        ? "No matching sessions"
+                        : "No attendance sessions"}
+                    </h3>
+                    <p>
+                      {sessions.length
+                        ? "Try changing your search or filters."
+                        : "Sessions will appear here after you start attendance."}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="attendance-table-wrapper">
+                    <table className="attendance-table">
+                      <thead>
+                        <tr>
+                          <th>Course</th>
+                          <th>Date</th>
+                          <th>Start Time</th>
+                          <th>End Time</th>
+                          <th>Status</th>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {filteredSessions.map((session) => (
+                          <tr
+                            key={session.session_id}
+                            tabIndex={0}
+                            aria-selected={isSameId(
+                              selectedSession?.session_id,
+                              session.session_id
+                            )}
+                            className={
+                              isSameId(
+                                selectedSession?.session_id,
+                                session.session_id
+                              )
+                                ? "selected"
+                                : ""
+                            }
+                            onClick={() => handleSessionSelect(session)}
+                            onKeyDown={(event) => {
+                              if (
+                                event.key === "Enter" ||
+                                event.key === " "
+                              ) {
+                                event.preventDefault();
+                                handleSessionSelect(session);
+                              }
+                            }}
+                          >
+                            <td>{getSessionClassName(session)}</td>
+                            <td>{formatDate(session.session_date)}</td>
+                            <td>{formatTime(session.start_time)}</td>
+                            <td>{formatTime(session.end_time)}</td>
+                            <td>
+                              <span
+                                className={`attendance-status ${
+                                  session.status?.toLowerCase() || "unknown"
+                                }`}
+                              >
+                                {session.status || "N/A"}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                <div className="attendance-list-footer">
+                  <span>
+                    Showing {filteredSessions.length} of {sessions.length}{" "}
+                    sessions
+                  </span>
+                </div>
+              </>
+            )}
+
+            {activeTab === "attendance" && (
+              <>
+                {!selectedSession ? (
+                  <div className="attendance-empty-state">
+                    <FontAwesomeIcon icon={faCalendar} />
+                    <h3>Select an attendance session</h3>
+                    <p>
+                      Open Session History and select a session to view its
+                      attendance records.
+                    </p>
+                    <button
+                      type="button"
+                      className="attendance-outline-button"
+                      onClick={() => setActiveTab("history")}
+                    >
+                      View Session History
+                    </button>
+                  </div>
+                ) : recordsLoading || studentsLoading ? (
+                  <div className="attendance-empty-state">
+                    <FontAwesomeIcon icon={faSpinner} spin />
+                    <h3>
+                      {recordsLoading
+                        ? "Loading attendance records…"
+                        : "Loading students…"}
+                    </h3>
+                  </div>
+                ) : recordsError ? (
+                  <div className="attendance-empty-state" role="alert">
+                    <FontAwesomeIcon icon={faCircleExclamation} />
+                    <h3>Unable to load attendance</h3>
+                    <p>{recordsError}</p>
+                    <button
+                      type="button"
+                      className="attendance-outline-button"
+                      onClick={() => loadAttendanceRecords(selectedSession)}
+                    >
+                      <FontAwesomeIcon icon={faRotateRight} />
+                      Retry
+                    </button>
+                  </div>
+                ) : studentsError ? (
+                  <div className="attendance-empty-state" role="alert">
+                    <FontAwesomeIcon icon={faCircleExclamation} />
+                    <h3>Student data unavailable</h3>
+                    <p>{studentsError}</p>
+                  </div>
+                ) : !studentEnrollmentScopeAvailable ? (
+                  <div className="attendance-empty-state">
+                    <FontAwesomeIcon icon={faUserGraduate} />
+                    <h3>Course enrollment data is required</h3>
+                    <p>
+                      The students API does not provide offering IDs. Students
+                      cannot safely be assigned to this course without that
+                      information.
+                    </p>
+                    <span className="attendance-api-pending">
+                      API Integration Pending
+                    </span>
+                  </div>
+                ) : sessionStudents.length === 0 ? (
+                  <div className="attendance-empty-state">
+                    <FontAwesomeIcon icon={faUsers} />
+                    <h3>No enrolled students returned</h3>
+                    <p>
+                      No students matching this course offering were returned
+                      by the backend.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {markAttendanceError && (
+                      <div className="attendance-inline-error" role="alert">
+                        <FontAwesomeIcon icon={faCircleExclamation} />
+                        {markAttendanceError}
+                      </div>
+                    )}
+
+                    <div className="attendance-table-wrapper">
+                      <table className="attendance-table">
+                        <thead>
+                          <tr>
+                            <th>#</th>
+                            <th>Student Name</th>
+                            <th>Enrollment No.</th>
+                            <th>Status</th>
+                            <th>Marked At</th>
+                            <th>Method</th>
+                            <th>Action</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {displayStudents.map((student, index) => {
+                            const record = attendanceRecordMap.get(
+                              String(student.student_id)
+                            );
+                            const hasRecord = Boolean(record);
+                            const isPresent = record?.status === "PRESENT";
+                            const isMarking = isSameId(
+                              markingStudentId,
+                              student.student_id
+                            );
+
+                            return (
+                              <tr key={student.student_id}>
+                                <td>{(page - 1) * pageSize + index + 1}</td>
+                                <td>
+                                  <div className="attendance-student-cell">
+                                    <span className="attendance-student-avatar">
+                                      {getInitials(getStudentName(student))}
+                                    </span>
+                                    <span>{getStudentName(student)}</span>
+                                  </div>
+                                </td>
+                                <td>{student.enrollment_no || "N/A"}</td>
+                                <td>
+                                  <span
+                                    className={`attendance-status ${
+                                      record?.status?.toLowerCase() || "unknown"
+                                    }`}
+                                  >
+                                    {getAttendanceStatus(record)}
+                                  </span>
+                                </td>
+                                <td>{formatTime(record?.marked_at)}</td>
+                                <td>{record?.recognition_method || "N/A"}</td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="attendance-outline-button"
+                                    onClick={() =>
+                                      handleMarkAttendance(student.student_id)
+                                    }
+                                    disabled={
+                                      hasRecord ||
+                                      selectedSession.status !== "ACTIVE" ||
+                                      isMarking
+                                    }
+                                  >
+                                    {isMarking ? (
+                                      <FontAwesomeIcon icon={faSpinner} spin />
+                                    ) : isPresent ? (
+                                      <FontAwesomeIcon icon={faCircleCheck} />
+                                    ) : (
+                                      <FontAwesomeIcon icon={faUserCheck} />
+                                    )}
+                                    {isMarking
+                                      ? "Marking…"
+                                      : isPresent
+                                        ? "Present"
+                                        : hasRecord
+                                          ? "Recorded"
+                                          : "Mark Present"}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="attendance-list-footer">
+                      <span>
+                        Showing{" "}
+                        {filteredStudents.length === 0
+                          ? 0
+                          : (page - 1) * pageSize + 1}
+                        –
+                        {Math.min(page * pageSize, filteredStudents.length)} of{" "}
+                        {filteredStudents.length} students
+                      </span>
+
+                      <div className="attendance-pagination">
+                        <button
+                          type="button"
+                          onClick={() => setPage((current) => current - 1)}
+                          disabled={page <= 1}
+                          aria-label="Previous page"
+                        >
+                          <FontAwesomeIcon icon={faArrowLeft} />
+                        </button>
+                        <span>
+                          {page} / {totalPages}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPage((current) => current + 1)}
+                          disabled={page >= totalPages}
+                          aria-label="Next page"
+                        >
+                          <FontAwesomeIcon icon={faArrowRight} />
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </>
             )}
           </div>
         </section>
-      )}
 
       {coursesError && (
         <section className="attendance-integration-notice" role="alert">
@@ -1405,259 +1670,343 @@ function Attendance() {
           </div>
         </section>
       )}
+    </main>
 
-      <section className="attendance-integration-notice">
-        <div className="attendance-notice-icon">
-          <FontAwesomeIcon icon={faCircleInfo} />
-        </div>
-        <div>
-          <strong>Faculty attendance services connected</strong>
-          <p>
-            Session management, attendance records, manual attendance marking,
-            and face-recognition requests use the Flask API. Face recognition
-            requires an active session and a registered student face profile.
-          </p>
+    <aside className="attendance-side-column">
+      <section className="attendance-side-card">
+        <h2>
+          <FontAwesomeIcon icon={faBolt} />
+          Quick Actions
+        </h2>
+
+        <button
+          type="button"
+          className="attendance-quick-action primary"
+          onClick={handleOpenStartModal}
+          disabled={
+            coursesLoading ||
+            courses.length === 0 ||
+            Boolean(activeSession)
+          }
+        >
+          <span className="attendance-quick-icon">
+            <FontAwesomeIcon icon={faCamera} />
+          </span>
+          <span>
+            <strong>Start Attendance</strong>
+            <small>Begin a session for a course</small>
+          </span>
+        </button>
+
+        <button
+          type="button"
+          className="attendance-quick-action"
+          onClick={() => {
+            setActiveTab("attendance");
+            document
+              .querySelector(".attendance-records-section")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        >
+          <span className="attendance-quick-icon">
+            <FontAwesomeIcon icon={faUsers} />
+          </span>
+          <span>
+            <strong>View Students</strong>
+            <small>View available course attendance</small>
+          </span>
+        </button>
+
+        <div className="attendance-quick-action pending-action">
+          <span className="attendance-quick-icon">
+            <FontAwesomeIcon icon={faFileLines} />
+          </span>
+          <span>
+            <strong>Generate Report</strong>
+            <small>API Integration Pending</small>
+          </span>
         </div>
       </section>
 
-      {showFaceAttendance && (
-        <div
-          className="attendance-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (
-              event.target === event.currentTarget &&
-              !recognizingFace
-            ) {
-              handleCloseFaceAttendance();
-            }
-          }}
-        >
-          <div
-            className="attendance-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="face-attendance-title"
+      <section className="attendance-side-card">
+        <div className="attendance-side-heading">
+          <h2>
+            <FontAwesomeIcon icon={faCalendar} />
+            Today's Schedule
+          </h2>
+          <button
+            type="button"
+            onClick={() => setScheduleExpanded((current) => !current)}
           >
-            <div className="attendance-modal-header">
-              <div>
-                <h2 id="face-attendance-title">Face Attendance</h2>
-                <p>
-                  Position one student in front of the camera and capture
-                  their face.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="attendance-modal-close"
-                onClick={handleCloseFaceAttendance}
-                disabled={recognizingFace}
-                aria-label="Close"
-              >
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
-            </div>
-
-            <div className="attendance-modal-body">
-              <div className="attendance-camera-container">
-                <video
-                  ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="attendance-camera-video"
-                />
-                <canvas
-                  ref={canvasRef}
-                  className="attendance-camera-canvas"
-                  aria-hidden="true"
-                />
-              </div>
-
-              {faceAttendanceError && (
-                <div className="attendance-session-pending" role="alert">
-                  <div className="attendance-pending-dot">
-                    <FontAwesomeIcon icon={faCircleExclamation} />
-                  </div>
-                  <div>
-                    <strong>Face recognition unavailable</strong>
-                    <p>{faceAttendanceError}</p>
-                  </div>
-                </div>
-              )}
-
-              {!cameraReady && !faceAttendanceError && (
-                <p className="attendance-camera-help">Starting camera...</p>
-              )}
-
-              {cameraReady && !faceAttendanceError && (
-                <p className="attendance-camera-help">
-                  Camera ready. Make sure exactly one student is visible
-                  before capturing.
-                </p>
-              )}
-            </div>
-
-            <div className="attendance-modal-footer">
-              <button
-                type="button"
-                className="attendance-secondary-button"
-                onClick={handleCloseFaceAttendance}
-                disabled={recognizingFace}
-              >
-                <FontAwesomeIcon icon={faXmark} />
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="attendance-primary-button"
-                onClick={handleRecognizeFace}
-                disabled={!cameraReady || recognizingFace}
-              >
-                {recognizingFace ? (
-                  <>
-                    <FontAwesomeIcon icon={faSpinner} spin />
-                    Recognizing...
-                  </>
-                ) : (
-                  <>
-                    <FontAwesomeIcon icon={faUserCheck} />
-                    Capture & Recognize
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
+            {scheduleExpanded ? "Collapse" : "Expand"}
+          </button>
         </div>
-      )}
 
-      {showStartModal && (
+        {scheduleExpanded && (
+          <div className="attendance-schedule-pending">
+            <FontAwesomeIcon icon={faCircleInfo} />
+            <strong>API Integration Pending</strong>
+            <p>
+              A schedule API is not currently used by this page. No timetable
+              entries are displayed until a real schedule endpoint is
+              available.
+            </p>
+          </div>
+        )}
+      </section>
+
+      <section className="attendance-side-card attendance-help-card">
+        <h2>
+          <FontAwesomeIcon icon={faCircleInfo} />
+          Need help?
+        </h2>
+        <p>
+          If attendance data is unavailable, check the faculty API response or
+          contact your system administrator.
+        </p>
+        <span className="attendance-api-pending">
+          Backend-dependent features
+        </span>
+      </section>
+    </aside>
+
+    {showFaceAttendance && (
+      <div
+        className="attendance-modal-backdrop"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            !recognizingFace
+          ) {
+            handleCloseFaceAttendance();
+          }
+        }}
+      >
         <div
-          className="attendance-modal-backdrop"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (
-              event.target === event.currentTarget &&
-              !startingSession
-            ) {
-              setShowStartModal(false);
-            }
-          }}
+          className="attendance-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="face-attendance-title"
         >
-          <div
-            className="attendance-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="start-attendance-title"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <div className="attendance-modal-header">
-              <div>
-                <span className="attendance-eyebrow">ATTENDANCE</span>
-                <h2 id="start-attendance-title">Start Attendance</h2>
-              </div>
-              <button
-                type="button"
-                className="attendance-modal-close"
-                onClick={() => setShowStartModal(false)}
-                disabled={startingSession}
-                aria-label="Close"
-              >
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
+          <div className="attendance-modal-header">
+            <div>
+              <h2 id="face-attendance-title">Face Attendance</h2>
+              <p>
+                Position one student in front of the camera and capture their
+                face.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="attendance-modal-close"
+              onClick={handleCloseFaceAttendance}
+              disabled={recognizingFace}
+              aria-label="Close"
+            >
+              <FontAwesomeIcon icon={faXmark} />
+            </button>
+          </div>
+
+          <div className="attendance-modal-body">
+            <div className="attendance-camera-container">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="attendance-camera-video"
+              />
+              <canvas
+                ref={canvasRef}
+                className="attendance-camera-canvas"
+                aria-hidden="true"
+              />
             </div>
 
-            <div className="attendance-modal-body">
-              <div className="attendance-form-group">
-                <label htmlFor="start-class">Course Offering</label>
-                <select
-                  id="start-class"
-                  value={selectedOfferingId}
-                  onChange={(event) =>
-                    setSelectedOfferingId(event.target.value)
-                  }
-                  disabled={
-                    coursesLoading || courses.length === 0 || startingSession
-                  }
-                >
-                  {courses.length === 0 ? (
-                    <option value="">No course offerings available</option>
-                  ) : (
-                    courses.map((course) => (
-                      <option
-                        key={course.offering_id}
-                        value={course.offering_id}
-                      >
-                        {getCourseLabel(course)}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
-
-              <div className="attendance-session-pending">
+            {faceAttendanceError && (
+              <div className="attendance-session-pending" role="alert">
                 <div className="attendance-pending-dot">
-                  <FontAwesomeIcon icon={faCircleInfo} />
+                  <FontAwesomeIcon icon={faCircleExclamation} />
                 </div>
                 <div>
-                  <strong>Session will start immediately</strong>
-                  <p>
-                    The selected course offering will receive a new ACTIVE
-                    attendance session.
-                  </p>
+                  <strong>Face recognition unavailable</strong>
+                  <p>{faceAttendanceError}</p>
                 </div>
               </div>
+            )}
 
-              {startError && (
-                <div className="attendance-session-pending" role="alert">
-                  <div className="attendance-pending-dot">
-                    <FontAwesomeIcon icon={faCircleExclamation} />
-                  </div>
-                  <div>
-                    <strong>Unable to start session</strong>
-                    <p>{startError}</p>
-                  </div>
-                </div>
+            {!cameraReady && !faceAttendanceError && (
+              <p className="attendance-camera-help">Starting camera…</p>
+            )}
+
+            {cameraReady && !faceAttendanceError && (
+              <p className="attendance-camera-help">
+                Camera ready. Ensure exactly one student is visible.
+              </p>
+            )}
+          </div>
+
+          <div className="attendance-modal-footer">
+            <button
+              type="button"
+              className="attendance-secondary-button"
+              onClick={handleCloseFaceAttendance}
+              disabled={recognizingFace}
+            >
+              <FontAwesomeIcon icon={faXmark} />
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="attendance-primary-button"
+              onClick={handleRecognizeFace}
+              disabled={!cameraReady || recognizingFace}
+            >
+              {recognizingFace ? (
+                <>
+                  <FontAwesomeIcon icon={faSpinner} spin />
+                  Recognizing…
+                </>
+              ) : (
+                <>
+                  <FontAwesomeIcon icon={faUserCheck} />
+                  Capture & Recognize
+                </>
               )}
-            </div>
-
-            <div className="attendance-modal-footer">
-              <button
-                type="button"
-                className="attendance-secondary-button"
-                onClick={() => setShowStartModal(false)}
-                disabled={startingSession}
-              >
-                <FontAwesomeIcon icon={faXmark} />
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="attendance-primary-button"
-                onClick={handleStartAttendance}
-                disabled={
-                  startingSession ||
-                  !selectedOfferingId ||
-                  courses.length === 0
-                }
-              >
-                {startingSession ? (
-                  <>
-                    <FontAwesomeIcon icon={faSpinner} spin />
-                    Starting...
-                  </>
-                ) : (
-                  <>
-                    <FontAwesomeIcon icon={faCalendar} />
-                    Start Attendance
-                  </>
-                )}
-              </button>
-            </div>
+            </button>
           </div>
         </div>
-      )}
-    </div>
+      </div>
+    )}
+
+    {showStartModal && (
+      <div
+        className="attendance-modal-backdrop"
+        role="presentation"
+        onMouseDown={(event) => {
+          if (
+            event.target === event.currentTarget &&
+            !startingSession
+          ) {
+            setShowStartModal(false);
+          }
+        }}
+      >
+        <div
+          className="attendance-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="start-attendance-title"
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div className="attendance-modal-header">
+            <div>
+              <span className="attendance-eyebrow">ATTENDANCE</span>
+              <h2 id="start-attendance-title">Start Attendance</h2>
+            </div>
+            <button
+              type="button"
+              className="attendance-modal-close"
+              onClick={() => setShowStartModal(false)}
+              disabled={startingSession}
+              aria-label="Close"
+            >
+              <FontAwesomeIcon icon={faXmark} />
+            </button>
+          </div>
+
+          <div className="attendance-modal-body">
+            <div className="attendance-form-group">
+              <label htmlFor="start-class">Course Offering</label>
+              <select
+                id="start-class"
+                value={selectedOfferingId}
+                onChange={(event) =>
+                  setSelectedOfferingId(event.target.value)
+                }
+                disabled={
+                  coursesLoading || courses.length === 0 || startingSession
+                }
+              >
+                {courses.length === 0 ? (
+                  <option value="">No course offerings available</option>
+                ) : (
+                  courses.map((course) => (
+                    <option
+                      key={course.offering_id}
+                      value={course.offering_id}
+                    >
+                      {getCourseLabel(course)}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+
+            <div className="attendance-session-pending">
+              <div className="attendance-pending-dot">
+                <FontAwesomeIcon icon={faCircleInfo} />
+              </div>
+              <div>
+                <strong>Session will start immediately</strong>
+                <p>
+                  The selected course offering will receive a new active
+                  attendance session.
+                </p>
+              </div>
+            </div>
+
+            {startError && (
+              <div className="attendance-session-pending" role="alert">
+                <div className="attendance-pending-dot">
+                  <FontAwesomeIcon icon={faCircleExclamation} />
+                </div>
+                <div>
+                  <strong>Unable to start session</strong>
+                  <p>{startError}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="attendance-modal-footer">
+            <button
+              type="button"
+              className="attendance-secondary-button"
+              onClick={() => setShowStartModal(false)}
+              disabled={startingSession}
+            >
+              <FontAwesomeIcon icon={faXmark} />
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="attendance-primary-button"
+              onClick={handleStartAttendance}
+              disabled={
+                startingSession ||
+                !selectedOfferingId ||
+                courses.length === 0
+              }
+            >
+              {startingSession ? (
+                <>
+                  <FontAwesomeIcon icon={faSpinner} spin />
+                  Starting…
+                </>
+              ) : (
+                <>
+                  <FontAwesomeIcon icon={faCalendar} />
+                  Start Attendance
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
   );
 }
 
