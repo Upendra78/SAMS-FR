@@ -1,6 +1,5 @@
-
 import { useCallback, useEffect, useMemo, useState } from "react";
-
+import { useLocation, useNavigate } from "react-router-dom";
 import {
   faBook,
   faBookOpen,
@@ -22,6 +21,7 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 import {
+  bulkEnrollStudents,
   createAdminEnrollment,
   deleteAdminEnrollment,
   getAdminEnrollments,
@@ -39,6 +39,7 @@ import {
   createAdminCourseOffering,
   updateAdminCourseOffering,
   deleteAdminCourseOffering,
+  getAdminBatches,
 } from "../../services/adminService";
 
 import coursesImage from "../../../image/Courses.png";
@@ -50,8 +51,8 @@ import "./AcademicManagement.css";
 
 const TABS = [
   { id: "courses", label: "Courses", icon: faBook },
-  { id: "offerings", label: "Course Offerings", icon: faBookOpen },
-  { id: "enrollments", label: "Course Enrollments", icon: faGraduationCap },
+  { id: "offerings", label: "Course Offerings to Faculty", icon: faBookOpen },
+  { id: "enrollments", label: "Course Enrollments to Student", icon: faGraduationCap },
   { id: "assignments", label: "Assignments", icon: faChalkboardTeacher },
 ];
 
@@ -61,6 +62,7 @@ const EMPTY_COURSE_FORM = {
   department_id: "",
   semester: "",
   credits: "",
+  batch: "",
 };
 
 const EMPTY_OFFERING_FORM = {
@@ -95,10 +97,34 @@ function formatDate(value) {
 }
 
 function AcademicManagement() {
-  const [activeTab, setActiveTab] = useState("courses");
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const academicBasePath = "/admin/academic-management";
+
+  const getTabFromPath = () => {
+    const path = location.pathname
+      .replace(`${academicBasePath}/`, "")
+      .replace(`${academicBasePath}`, "");
+
+    const tabMap = {
+      courses: "courses",
+      "course-offerings": "offerings",
+      "course-enrollments": "enrollments",
+      assignments: "assignments",
+    };
+
+    return tabMap[path] || "courses";
+  };
+
+  const activeTab = getTabFromPath();
+
 
   // Course data
   const [courses, setCourses] = useState([]);
+  const [batches, setBatches] = useState([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
+  const [batchesError, setBatchesError] = useState("");
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [coursesError, setCoursesError] = useState("");
   const [departments, setDepartments] = useState([]);
@@ -151,6 +177,10 @@ function AcademicManagement() {
     ...EMPTY_ENROLLMENT_FORM,
   });
   const [creatingEnrollment, setCreatingEnrollment] = useState(false);
+  const [bulkEnrollmentOfferingId, setBulkEnrollmentOfferingId] =
+    useState("");
+  const [bulkEnrollmentLoading, setBulkEnrollmentLoading] =
+    useState(false);
   const [deletingEnrollmentId, setDeletingEnrollmentId] = useState(null);
   const [enrollmentActionError, setEnrollmentActionError] = useState("");
   const [enrollmentActionMessage, setEnrollmentActionMessage] = useState("");
@@ -314,6 +344,40 @@ function AcademicManagement() {
     };
   }, [activeTab]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadBatches = async () => {
+      setBatchesLoading(true);
+      setBatchesError("");
+
+      try {
+        const response = await getAdminBatches();
+
+        if (!cancelled) {
+          setBatches(response.data || []);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setBatchesError(
+            error.response?.data?.message ||
+              "Failed to load batches."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setBatchesLoading(false);
+        }
+      }
+    };
+
+    loadBatches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Load enrollment records and the data needed by the enrollment form.
   useEffect(() => {
     if (activeTab !== "enrollments") return;
@@ -475,7 +539,25 @@ function AcademicManagement() {
   };
 
   const handleTabChange = (tabId) => {
-    setActiveTab(tabId);
+    const tabPaths = {
+      courses: "",
+      offerings: "course-offerings",
+      enrollments: "course-enrollments",
+      assignments: "assignments",
+    };
+
+    const tabPath = tabPaths[tabId];
+
+    if (tabPath === undefined) {
+      return;
+    }
+
+    navigate(
+      tabPath
+        ? `${academicBasePath}/${tabPath}`
+        : academicBasePath
+    );
+
     setAssignmentNotice("");
     setCourseActionError("");
     setCourseActionMessage("");
@@ -498,6 +580,7 @@ function AcademicManagement() {
             department_id: String(course.department_id ?? ""),
             semester: String(course.semester ?? ""),
             credits: String(course.credits ?? ""),
+            batch: course.batch || "",
           }
         : { ...EMPTY_COURSE_FORM }
     );
@@ -586,11 +669,13 @@ function AcademicManagement() {
       department_id: departmentId,
       semester,
       credits,
+      batch: courseForm.batch.trim()
     };
 
     if (
       !payload.course_code ||
       !payload.course_name ||
+      !payload.batch ||
       !Number.isInteger(departmentId) ||
       departmentId <= 0 ||
       !Number.isInteger(semester) ||
@@ -687,7 +772,8 @@ function AcademicManagement() {
       !Number.isInteger(payload.semester) ||
       payload.semester < 1 ||
       !payload.academic_year ||
-      !payload.section
+      !payload.section,
+      !payload.somethingElse
     ) {
       setOfferingActionError("Complete all required offering fields.");
       return;
@@ -800,6 +886,60 @@ function AcademicManagement() {
       );
     } finally {
       setEnrollmentsLoading(false);
+    }
+  };
+
+  const handleBulkEnrollStudents = async () => {
+    const offeringId = Number(bulkEnrollmentOfferingId);
+
+    if (
+      !Number.isInteger(offeringId) ||
+      offeringId <= 0 ||
+      !offerings.some((offering) => offering.offering_id === offeringId)
+    ) {
+      setEnrollmentActionError("Select a valid course offering.");
+      return;
+    }
+
+    const selectedOffering = offerings.find(
+      (offering) => offering.offering_id === offeringId
+    );
+
+    const confirmed = window.confirm(
+      `Bulk enroll eligible students in ${
+        selectedOffering.course_name || selectedOffering.course_code
+      } (Offering ID: ${offeringId})?\n\nStudents already enrolled will be skipped.`
+    );
+
+    if (!confirmed) return;
+
+    setBulkEnrollmentLoading(true);
+    setEnrollmentActionError("");
+    setEnrollmentActionMessage("");
+
+    try {
+      const result = await bulkEnrollStudents(offeringId);
+
+      if (!result?.success) {
+        throw new Error(result?.message || "Bulk enrollment failed.");
+      }
+
+      const data = result.data || {};
+
+      setEnrollmentActionMessage(
+        `${result.message || "Bulk enrollment completed."} ` +
+        `Eligible: ${data.eligible_students ?? 0}; ` +
+        `created: ${data.created ?? 0}; ` +
+        `already enrolled: ${data.already_enrolled ?? 0}.`
+      );
+
+      await handleRefreshEnrollments();
+    } catch (error) {
+      setEnrollmentActionError(
+        getErrorMessage(error, "Unable to bulk enroll students.")
+      );
+    } finally {
+      setBulkEnrollmentLoading(false);
     }
   };
 
@@ -1284,6 +1424,7 @@ function AcademicManagement() {
                     <th>Department</th>
                     <th>Semester</th>
                     <th>Credits</th>
+                    <th>Batch</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -1316,6 +1457,7 @@ function AcademicManagement() {
                         </td>
                         <td>{course.semester ?? "—"}</td>
                         <td>{course.credits ?? "—"}</td>
+                        <td>{course.batch || "—"}</td>
                         <td>
                           <button
                             type="button"
@@ -1445,7 +1587,7 @@ function AcademicManagement() {
                 ACADEMIC MANAGEMENT
               </span>
 
-              <h2>Course Offerings</h2>
+              <h2>Course Offerings to Faculty</h2>
 
               <p>
                 Assign courses to faculty for an academic year,
@@ -1636,23 +1778,65 @@ function AcademicManagement() {
         <div className="academic-table-card">
           <div className="enrollments-section-header">
             <div className="enrollments-section-title">
-              <h2>Course Enrollments</h2>
+              <h2>Course Enrollments to Student</h2>
               <p>
                 Manage student enrollments, update records, and monitor enrollment status.
               </p>
             </div>
 
-            <button
-              type="button"
-              className="enrollments-refresh-btn"
-              onClick={handleRefreshEnrollments}
-              disabled={enrollmentsLoading}
-            >
-              <span className={enrollmentsLoading ? "refresh-icon spinning" : "refresh-icon"}>
-                ↻
-              </span>
-              {enrollmentsLoading ? "Refreshing..." : "Refresh"}
-            </button>
+            <div className="enrollments-header-actions">
+              <select
+                className="bulk-enrollment-select"
+                aria-label="Select course offering for bulk enrollment"
+                value={bulkEnrollmentOfferingId}
+                onChange={(event) => setBulkEnrollmentOfferingId(event.target.value)}
+                disabled={bulkEnrollmentLoading}
+              >
+                <option value="">Select course offering in bulk</option>
+                {offerings.map((offering) => (
+                  <option
+                    key={offering.offering_id}
+                    value={offering.offering_id}
+                  >
+                    {offering.course_code} — {offering.course_name}
+                    {" | Sem "}
+                    {offering.semester}
+                    {" | Section "}
+                    {offering.section}
+                    {" | "}
+                    {offering.academic_year}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                type="button"
+                className="academic-primary-button"
+                onClick={handleBulkEnrollStudents}
+                disabled={!bulkEnrollmentOfferingId || bulkEnrollmentLoading}
+              >
+                <FontAwesomeIcon icon={faPlus} />
+                {bulkEnrollmentLoading ? "Enrolling..." : "Bulk Enroll Students"}
+              </button>
+
+              <button
+                type="button"
+                className="enrollments-refresh-btn"
+                onClick={handleRefreshEnrollments}
+                disabled={enrollmentsLoading || bulkEnrollmentLoading}
+              >
+                <span
+                  className={
+                    enrollmentsLoading
+                      ? "refresh-icon spinning"
+                      : "refresh-icon"
+                  }
+                >
+                  {"↻"}
+                </span>
+                {enrollmentsLoading ? "Refreshing..." : "Refresh"}
+              </button>
+            </div>
           </div>
 
           {enrollmentsLoading ? (
@@ -2038,6 +2222,47 @@ function AcademicManagement() {
                       required
                       disabled={savingCourse}
                     />
+                  </div>
+                  <div className="academic-form-field">
+                    <label htmlFor="course-batch">Batch / Academic </label>
+                    <select
+                      id="course-batch"
+                      name="batch"
+                      value={courseForm.batch}
+                      onChange={(event) =>
+                        setCourseForm((current) => ({
+                          ...current,
+                          batch: event.target.value,
+                        }))
+                      }
+                      required
+                      disabled={savingCourse}
+                    >
+                      <option value="">Select batch</option>
+
+                      {batchesLoading && (
+                        <option value="" disabled>
+                          Loading batches...
+                        </option>
+                      )}
+
+                      {!batchesLoading &&
+                        batches
+                          .filter((batch) => batch.is_active)
+                          .map((batch) => (
+                            <option
+                              key={batch.batch_id}
+                              value={batch.batch_name}
+                            >
+                              {batch.batch_name}
+                            </option>
+                          ))}
+                    </select>
+                    {batchesError && (
+                      <p className="form-error" role="alert">
+                        {batchesError}
+                      </p>
+                    )}
                   </div>
                 </div>
               </div>

@@ -18,6 +18,7 @@ import Departments from "../pages/admin/Departments";
 import AcademicManagement from "../pages/admin/AcademicManagement";
 import AttendanceReports from "../pages/admin/AttendanceReports";
 import AdminManagement from "../pages/admin/AdminManagement";
+import BatchManagement from "../pages/admin/BatchManagement";
 
 import FacultyDashboard from "../pages/faculty/FacultyDashboard";
 import Classes from "../pages/faculty/Classes";
@@ -97,7 +98,32 @@ function AppRoutes() {
 
         <Route
           path="academic-management"
+          element={<Navigate to="/admin/academic-management/courses" replace />}
+        />
+
+        <Route
+          path="academic-management/courses"
           element={<AcademicManagement />}
+        />
+
+        <Route
+          path="academic-management/course-offerings"
+          element={<AcademicManagement />}
+        />
+
+        <Route
+          path="academic-management/course-enrollments"
+          element={<AcademicManagement />}
+        />
+
+        <Route
+          path="academic-management/assignments"
+          element={<AcademicManagement />}
+        />
+
+        <Route
+          path="academic-management/batches"
+          element={<BatchManagement />}
         />
 
         <Route

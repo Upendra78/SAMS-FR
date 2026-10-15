@@ -263,9 +263,9 @@
 .student-search-field label,
 .student-filter-field label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 7px;
   color: #536176;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -285,19 +285,18 @@
 
 .student-input-with-icon input,
 .student-filter-field select {
+  box-sizing: border-box;
   width: 100%;
-  height: 37px;
+  height: 42px;
   border: 1px solid #d8e0eb;
-  border-radius: 7px;
-  outline: none;
+  border-radius: 9px;
   background: #ffffff;
   color: #263349;
   font-family: inherit;
   font-size: 12px;
   transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    background 0.15s ease;
+    border-color 0.18s ease,
+    box-shadow 0.18s ease;
 }
 
 .student-input-with-icon input {
@@ -333,30 +332,67 @@
 }
 
 .student-clear-button {
+  box-sizing: border-box;
   display: inline-flex;
+  width: 100%;
+  height: 42px;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  height: 37px;
-  padding: 0 11px;
-  border: 0;
-  background: transparent;
-  color: #4f6fa9;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1px solid #d8e0eb;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #536176;
   font-family: inherit;
   font-size: 11px;
   font-weight: 700;
   white-space: nowrap;
   cursor: pointer;
+  transition:
+    border-color 0.18s ease,
+    background 0.18s ease,
+    color 0.18s ease;
 }
 
 .student-clear-button:hover:not(:disabled) {
+  border-color: #93b4f8;
+  background: #f5f8ff;
   color: #2563eb;
 }
 
 .student-clear-button:disabled {
+  background: #f8fafc;
   color: #aab3c0;
   cursor: not-allowed;
 }
+
+
+@media (max-width: 1100px) {
+  .student-filter-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+  }
+
+  .student-search-field {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 600px) {
+  .student-filter-panel {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .student-search-field {
+    grid-column: auto;
+  }
+}
+
+
+
 
 /* =========================================================
    Table
@@ -653,11 +689,17 @@
   border: 1px solid #e0e6ef;
   border-radius: 6px;
   background: #ffffff;
-  color: #8b96a7;
+  color: #536176;
   font-family: inherit;
   font-size: 10px;
   font-weight: 600;
+  cursor: pointer;
+}
+
+.student-pagination-controls button:disabled {
+  color: #aab3c0;
   cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .student-pagination-controls .student-page-number {
@@ -1993,7 +2035,19 @@
 
 @media (max-width: 1180px) {
   .student-filter-panel {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    display: grid;
+    grid-template-columns:
+      minmax(240px, 1.6fr)
+      repeat(3, minmax(140px, 1fr))
+      minmax(145px, 0.85fr);
+    align-items: end;
+    gap: 14px;
+    margin-bottom: 18px;
+    padding: 18px;
+    border: 1px solid #e2e8f0;
+    border-radius: 13px;
+    background: #ffffff;
+    box-shadow: 0 4px 14px rgba(24, 39, 75, 0.04);
   }
 
   .student-search-field {
@@ -2001,7 +2055,48 @@
   }
 
   .student-clear-button {
-    justify-self: start;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    width: 132px;
+    height: 37px;
+    padding: 0 12px;
+    border: 1px solid #d8e0eb;
+    border-radius: 7px;
+    background: #ffffff;
+    color: #536176;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 700;
+    white-space: nowrap;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition:
+      border-color 0.15s ease,
+      background 0.15s ease,
+      color 0.15s ease,
+      box-shadow 0.15s ease;
+  }
+
+  .student-clear-button:hover:not(:disabled) {
+    border-color: #93b4f8;
+    background: #f5f8ff;
+    color: #2563eb;
+    box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.06);
+  }
+
+  .student-clear-button:disabled {
+    border-color: #e2e8f0;
+    background: #f8fafc;
+    color: #aab3c0;
+    cursor: not-allowed;
+    box-shadow: none;
+  }
+  .student-add-button {
+    min-height: 46px;
+    padding-top: 4px;
+    padding-bottom: 4px;
   }
 }
 
@@ -2127,4 +2222,10 @@
   .student-modal-footer .student-primary-button {
     flex: 1;
   }
+}
+
+.student-add-button {
+  min-height: 46px;
+  padding-top: 12px;
+  padding-bottom: 12px;
 }

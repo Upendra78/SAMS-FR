@@ -503,20 +503,6 @@ function Departments() {
         </div>
       </div>
 
-      <div className="department-integration-notice">
-        <div className="department-integration-icon" aria-hidden="true">
-          i
-        </div>
-        <div>
-          <strong>Department management connected</strong>
-          <span>
-            Department details, HOD assignments, department status, and faculty
-            and student counts are loaded from the backend API.
-          </span>
-        </div>
-        <span className="department-integration-badge">API Connected</span>
-      </div>
-
       {showAddModal && (
         <div
           className="department-modal-overlay"

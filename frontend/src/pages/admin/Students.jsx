@@ -26,6 +26,7 @@ import {
   getUsers,
   getAdminDepartments,
   deleteAdminStudent,
+  getAdminBatches,
 } from "../../services/adminService";
 
 import {
@@ -77,6 +78,8 @@ function Student() {
   const [students, setStudents] = useState([]);
   const [studentUsers, setStudentUsers] = useState([]);
   const [departmentOptions, setDepartmentOptions] = useState([]);
+  const [batchOptions, setBatchOptions] = useState([]);
+  const [batchesLoading, setBatchesLoading] = useState(false);
   const [departmentsLoading, setDepartmentsLoading] = useState(false);
 
   // DELETE STUDENT
@@ -104,7 +107,6 @@ function Student() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [department, setDepartment] = useState("All");
-  const [program, setProgram] = useState("All");
   const [yearSemester, setYearSemester] =
     useState("All");
   const [status, setStatus] = useState("All");
@@ -139,6 +141,7 @@ function Student() {
       section: "",
       academic_year: "",
       department_id: "",
+      batch_id: "",
     });
 
   // =========================================================
@@ -170,6 +173,9 @@ function Student() {
 
   const [faceCaptureBlob, setFaceCaptureBlob] =
     useState(null);
+
+  const [currentPage, setCurrentPage] = useState(1);
+  const studentsPerPage = 10;
 
   // =========================================================
   // FETCH FACE STATUS FOR ALL STUDENTS
@@ -388,6 +394,46 @@ function Student() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchBatches = async () => {
+      setBatchesLoading(true);
+
+      try {
+        const response = await getAdminBatches();
+
+        if (response?.success && Array.isArray(response.data)) {
+          if (!cancelled) {
+            setBatchOptions(
+              response.data.filter(
+                (batch) => batch.is_active === true
+              )
+            );
+          }
+        } else {
+          throw new Error(
+            response?.message || "Failed to load batches."
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Failed to fetch batches:", error);
+        }
+      } finally {
+        if (!cancelled) {
+          setBatchesLoading(false);
+        }
+      }
+    };
+
+    fetchBatches();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // =========================================================
   // FACE STATUS HELPER
   // =========================================================
@@ -470,8 +516,6 @@ function Student() {
     [departmentOptions]
   );
 
-  const programs = ["All"];
-
   const yearSemesters = useMemo(() => {
     const values = students
       .map((student) =>
@@ -539,9 +583,6 @@ function Student() {
         student?.department_name ===
           department;
 
-      const matchesProgram =
-        program === "All";
-
       const matchesYearSemester =
         yearSemester === "All" ||
         String(student?.semester) ===
@@ -563,7 +604,6 @@ function Student() {
       return (
         matchesSearch &&
         matchesDepartment &&
-        matchesProgram &&
         matchesYearSemester &&
         matchesStatus
       );
@@ -573,10 +613,21 @@ function Student() {
     faceStatuses,
     searchTerm,
     department,
-    program,
     yearSemester,
     status,
   ]);
+
+  const totalPages = Math.max(
+    1,
+    Math.ceil(filteredStudents.length / studentsPerPage),
+  );
+
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const paginatedStudents = filteredStudents.slice(
+    (safeCurrentPage - 1) * studentsPerPage,
+    safeCurrentPage * studentsPerPage,
+  );
 
   // =========================================================
   // FILTER HANDLERS
@@ -585,14 +636,12 @@ function Student() {
   const hasActiveFilters =
     Boolean(searchTerm) ||
     department !== "All" ||
-    program !== "All" ||
     yearSemester !== "All" ||
     status !== "All";
 
   function handleClearFilters() {
     setSearchTerm("");
     setDepartment("All");
-    setProgram("All");
     setYearSemester("All");
     setStatus("All");
   }
@@ -620,6 +669,7 @@ function Student() {
       section: "",
       academic_year: "",
       department_id: "",
+      batch_id: "",
     });
 
     setShowCreateStudent(true);
@@ -728,6 +778,9 @@ function Student() {
       academic_year:
         createStudentForm.academic_year.trim(),
       department_id: departmentId,
+      batch_id: createStudentForm.batch_id
+        ? Number(createStudentForm.batch_id)
+        : null,
     };
 
     try {
@@ -1107,35 +1160,6 @@ function Student() {
         </div>
 
         <div className="student-filter-field">
-          <label htmlFor="student-program">
-            Program
-          </label>
-
-          <select
-            id="student-program"
-            value={program}
-            onChange={(event) =>
-              setProgram(
-                event.target.value,
-              )
-            }
-          >
-            {programs.map((item) => (
-              <option
-                key={item}
-                value={item}
-              >
-                {item}
-              </option>
-            ))}
-          </select>
-
-          <small>
-            API integration pending
-          </small>
-        </div>
-
-        <div className="student-filter-field">
           <label htmlFor="student-year">
             Year / Semester
           </label>
@@ -1300,7 +1324,7 @@ function Student() {
                 </thead>
 
                 <tbody>
-                  {filteredStudents.map(
+                  {paginatedStudents.map(
                     (student) => {
                       const faceStatus =
                         getFaceProfileStatus(
@@ -1465,71 +1489,66 @@ function Student() {
           )}
         </div>
 
-        {!loading &&
-          !error &&
-          students.length > 0 && (
-            <div className="student-pagination">
-              <span>
-                Showing{" "}
-                {
-                  filteredStudents.length
-                }{" "}
-                of {students.length}{" "}
-                students
-              </span>
+        {!loading && !error && students.length > 0 && (
+          <div className="student-pagination">
+            <span>
+              Showing{" "}
+              {filteredStudents.length === 0
+                ? 0
+                : (currentPage - 1) * studentsPerPage + 1}
+              {"–"}
+              {Math.min(
+                currentPage * studentsPerPage,
+                filteredStudents.length,
+              )}{" "}
+              of {filteredStudents.length} filtered students
+            </span>
 
-              <div className="student-pagination-controls">
-                <button
-                  type="button"
-                  disabled
-                >
-                  Previous
-                </button>
+            <div className="student-pagination-controls">
+              <button
+                type="button"
+                disabled={currentPage === 1}
+                onClick={() =>
+                  setCurrentPage((page) => Math.max(1, page - 1))
+                }
+              >
+                Previous
+              </button>
 
+              {Array.from(
+                { length: totalPages },
+                (_, index) => index + 1,
+              ).map((page) => (
                 <button
+                  key={page}
                   type="button"
-                  className="student-page-number"
-                  disabled
+                  className={
+                    page === currentPage
+                      ? "student-page-number active"
+                      : "student-page-number"
+                  }
+                  aria-current={page === currentPage ? "page" : undefined}
+                  onClick={() => setCurrentPage(page)}
+                  disabled={page === currentPage}
                 >
-                  1
+                  {page}
                 </button>
+              ))}
 
-                <button
-                  type="button"
-                  disabled
-                >
-                  Next
-                </button>
-              </div>
+              <button
+                type="button"
+                disabled={currentPage === totalPages}
+                onClick={() =>
+                  setCurrentPage((page) =>
+                    Math.min(totalPages, page + 1),
+                  )
+                }
+              >
+                Next
+              </button>
             </div>
-          )}
-      </div>
-
-      {/* =====================================================
-          INTEGRATION NOTICE
-      ====================================================== */}
-
-      <div className="student-integration-notice">
-        <div className="student-integration-icon">
-          <FontAwesomeIcon
-            icon={faCircleInfo}
-          />
-        </div>
-
-        <div>
-          <strong>
-            Student records connected
-          </strong>
-
-          <span>
-            Program, status Pending,
-            from backend data.
-          </span>
-        </div>
-
-        <span className="student-integration-badge">
-          Integrated
-        </span>
+          </div>
+        )}
       </div>
 
       {/* =====================================================
@@ -1798,6 +1817,38 @@ function Student() {
                     </small>
                   )}
                 </div>
+                <div className="student-form-field">
+                  <label htmlFor="create-student-batch">
+                    Batch
+                  </label>
+
+                  <select
+                    id="create-student-batch"
+                    name="batch_id"
+                    value={createStudentForm.batch_id}
+                    onChange={handleCreateStudentChange}
+                    disabled={createStudentLoading || batchesLoading}
+                  >
+                    <option value="">
+                      {batchesLoading
+                        ? "Loading batches..."
+                        : "Select a Batch (Optional)"}
+                    </option>
+
+                    {batchOptions.map((batch) => (
+                      <option
+                        key={batch.batch_id}
+                        value={batch.batch_id}
+                      >
+                        {batch.batch_name}
+                      </option>
+                    ))}
+                  </select>
+
+                  {!batchesLoading && batchOptions.length === 0 && (
+                    <small>No active batches available.</small>
+                  )}
+                </div>
               </div>
 
               {createStudentError && (
@@ -1833,7 +1884,7 @@ function Student() {
 
                 <button
                   type="submit"
-                  className="student-primary-button"
+                  className="student-primary-button student-add-button"
                   disabled={
                     createStudentLoading ||
                     studentUsers.length ===

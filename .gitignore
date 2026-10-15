@@ -40,3 +40,18 @@ backend/student-cookies.txt
 
 # Local backup files
 *.py.bak
+
+
+# Virtual environments
+.venv/
+venv/
+
+# Database backups and local data
+backups/
+*.sql
+*.dump
+
+# Private keys and certificates
+*.key
+*.pem
+!backend/certs/ca.pem
