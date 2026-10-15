@@ -12,6 +12,7 @@ from flask_jwt_extended import (
 
 from app.services.auth_service import authenticate_user
 from flask_jwt_extended import verify_jwt_in_request
+from datetime import timedelta
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -37,7 +38,12 @@ def login():
             "success": False,
             "message": "Invalid email or password",
         }), 401
+    
+    token_options = {}
 
+    if str(user.role).strip().lower() == "admin":
+        token_options["expires_delta"] = timedelta(hours=3)
+    
     access_token = create_access_token(
         identity=str(user.user_id),
         additional_claims={
