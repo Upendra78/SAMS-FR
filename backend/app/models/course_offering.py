@@ -63,5 +63,11 @@ class CourseOffering(db.Model):
         cascade="all, delete-orphan",
     )
 
+    timetable_entries = db.relationship(
+        "TimetableEntry",
+        back_populates = "offering",
+        cascade = "all, delete-orphan",
+    )
+
     def __repr__(self):
         return f"<CourseOffering {self.offering_id}>"
