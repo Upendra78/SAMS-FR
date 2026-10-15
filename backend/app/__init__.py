@@ -30,7 +30,8 @@ from app.routes.reports import reports_bp
 from app.routes.analytics import analytics_bp
 from app.routes.admin_attendance import admin_attendance_bp
 from app.routes.admin_analytics import admin_analytics_bp
-
+from app.routes.timetable import timetable_bp
+from app.routes.timetable_import import timetable_import_bp
 
 def create_app():
     app = Flask(__name__)
@@ -67,5 +68,7 @@ def create_app():
     app.register_blueprint(analytics_bp)
     app.register_blueprint(admin_attendance_bp)
     app.register_blueprint(admin_analytics_bp)
+    app.register_blueprint(timetable_bp)
+    app.register_blueprint(timetable_import_bp)
 
     return app
