@@ -1,15 +1,16 @@
+
 import { Navigate, Route, Routes } from "react-router-dom";
 
 import ProtectedRoute from "./ProtectedRoute";
+
 import Unauthorized from "../pages/Unauthorized";
+import Login from "../pages/auth/Login";
+import ForgotPassword from "../pages/auth/ForgotPassword";
 import VerifyOtp from "../pages/auth/VerifyOtp";
 
 import AdminLayout from "../layouts/AdminLayout";
 import FacultyLayout from "../layouts/FacultyLayout";
 import StudentLayout from "../layouts/StudentLayout";
-
-import Login from "../pages/auth/Login";
-import ForgotPassword from "../pages/auth/ForgotPassword";
 
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import Students from "../pages/admin/Students";
@@ -19,6 +20,9 @@ import AcademicManagement from "../pages/admin/AcademicManagement";
 import AttendanceReports from "../pages/admin/AttendanceReports";
 import AdminManagement from "../pages/admin/AdminManagement";
 import BatchManagement from "../pages/admin/BatchManagement";
+import TimetableManagement from "../pages/admin/TimetableManagement";
+import AdminProfile from "../pages/admin/AdminProfile";
+import AdminSettings from "../pages/admin/AdminSettings";
 
 import FacultyDashboard from "../pages/faculty/FacultyDashboard";
 import Classes from "../pages/faculty/Classes";
@@ -32,8 +36,6 @@ import StudentDashboard from "../pages/student/StudentDashboard";
 import Profile from "../pages/student/Profile";
 import StudentAttendance from "../pages/student/Attendance";
 import AttendanceHistory from "../pages/student/AttendanceHistory";
-import AdminProfile from "../pages/admin/AdminProfile";
-import AdminSettings from "../pages/admin/AdminSettings";
 import Courses from "../pages/student/Courses";
 import Schedule from "../pages/student/Schedule";
 import StudentReports from "../pages/student/Reports";
@@ -42,13 +44,15 @@ import StudentSettings from "../pages/student/Settings";
 function AppRoutes() {
   return (
     <Routes>
-      {/* ==================== DEFAULT ==================== */}
+      {/* Default */}
+      <Route
+        path="/"
+        element={<Navigate to="/auth" replace />}
+      />
 
-      <Route path="/" element={<Navigate to="/auth" replace />} />
-
-      {/* ==================== AUTHENTICATION ==================== */}
-
+      {/* Authentication */}
       <Route path="/auth" element={<Login />} />
+
       <Route
         path="/auth/forgot-password"
         element={<ForgotPassword />}
@@ -59,10 +63,12 @@ function AppRoutes() {
         element={<VerifyOtp />}
       />
 
-      <Route path="/unauthorized" element={<Unauthorized />} />
+      <Route
+        path="/unauthorized"
+        element={<Unauthorized />}
+      />
 
-      {/* ==================== ADMIN PORTAL ==================== */}
-
+      {/* Admin portal */}
       <Route
         path="/admin"
         element={
@@ -81,6 +87,12 @@ function AppRoutes() {
           element={<AdminDashboard />}
         />
 
+        {/* User management */}
+        <Route
+          path="management"
+          element={<AdminManagement />}
+        />
+
         <Route
           path="students"
           element={<Students />}
@@ -91,14 +103,21 @@ function AppRoutes() {
           element={<Faculty />}
         />
 
+        {/* Departments */}
         <Route
           path="departments"
           element={<Departments />}
         />
 
+        {/* Academic management */}
         <Route
           path="academic-management"
-          element={<Navigate to="/admin/academic-management/courses" replace />}
+          element={
+            <Navigate
+              to="/admin/academic-management/courses"
+              replace
+            />
+          }
         />
 
         <Route
@@ -121,17 +140,33 @@ function AppRoutes() {
           element={<AcademicManagement />}
         />
 
+        {/* Keep the original batch URL working */}
         <Route
           path="academic-management/batches"
+          element={
+            <Navigate to="/admin/batches" replace />
+          }
+        />
+
+        {/* Batches: matches the sidebar URL */}
+        <Route
+          path="batches"
           element={<BatchManagement />}
         />
 
+        {/* Timetable management */}
+        <Route
+          path="timetable"
+          element={<TimetableManagement />}
+        />
+
+        {/* Attendance reports */}
         <Route
           path="attendance-reports"
           element={<AttendanceReports />}
         />
 
-        {/* ADMIN ACCOUNT */}
+        {/* Admin account */}
         <Route
           path="profile"
           element={<AdminProfile />}
@@ -141,15 +176,9 @@ function AppRoutes() {
           path="settings"
           element={<AdminSettings />}
         />
-
-        <Route
-          path="management"
-          element={<AdminManagement />}
-        />
       </Route>
 
-      {/* ==================== FACULTY PORTAL ==================== */}
-
+      {/* Faculty portal */}
       <Route
         path="/faculty"
         element={
@@ -198,8 +227,8 @@ function AppRoutes() {
           element={<FacultySettings />}
         />
       </Route>
-      {/* ==================== STUDENT PORTAL ==================== */}
 
+      {/* Student portal */}
       <Route
         path="/student"
         element={
@@ -243,13 +272,18 @@ function AppRoutes() {
           element={<Schedule />}
         />
 
-        <Route path="reports" element={<StudentReports />} />
-        <Route path="settings" element={<StudentSettings />} />
+        <Route
+          path="reports"
+          element={<StudentReports />}
+        />
 
+        <Route
+          path="settings"
+          element={<StudentSettings />}
+        />
       </Route>
 
-      {/* ==================== UNKNOWN ROUTES ==================== */}
-
+      {/* Unknown routes */}
       <Route
         path="*"
         element={<Navigate to="/auth" replace />}

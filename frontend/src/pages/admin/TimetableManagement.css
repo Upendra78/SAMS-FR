@@ -1,0 +1,2127 @@
+/* =========================================================
+   Timetable Management
+   Clean consolidated stylesheet
+   ========================================================= */
+
+.timetable-page {
+  width: 100%;
+  min-width: 0;
+  color: #16345f;
+  font-size: 13px;
+}
+
+.timetable-workspace {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Header */
+
+.timetable-import-heading,
+.timetable-adjustment-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 15px;
+  border: 1px solid #d9eaff;
+  border-radius: 8px;
+  background: linear-gradient(120deg, #fff, #f5faff);
+}
+
+.timetable-import-heading h2 {
+  margin: 0 0 5px;
+  color: #102e59;
+  font-size: 21px;
+  font-weight: 750;
+}
+
+.timetable-import-heading p,
+.timetable-adjustment-heading p {
+  margin: 0;
+  color: #5e7da9;
+  line-height: 1.5;
+}
+
+.timetable-heading-icon {
+  display: grid;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 10px;
+  background: #1266f5;
+  color: #fff;
+  font-size: 20px;
+}
+
+.timetable-heading-icon-small {
+  flex-basis: 36px;
+  width: 36px;
+  height: 36px;
+  font-size: 17px;
+}
+
+/* Four-step import wizard */
+
+.timetable-stepper {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  padding: 4px 10px 12px;
+}
+
+.timetable-step {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 0 5px;
+  border: 0;
+  background: transparent;
+  color: #6681a6;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.timetable-step:not(:last-child)::after {
+  position: absolute;
+  top: 14px;
+  left: calc(50% + 22px);
+  width: calc(100% - 44px);
+  height: 2px;
+  background: #cbdcf3;
+  content: "";
+}
+
+.timetable-step.is-complete:not(:last-child)::after {
+  background: #1769f5;
+}
+
+.timetable-step-circle {
+  z-index: 1;
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #d4e2f3;
+  border-radius: 50%;
+  background: #e7f0fc;
+  color: #254b7d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.timetable-step.is-active {
+  color: #1266f5;
+  font-weight: 700;
+}
+
+.timetable-step.is-active .timetable-step-circle,
+.timetable-step.is-complete .timetable-step-circle {
+  border-color: #1769f5;
+  background: #1769f5;
+  color: #fff;
+}
+
+/* Keyboard focus */
+
+.timetable-step:focus-visible,
+.timetable-tabs button:focus-visible,
+.timetable-primary-button:focus-visible,
+.timetable-outline-button:focus-visible,
+.timetable-dropzone:focus-visible,
+.timetable-icon-button:focus-visible {
+  outline: 3px solid #a9cbff;
+  outline-offset: 3px;
+}
+
+/* File upload and file information */
+
+.timetable-upload-card {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.9fr) minmax(0, 2fr);
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d9eaff;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timetable-file-summary,
+.timetable-file-information {
+  min-width: 0;
+  padding: 15px;
+  border: 1px dashed #b8d5fc;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+
+.timetable-file-summary {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.timetable-excel-icon {
+  display: grid;
+  flex: 0 0 40px;
+  width: 40px;
+  height: 44px;
+  place-items: center;
+  border-radius: 7px;
+  background: #178a50;
+  color: #fff;
+  font-size: 23px;
+}
+
+.timetable-file-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.timetable-file-copy strong {
+  color: #173866;
+  font-size: 13px;
+}
+
+.timetable-file-copy > span {
+  color: #6380a7;
+  font-size: 11px;
+}
+
+.timetable-success-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 5px 9px;
+  border-radius: 5px;
+  background: #d9f8e9;
+  color: #087947 !important;
+  font-weight: 700;
+}
+
+.timetable-file-information {
+  border-style: solid;
+  background: linear-gradient(120deg, #fff, #f7fbff);
+}
+
+.timetable-information-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 17px;
+  color: #0965e9;
+}
+
+.timetable-file-metadata {
+  display: grid;
+  grid-template-columns: 1.4fr 1.1fr 0.8fr 1.2fr;
+}
+
+.timetable-file-metadata > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0 12px;
+  border-right: 1px solid #dce9f9;
+}
+
+.timetable-file-metadata > div:first-child {
+  padding-left: 0;
+}
+
+.timetable-file-metadata > div:last-child {
+  border-right: 0;
+}
+
+.timetable-file-metadata span {
+  color: #6784aa;
+  font-size: 11px;
+}
+
+.timetable-file-metadata strong {
+  overflow-wrap: anywhere;
+  color: #183b6c;
+  font-size: 11px;
+}
+
+.timetable-hidden-input {
+  display: none;
+}
+
+/* Buttons */
+
+.timetable-primary-button,
+.timetable-outline-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px 14px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.timetable-primary-button {
+  background: #1266f5;
+  color: #fff;
+}
+
+.timetable-primary-button:hover:not(:disabled) {
+  background: #0754d5;
+}
+
+.timetable-primary-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.timetable-outline-button {
+  border-color: #b9d7ff;
+  background: #fff;
+  color: #1764d7;
+}
+
+.timetable-outline-button:hover:not(:disabled) {
+  background: #eff6ff;
+}
+
+.timetable-outline-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Alerts */
+
+.timetable-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 11px 13px;
+  border: 1px solid;
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.timetable-alert-error {
+  border-color: #f1bfc3;
+  background: #fff5f5;
+  color: #a32c35;
+}
+
+.timetable-alert-info {
+  border-color: #c9e0ff;
+  background: #f0f7ff;
+  color: #215a9e;
+}
+
+/* Wizard stage cards */
+
+.timetable-stage-card {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid #d9eaff;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timetable-stage-title {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  margin-bottom: 17px;
+}
+
+.timetable-stage-number {
+  display: grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eaf2ff;
+  color: #1266f5;
+  font-weight: 750;
+}
+
+.timetable-stage-title h3,
+.timetable-preview-toolbar h3 {
+  margin: 0 0 5px;
+  color: #163762;
+  font-size: 15px;
+}
+
+.timetable-stage-title p,
+.timetable-preview-toolbar p {
+  margin: 0;
+  color: #6883a7;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Upload dropzone */
+
+.timetable-dropzone {
+  display: flex;
+  width: 100%;
+  min-height: 155px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  border: 2px dashed #b7d4ff;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #1769e9;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+
+.timetable-dropzone:hover {
+  border-color: #1769f5;
+  background: #eff6ff;
+}
+
+.timetable-dropzone > svg {
+  font-size: 29px;
+}
+
+.timetable-dropzone strong {
+  font-size: 13px;
+}
+
+.timetable-dropzone span {
+  color: #6983a7;
+  font-size: 11px;
+}
+
+.timetable-stage-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.timetable-stage-actions > span {
+  color: #6983a7;
+  font-size: 11px;
+}
+
+/* Four persistent management tabs */
+
+.timetable-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: 1px solid #d8e7fa;
+  scrollbar-width: thin;
+  scrollbar-color: #c5d9f4 transparent;
+}
+
+.timetable-tabs button {
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 5px 5px 0 0;
+  background: transparent;
+  color: #56769f;
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.timetable-tabs button:hover {
+  background: #f3f8ff;
+  color: #1764d7;
+}
+
+.timetable-tabs button.is-active {
+  border-bottom-color: #1769f5;
+  background: #f4f8ff;
+  color: #1266f5;
+}
+
+.timetable-tabs button:focus-visible {
+  outline: 3px solid #a9cbff;
+  outline-offset: -3px;
+}
+
+.timetable-management-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  padding: 15px;
+  border: 1px solid #d9eaff;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timetable-management-section > .timetable-tabs {
+  margin-bottom: 2px;
+}
+
+.timetable-management-content {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+  animation: timetable-content-in 0.15s ease-out;
+}
+
+@keyframes timetable-content-in {
+  from {
+    opacity: 0.7;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Timetable toolbar and filters */
+
+.timetable-preview-card {
+  min-width: 0;
+  padding: 14px;
+}
+
+.timetable-preview-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.timetable-preview-toolbar > div {
+  min-width: 0;
+}
+
+.timetable-preview-toolbar h3 {
+  margin: 0 0 5px;
+  color: #163762;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.timetable-preview-toolbar p {
+  margin: 0;
+  color: #6883a7;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.timetable-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d9eaff;
+  border-radius: 7px;
+  background: #f7fbff;
+}
+
+.timetable-filter-bar > label {
+  display: flex;
+  flex: 0 1 160px;
+  min-width: 125px;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.timetable-filter-bar label > span {
+  color: #5878a2;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.timetable-filter-bar select,
+.timetable-filter-bar input,
+.timetable-form-grid input,
+.timetable-form-grid select,
+.timetable-form-grid textarea {
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #d3e2f4;
+  border-radius: 5px;
+  outline: none;
+  background: #fff;
+  color: #183a67;
+  font: inherit;
+}
+
+.timetable-filter-bar select:focus,
+.timetable-filter-bar input:focus,
+.timetable-form-grid input:focus,
+.timetable-form-grid select:focus,
+.timetable-form-grid textarea:focus {
+  border-color: #6199f7;
+  box-shadow: 0 0 0 3px #eaf2ff;
+}
+
+.timetable-filter-search {
+  flex: 1 1 220px;
+}
+
+.timetable-search-input {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding-left: 10px;
+  border: 1px solid #d3e2f4;
+  border-radius: 5px;
+  background: #fff;
+  color: #6885a9;
+}
+
+.timetable-search-input:focus-within {
+  border-color: #6199f7;
+  box-shadow: 0 0 0 3px #eaf2ff;
+}
+
+.timetable-search-input input {
+  border: 0;
+  box-shadow: none !important;
+}
+
+.timetable-search-input input:focus {
+  outline: none;
+}
+
+.timetable-result-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 12px 0;
+  color: #52749e;
+  font-size: 11px;
+}
+
+.timetable-result-summary span:first-child {
+  padding: 6px 10px;
+  border-radius: 5px;
+  background: #e5faf5;
+  color: #087e76;
+  font-weight: 700;
+}
+
+/* Shared data tables */
+
+.timetable-table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #d8e7f8;
+  border-radius: 6px;
+  background: #fff;
+  scrollbar-width: thin;
+  scrollbar-color: #c5d9f4 #f8fbff;
+}
+
+.timetable-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: #234570;
+  font-size: 11px;
+  text-align: left;
+}
+
+.timetable-table th {
+  padding: 12px;
+  border-right: 1px solid #dbe8f7;
+  border-bottom: 1px solid #d4e5f9;
+  background: #eef6ff;
+  color: #28517f;
+  font-size: 11px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.timetable-table td {
+  padding: 11px 12px;
+  border-right: 1px solid #e0ebf8;
+  border-bottom: 1px solid #e0ebf8;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+.timetable-table th:last-child,
+.timetable-table td:last-child {
+  border-right: 0;
+}
+
+.timetable-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.timetable-table tbody tr {
+  transition: background 0.12s ease;
+}
+
+.timetable-table tbody tr:hover {
+  background: #f5f9ff;
+}
+
+.timetable-table-message {
+  padding: 28px 16px !important;
+  color: #6782a5;
+  text-align: center;
+  line-height: 1.7;
+}
+
+.timetable-table-footnote {
+  padding: 10px 2px 0;
+  color: #6782a5;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.timetable-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: 5px;
+  background: #e8f2ff;
+  color: #1764d7;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.timetable-status-chip.is-success {
+  background: #d9f8e9;
+  color: #087947;
+}
+
+.timetable-status-chip.is-warning {
+  background: #fff2d8;
+  color: #936000;
+}
+
+.timetable-table .timetable-primary-button,
+.timetable-table .timetable-outline-button {
+  min-height: 32px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+/* Existing saved timetable / preview */
+
+.timetable-extracted-preview {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #e0ebf8;
+}
+
+.timetable-count-chip {
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-radius: 5px;
+  background: #e8f2ff;
+  color: #1764d7;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+/* Preview validation errors */
+
+.timetable-validation-errors {
+  margin-top: 16px;
+  padding: 13px;
+  border: 1px solid #f0c5c5;
+  border-radius: 6px;
+  background: #fff7f7;
+}
+
+.timetable-validation-errors h4 {
+  margin: 0 0 8px;
+  color: #a42f38;
+}
+
+.timetable-validation-errors p {
+  margin: 5px 0;
+  color: #8d4247;
+  line-height: 1.5;
+}
+
+/* Map & Assign: course offering inputs */
+
+.timetable-table td input[type="number"] {
+  width: 125px;
+  min-width: 95px;
+  min-height: 36px;
+  padding: 7px 9px;
+  border: 1px solid #cbdcf0;
+  border-radius: 5px;
+  outline: none;
+  background: #fff;
+  color: #183a67;
+  font: inherit;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.timetable-table td input[type="number"]:focus {
+  border-color: #6199f7;
+  box-shadow: 0 0 0 3px #eaf2ff;
+}
+
+.timetable-table td input[type="number"]::placeholder {
+  color: #91a6c0;
+}
+
+.timetable-table td input[type="number"]:invalid {
+  border-color: #e7a9ae;
+}
+
+/* Mapping and assignment layout */
+
+.timetable-mapping-panel {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.timetable-mapping-panel .timetable-table-wrapper {
+  margin-top: 4px;
+}
+
+.timetable-mapping-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #d9eaff;
+  border-radius: 6px;
+  background: #f7fbff;
+  color: #52749e;
+  font-size: 12px;
+}
+
+.timetable-mapping-status strong {
+  color: #1764d7;
+}
+
+.timetable-mapping-error {
+  padding: 10px 12px;
+  border: 1px solid #f1bfc3;
+  border-radius: 6px;
+  background: #fff5f5;
+  color: #a32c35;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Courses, faculty and classrooms cards */
+
+.timetable-simple-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.timetable-simple-card {
+  display: flex;
+  min-width: 0;
+  min-height: 145px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 16px;
+  border: 1px solid #dce9f9;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #fff, #f8fbff);
+  overflow-wrap: anywhere;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+.timetable-simple-card:hover {
+  transform: translateY(-2px);
+  border-color: #b8d5fc;
+  box-shadow: 0 5px 16px rgb(32 86 151 / 7%);
+}
+
+.timetable-simple-card-icon {
+  display: grid;
+  flex: 0 0 36px;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 8px;
+  background: #e7f1ff;
+  color: #1769f5;
+  font-size: 15px;
+}
+
+.timetable-simple-card strong {
+  color: #1c416e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.timetable-simple-card > span:last-child {
+  color: #6b85a7;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Separate Faculty Adjustment section */
+
+.timetable-adjustment-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 13px;
+  padding: 15px;
+  border: 1px solid #d9eaff;
+  border-radius: 8px;
+  background: #fff;
+  scroll-margin-top: 20px;
+}
+
+.timetable-adjustment-heading {
+  align-items: center;
+  gap: 12px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.timetable-adjustment-heading > div:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+
+.timetable-adjustment-heading h3 {
+  margin: 0 0 5px;
+  color: #173762;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.timetable-adjustment-heading h3 span {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.timetable-adjustment-heading p {
+  max-width: 760px;
+}
+
+.timetable-adjustment-note,
+.timetable-adjustment-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px 12px;
+  border: 1px solid #d4e6fb;
+  border-radius: 5px;
+  background: #f0f7ff;
+  color: #416c9d;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.timetable-adjustment-summary {
+  align-items: center;
+  background: #f8fbff;
+}
+
+.timetable-adjustment-section .timetable-table-wrapper {
+  margin-top: 2px;
+}
+
+.timetable-adjustment-section .timetable-table th {
+  background: #f1f6ff;
+}
+
+.timetable-adjustment-section .timetable-table td:last-child {
+  min-width: 110px;
+  white-space: nowrap;
+}
+
+/* Wizard footer */
+
+.timetable-wizard-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 15px;
+  border: 1px solid #d9eaff;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.timetable-wizard-footer > span,
+.timetable-wizard-footer > p {
+  margin: 0;
+  color: #6782a5;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+/* Modal */
+
+.timetable-modal-backdrop {
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 20px;
+  background: rgb(9 29 57 / 55%);
+}
+
+.timetable-modal {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid #d9e6f5;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 20px 70px rgb(15 42 76 / 25%);
+}
+
+.timetable-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+
+.timetable-modal-header h3 {
+  margin: 0 0 5px;
+  color: #183a67;
+  font-size: 17px;
+}
+
+.timetable-modal-header p {
+  margin: 0;
+  color: #6b85a7;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.timetable-icon-button {
+  display: inline-grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid #d6e4f5;
+  border-radius: 5px;
+  background: #fff;
+  color: #42658e;
+  cursor: pointer;
+}
+
+.timetable-icon-button:hover {
+  background: #f0f6ff;
+}
+
+.timetable-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+}
+
+.timetable-form-grid label {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  color: #34577f;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.timetable-form-full {
+  grid-column: 1 / -1;
+}
+
+.timetable-form-grid textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.timetable-checkbox-field {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 9px !important;
+}
+
+.timetable-checkbox-field input {
+  flex: 0 0 16px;
+  width: 16px;
+  min-height: 16px;
+  accent-color: #1769f5;
+}
+
+.timetable-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+/* Responsive layout */
+
+@media (max-width: 1000px) {
+  .timetable-upload-card {
+    grid-template-columns: 1fr;
+  }
+
+  .timetable-file-metadata {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 15px;
+  }
+
+  .timetable-file-metadata > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .timetable-file-metadata > div:nth-child(3) {
+    padding-left: 0;
+  }
+
+  .timetable-filter-bar {
+    align-items: stretch;
+  }
+
+  .timetable-filter-bar > label {
+    flex: 1 1 160px;
+  }
+
+  .timetable-management-section {
+    padding: 12px;
+  }
+
+  .timetable-simple-grid {
+    grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
+  }
+}
+
+@media (max-width: 650px) {
+  .timetable-import-heading {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .timetable-import-heading h2 {
+    font-size: 18px;
+  }
+
+  .timetable-heading-icon {
+    flex-basis: 38px;
+    width: 38px;
+    height: 38px;
+    font-size: 17px;
+  }
+
+  .timetable-stepper {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .timetable-step {
+    gap: 6px;
+    font-size: 10px;
+    text-align: center;
+  }
+
+  .timetable-step:not(:last-child)::after {
+    top: 13px;
+    left: calc(50% + 17px);
+    width: calc(100% - 34px);
+  }
+
+  .timetable-step-circle {
+    width: 26px;
+    height: 26px;
+  }
+
+  .timetable-file-summary {
+    flex-wrap: wrap;
+  }
+
+  .timetable-file-summary .timetable-outline-button {
+    width: 100%;
+  }
+
+  .timetable-file-metadata {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 15px 0;
+  }
+
+  .timetable-file-metadata > div {
+    padding: 0 10px;
+  }
+
+  .timetable-file-metadata > div:nth-child(odd) {
+    padding-left: 0;
+  }
+
+  .timetable-file-metadata > div:nth-child(even) {
+    border-right: 0;
+  }
+
+  .timetable-stage-card,
+  .timetable-preview-card,
+  .timetable-adjustment-section {
+    padding: 12px;
+  }
+
+  .timetable-management-section {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .timetable-management-content {
+    gap: 10px;
+  }
+
+  .timetable-tabs {
+    gap: 2px;
+  }
+
+  .timetable-tabs button {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 11px;
+  }
+
+  .timetable-filter-bar > label,
+  .timetable-filter-search {
+    width: 100%;
+    min-width: 0;
+    flex-basis: 100%;
+  }
+
+  .timetable-filter-bar > button {
+    width: 100%;
+  }
+
+  .timetable-preview-toolbar,
+  .timetable-adjustment-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .timetable-preview-toolbar {
+    flex-direction: column;
+  }
+
+  .timetable-preview-toolbar > button,
+  .timetable-adjustment-heading > button {
+    width: 100%;
+  }
+
+  .timetable-stage-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .timetable-stage-actions > button {
+    width: 100%;
+  }
+
+  .timetable-result-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .timetable-table {
+    min-width: 650px;
+  }
+
+  .timetable-table td input[type="number"] {
+    width: 110px;
+  }
+
+  .timetable-simple-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timetable-simple-card {
+    min-height: 0;
+  }
+
+  .timetable-adjustment-heading .timetable-heading-icon {
+    flex-shrink: 0;
+  }
+
+  .timetable-adjustment-section .timetable-table td:last-child {
+    min-width: 100px;
+  }
+
+  .timetable-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timetable-form-full {
+    grid-column: auto;
+  }
+
+  .timetable-wizard-footer {
+    align-items: stretch;
+  }
+
+  .timetable-wizard-footer > button {
+    flex: 1 1 130px;
+    white-space: normal;
+  }
+
+  .timetable-modal-backdrop {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .timetable-modal {
+    max-height: calc(100vh - 24px);
+    padding: 15px;
+  }
+
+  .timetable-form-actions {
+    flex-direction: column-reverse;
+  }
+
+  .timetable-form-actions > button {
+    width: 100%;
+  }
+}
+
+/* Respect reduced-motion preferences */
+
+@media (prefers-reduced-motion: reduce) {
+  .timetable-management-content,
+  .timetable-primary-button,
+  .timetable-outline-button,
+  .timetable-dropzone,
+  .timetable-simple-card,
+  .timetable-table tbody tr,
+  .timetable-table td input[type="number"] {
+    animation: none;
+    transition: none;
+  }
+}
+
+
+.timetable-mapping-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.timetable-mapping-stat {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--card-background, #fff);
+}
+
+.timetable-mapping-stat span {
+  display: block;
+  font-size: 0.82rem;
+  color: var(--text-secondary, #6b7280);
+}
+
+.timetable-mapping-stat strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.5rem;
+}
+
+.timetable-mapping-filters {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.timetable-mapping-filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.timetable-mapping-filters input,
+.timetable-mapping-filters select {
+  width: 100%;
+  min-width: 0;
+}
+
+.timetable-mapping-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.timetable-mapping-status[data-status="matched"] {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.timetable-mapping-status[data-status="unmatched"],
+.timetable-mapping-status[data-status="conflict"] {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.timetable-mapping-status[data-status="ambiguous"] {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+@media (max-width: 720px) {
+  .timetable-mapping-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .timetable-mapping-filters {
+    grid-template-columns: 1fr;
+  }
+}
+
+.timetable-upload-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.timetable-adjustment-heading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 20px;
+}
+
+.timetable-adjustment-heading-copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.timetable-adjustment-heading .timetable-primary-button {
+  flex-shrink: 0;
+}
+
+.timetable-adjustment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 24px;
+  padding-top: 22px;
+  border-top: 1px solid var(--border-color, #e5e7eb);
+}
+
+.timetable-adjustment-form > h4 {
+  margin: 0;
+}
+
+.timetable-adjustment-entry-select,
+.timetable-adjustment-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+
+.timetable-adjustment-entry-select select,
+.timetable-adjustment-box input,
+.timetable-adjustment-box select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.timetable-adjustment-faculty-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.timetable-adjustment-box {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 12px;
+  background: var(--card-background, #fff);
+}
+
+.timetable-adjustment-box > h4 {
+  margin: 0;
+}
+
+.timetable-adjustment-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  overflow-wrap: anywhere;
+}
+
+.timetable-adjustment-detail span {
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.85rem;
+}
+
+.timetable-adjustment-request-box {
+  gap: 18px;
+}
+
+.timetable-adjustment-request-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.timetable-adjustment-approval-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 8px;
+  background: var(--muted-background, #f3f4f6);
+}
+
+.timetable-adjustment-approval-status span {
+  color: var(--text-secondary, #6b7280);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 720px) {
+  .timetable-adjustment-heading {
+    flex-wrap: wrap;
+  }
+
+  .timetable-adjustment-heading-copy {
+    flex-basis: calc(100% - 60px);
+  }
+
+  .timetable-adjustment-heading .timetable-primary-button {
+    width: 100%;
+  }
+
+  .timetable-adjustment-faculty-grid,
+  .timetable-adjustment-request-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* =========================================================
+   FACULTY ADJUSTMENT — REFINED PROFESSIONAL LAYOUT
+   Keeps the existing blue-and-white timetable theme
+   ========================================================= */
+
+.timetable-adjustment-section {
+  --adjustment-border: #dce7f5;
+  --adjustment-muted: #657d9d;
+  --adjustment-text: #18375f;
+  --adjustment-blue: #1769f5;
+
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--adjustment-border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 3px 12px rgb(30 64 115 / 4%);
+  scroll-margin-top: 20px;
+  box-sizing: border-box;
+}
+
+/* Heading and Add Faculty Adjustment button */
+
+.timetable-adjustment-heading {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0 16px;
+  border: 0;
+  border-bottom: 1px solid #e6edf7;
+  border-radius: 0;
+  background: transparent;
+  box-sizing: border-box;
+}
+
+.timetable-adjustment-heading .timetable-heading-icon {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  border-radius: 9px;
+  font-size: 18px;
+}
+
+.timetable-adjustment-heading-copy,
+.timetable-adjustment-heading > div:nth-child(2) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.timetable-adjustment-heading h3 {
+  margin: 0 0 5px;
+  color: #163762;
+  font-size: 17px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.timetable-adjustment-heading h3 span {
+  font-size: inherit;
+  font-weight: inherit;
+}
+
+.timetable-adjustment-heading p {
+  max-width: 650px;
+  margin: 0;
+  color: #657d9d;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.timetable-adjustment-heading .timetable-primary-button {
+  flex: 0 0 auto;
+  min-height: 38px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* Informational notices */
+
+.timetable-adjustment-note,
+.timetable-adjustment-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin: 0;
+  padding: 11px 13px;
+  border: 1px solid #d8e7fb;
+  border-radius: 7px;
+  background: #f5f9ff;
+  color: #45688f;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.timetable-adjustment-summary {
+  align-items: center;
+  background: #f8fbff;
+}
+
+/* Assignment table */
+
+.timetable-adjustment-section .timetable-table-wrapper {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  overflow-x: auto;
+  border: 1px solid #dce7f5;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.timetable-adjustment-section .timetable-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+}
+
+.timetable-adjustment-section .timetable-table th {
+  padding: 12px 13px;
+  border-right: 1px solid #e0eaf7;
+  border-bottom: 1px solid #dce7f5;
+  background: #f2f7ff;
+  color: #315780;
+  font-size: 11px;
+  font-weight: 750;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.timetable-adjustment-section .timetable-table td {
+  padding: 12px 13px;
+  border-right: 1px solid #e8eef7;
+  border-bottom: 1px solid #e8eef7;
+  color: #355577;
+  line-height: 1.5;
+  vertical-align: middle;
+}
+
+.timetable-adjustment-section .timetable-table th:last-child,
+.timetable-adjustment-section .timetable-table td:last-child {
+  border-right: 0;
+}
+
+.timetable-adjustment-section .timetable-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.timetable-adjustment-section .timetable-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.timetable-adjustment-section .timetable-table .timetable-table-message {
+  padding: 24px 16px !important;
+  background: #fbfdff;
+  color: #7085a2;
+  font-size: 12px;
+  line-height: 1.7;
+  text-align: center;
+  white-space: normal;
+}
+
+/* Adjustment form container */
+
+.timetable-adjustment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  margin: 4px 0 0;
+  padding: 18px 0 0;
+  border-top: 1px solid #e4ecf7;
+  box-sizing: border-box;
+}
+
+.timetable-adjustment-form > h4 {
+  margin: 0;
+  color: #183a67;
+  font-size: 15px;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+/* Assignment selector */
+
+.timetable-adjustment-entry-select {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+}
+
+.timetable-adjustment-entry-select label,
+.timetable-adjustment-entry-select > span {
+  color: #496889;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.timetable-adjustment-entry-select select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid #d3e0f1;
+  border-radius: 7px;
+  outline: none;
+  background: #fff;
+  color: #24466f;
+  font: inherit;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.timetable-adjustment-entry-select select:focus {
+  border-color: #76a7f8;
+  box-shadow: 0 0 0 3px #eaf2ff;
+}
+
+/* Current and substitute faculty cards */
+
+.timetable-adjustment-faculty-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+.timetable-adjustment-box {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+  padding: 17px;
+  border: 1px solid #dce7f5;
+  border-radius: 9px;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.timetable-adjustment-box > h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding-bottom: 11px;
+  border-bottom: 1px solid #e8eef7;
+  color: #193c68;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.timetable-adjustment-faculty-grid .timetable-adjustment-box:first-child {
+  background: linear-gradient(145deg, #fff, #f9fbff);
+}
+
+.timetable-adjustment-faculty-grid .timetable-adjustment-box:nth-child(2) {
+  border-color: #d4e4fb;
+  background: linear-gradient(145deg, #fff, #f6faff);
+}
+
+/* Faculty information rows */
+
+.timetable-adjustment-detail {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.timetable-adjustment-detail span {
+  color: #6b82a0;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.45;
+}
+
+.timetable-adjustment-detail strong {
+  max-width: 100%;
+  color: #24466e;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.timetable-adjustment-box label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  color: #496889;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+/* Consistent inputs across faculty and request fields */
+
+.timetable-adjustment-box input:not([type="checkbox"]),
+.timetable-adjustment-box select,
+.timetable-adjustment-box textarea {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 39px;
+  padding: 9px 11px;
+  border: 1px solid #d3e0f1;
+  border-radius: 7px;
+  outline: none;
+  background: #fff;
+  color: #24466f;
+  font: inherit;
+  font-size: 12px;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.timetable-adjustment-box textarea {
+  min-height: 84px;
+  resize: vertical;
+}
+
+.timetable-adjustment-box input::placeholder,
+.timetable-adjustment-box textarea::placeholder {
+  color: #94a6bd;
+}
+
+.timetable-adjustment-box input:focus,
+.timetable-adjustment-box select:focus,
+.timetable-adjustment-box textarea:focus {
+  border-color: #76a7f8;
+  box-shadow: 0 0 0 3px #eaf2ff;
+}
+
+/* Adjustment request panel */
+
+.timetable-adjustment-request-box {
+  gap: 16px;
+  padding: 18px;
+  border-color: #d7e5f7;
+  background: #fbfdff;
+}
+
+.timetable-adjustment-request-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.timetable-adjustment-request-grid > * {
+  min-width: 0;
+}
+
+.timetable-adjustment-approval-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid #d9e7f8;
+  border-radius: 7px;
+  background: #f1f7ff;
+  box-sizing: border-box;
+}
+
+.timetable-adjustment-approval-status strong {
+  color: #285481;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.timetable-adjustment-approval-status span {
+  color: #637e9e;
+  font-size: 11px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* Checkbox and approval option */
+
+.timetable-adjustment-box label:has(input[type="checkbox"]),
+.timetable-adjustment-request-box .timetable-checkbox-field {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 9px;
+  line-height: 1.5;
+}
+
+.timetable-adjustment-box input[type="checkbox"] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: #1769f5;
+}
+
+/* Form action buttons */
+
+.timetable-adjustment-form .timetable-form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 0;
+  padding-top: 15px;
+  border-top: 1px solid #e5edf7;
+}
+
+.timetable-adjustment-form .timetable-form-actions button {
+  min-width: 110px;
+}
+
+/* Keyboard accessibility */
+
+.timetable-adjustment-section button:focus-visible,
+.timetable-adjustment-section select:focus-visible,
+.timetable-adjustment-section input:focus-visible,
+.timetable-adjustment-section textarea:focus-visible {
+  outline: 2px solid #91baff;
+  outline-offset: 2px;
+}
+
+/* Tablet */
+
+@media (max-width: 900px) {
+  .timetable-adjustment-section {
+    padding: 16px;
+  }
+
+  .timetable-adjustment-faculty-grid {
+    gap: 12px;
+  }
+
+  .timetable-adjustment-box {
+    padding: 14px;
+  }
+}
+
+/* Mobile */
+
+@media (max-width: 650px) {
+  .timetable-adjustment-section {
+    gap: 13px;
+    padding: 12px;
+    border-radius: 8px;
+  }
+
+  .timetable-adjustment-heading {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-bottom: 13px;
+  }
+
+  .timetable-adjustment-heading .timetable-heading-icon {
+    flex-basis: 36px;
+    width: 36px;
+    height: 36px;
+  }
+
+  .timetable-adjustment-heading-copy,
+  .timetable-adjustment-heading > div:nth-child(2) {
+    flex: 1 1 calc(100% - 50px);
+  }
+
+  .timetable-adjustment-heading h3 {
+    font-size: 15px;
+  }
+
+  .timetable-adjustment-heading .timetable-primary-button {
+    width: 100%;
+    margin: 2px 0 0;
+  }
+
+  .timetable-adjustment-form {
+    gap: 13px;
+    padding-top: 14px;
+  }
+
+  .timetable-adjustment-faculty-grid,
+  .timetable-adjustment-request-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .timetable-adjustment-box,
+  .timetable-adjustment-request-box {
+    gap: 13px;
+    padding: 14px;
+  }
+
+  .timetable-adjustment-form .timetable-form-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .timetable-adjustment-form .timetable-form-actions button {
+    width: 100%;
+  }
+}
+
+/* Reduced motion */
+
+@media (prefers-reduced-motion: reduce) {
+  .timetable-adjustment-section *,
+  .timetable-adjustment-section *::before,
+  .timetable-adjustment-section *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

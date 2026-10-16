@@ -772,8 +772,7 @@ function AcademicManagement() {
       !Number.isInteger(payload.semester) ||
       payload.semester < 1 ||
       !payload.academic_year ||
-      !payload.section,
-      !payload.somethingElse
+      !payload.section
     ) {
       setOfferingActionError("Complete all required offering fields.");
       return;
