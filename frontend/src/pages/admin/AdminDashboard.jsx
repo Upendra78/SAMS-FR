@@ -8,14 +8,45 @@ import "./AdminDashboard.css";
 function AdminDashboard() {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  useEffect(() => {
-    let isMounted = true;
+  async function loadDashboard({ isRefresh = false } = {}) {
+    if (isRefresh) {
+      setRefreshing(true);
+    }
 
-    async function loadDashboard() {
+    try {
+      const result = await getAdminDashboard();
+
+      if (!result?.success) {
+        throw new Error(
+          result?.message || "Failed to load admin dashboard."
+        );
+      }
+
+      setDashboardData(result.data || null);
+      setErrorMessage("");
+    } catch (error) {
+      setErrorMessage(
+        error?.response?.data?.message ||
+          error?.message ||
+          "Unable to load dashboard data."
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchDashboard() {
       try {
         const result = await getAdminDashboard();
+
+        if (cancelled) return;
 
         if (!result?.success) {
           throw new Error(
@@ -23,16 +54,10 @@ function AdminDashboard() {
           );
         }
 
-        if (!isMounted) {
-          return;
-        }
-
         setDashboardData(result.data || null);
         setErrorMessage("");
       } catch (error) {
-        if (!isMounted) {
-          return;
-        }
+        if (cancelled) return;
 
         setDashboardData(null);
         setErrorMessage(
@@ -41,16 +66,16 @@ function AdminDashboard() {
             "Unable to load dashboard data."
         );
       } finally {
-        if (isMounted) {
+        if (!cancelled) {
           setLoading(false);
         }
       }
     }
 
-    loadDashboard();
+    fetchDashboard();
 
     return () => {
-      isMounted = false;
+      cancelled = true;
     };
   }, []);
 
@@ -139,6 +164,22 @@ function AdminDashboard() {
             Monitor students, faculty, courses, and attendance from one
             centralized dashboard.
           </p>
+        </div>
+        <div className="admin-dashboard-header-actions">
+          <button
+            type="button"
+            className="admin-dashboard-refresh"
+            onClick={() => loadDashboard({ isRefresh: true })}
+            disabled={refreshing}
+          >
+            <i
+              className={`fa-solid fa-rotate ${
+                refreshing ? "fa-spin" : ""
+              }`}
+              aria-hidden="true"
+            />
+            <span>{refreshing ? "Refreshing..." : "Refresh data"}</span>
+          </button>
         </div>
       </header>
 

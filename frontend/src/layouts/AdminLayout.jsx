@@ -1,9 +1,11 @@
+
 import { useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faBell,
   faBookOpen,
   faBuilding,
+  faCalendarDays,
   faChartColumn,
   faChartLine,
   faChevronDown,
@@ -16,7 +18,12 @@ import {
   faUser,
   faUsers,
 } from "@fortawesome/free-solid-svg-icons";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import {
+  NavLink,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
 
 import useAuth from "../hooks/useAuth";
 
@@ -27,6 +34,7 @@ const managementItems = [
     label: "Users",
     path: "/admin/management",
     icon: faUsers,
+    end: true,
   },
   {
     label: "Faculty",
@@ -40,16 +48,31 @@ const managementItems = [
   },
 ];
 
-const navigationItems = [
+const academicItems = [
   {
-    label: "Dashboard",
-    path: "/admin",
-    icon: faChartLine,
+    label: "Courses",
+    path: "/admin/academic-management/courses",
+    icon: faBookOpen,
   },
   {
-    label: "Departments",
-    path: "/admin/departments",
-    icon: faBuilding,
+    label: "Course Offerings",
+    path: "/admin/academic-management/course-offerings",
+    icon: faBookOpen,
+  },
+  {
+    label: "Course Enrollments",
+    path: "/admin/academic-management/course-enrollments",
+    icon: faGraduationCap,
+  },
+  {
+    label: "Batches",
+    path: "/admin/batches",
+    icon: faSchool,
+  },
+  {
+    label: "Assignments",
+    path: "/admin/academic-management/assignments",
+    icon: faBookOpen,
   },
 ];
 
@@ -71,47 +94,90 @@ function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  const pathname = location.pathname;
+
+  // Determine which navigation groups match the current route.
   const isManagementRoute =
-    location.pathname === "/admin/management" ||
-    location.pathname.startsWith("/admin/faculty") ||
-    location.pathname.startsWith("/admin/students");
+    pathname === "/admin/management" ||
+    pathname.startsWith("/admin/faculty") ||
+    pathname.startsWith("/admin/students");
 
   const isAcademicRoute =
-    location.pathname.startsWith("/admin/academic-management");
+    pathname.startsWith("/admin/academic-management") ||
+    pathname === "/admin/batches" ||
+    pathname === "/admin/assignments";
 
   const isAttendanceRoute =
-    location.pathname.startsWith("/admin/attendance-reports");
+    pathname.startsWith("/admin/attendance-reports");
 
-  const [managementOpen, setManagementOpen] =
-    useState(isManagementRoute);
+  // null means follow the current route automatically.
+  // true/false means the user has manually toggled the group.
+  const [managementManualOpen, setManagementManualOpen] =
+    useState(null);
 
-  const [academicOpen, setAcademicOpen] =
-    useState(isAcademicRoute);
+  const [academicManualOpen, setAcademicManualOpen] =
+    useState(null);
 
-  const [attendanceOpen, setAttendanceOpen] =
-    useState(isAttendanceRoute);
+  const [attendanceManualOpen, setAttendanceManualOpen] =
+    useState(null);
+
+  const managementOpen =
+    managementManualOpen ?? isManagementRoute;
+
+  const academicOpen =
+    academicManualOpen ?? isAcademicRoute;
+
+  const attendanceOpen =
+    attendanceManualOpen ?? isAttendanceRoute;
 
   async function handleLogout() {
-    await logout();
-    navigate("/auth", { replace: true });
+    try {
+      await logout();
+    } finally {
+      navigate("/auth", { replace: true });
+    }
   }
 
   function handleManagementToggle() {
-    setManagementOpen((current) => !current);
+    setManagementManualOpen((current) =>
+      !(current ?? isManagementRoute)
+    );
   }
 
   function handleAcademicToggle() {
-    setAcademicOpen((current) => !current);
+    setAcademicManualOpen((current) =>
+      !(current ?? isAcademicRoute)
+    );
   }
 
   function handleAttendanceToggle() {
-    setAttendanceOpen((current) => !current);
+    setAttendanceManualOpen((current) =>
+      !(current ?? isAttendanceRoute)
+    );
+  }
+
+  function getGroupClass(isActive) {
+    return [
+      "admin-nav-link",
+      "admin-nav-group-button",
+      isActive ? "parent-active" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  function getNavClass({ isActive }) {
+    return `admin-nav-link ${isActive ? "active" : ""}`;
+  }
+
+  function getSubNavClass({ isActive }) {
+    return `admin-subnav-link ${isActive ? "active" : ""}`;
   }
 
   return (
     <div className="admin-layout">
+      {/* Sidebar */}
       <aside className="admin-sidebar">
-        {/* Brand */}
         <div className="admin-sidebar-top">
           <div className="admin-brand">
             <div className="admin-brand-mark">
@@ -125,7 +191,6 @@ function AdminLayout() {
           </div>
         </div>
 
-        {/* Navigation */}
         <nav
           className="admin-navigation"
           aria-label="Admin navigation"
@@ -133,13 +198,9 @@ function AdminLayout() {
           <div className="admin-nav-list">
             {/* Dashboard */}
             <NavLink
-              to="/admin"
+              to="/admin/dashboard"
               end
-              className={({ isActive }) =>
-                `admin-nav-link ${
-                  isActive ? "active" : ""
-                }`
-              }
+              className={getNavClass}
             >
               <span className="admin-nav-icon">
                 <FontAwesomeIcon icon={faChartLine} />
@@ -154,9 +215,7 @@ function AdminLayout() {
             <div className="admin-nav-group">
               <button
                 type="button"
-                className={`admin-nav-link admin-nav-group-button ${
-                  isManagementRoute ? "parent-active" : ""
-                }`}
+                className={getGroupClass(isManagementRoute)}
                 onClick={handleManagementToggle}
                 aria-expanded={managementOpen}
               >
@@ -183,14 +242,10 @@ function AdminLayout() {
                 <div className="admin-subnav">
                   {managementItems.map((item) => (
                     <NavLink
-                      key={`${item.label}-${item.path}`}
+                      key={item.path}
                       to={item.path}
-                      end={item.path === "/admin/management"}
-                      className={({ isActive }) =>
-                        `admin-subnav-link ${
-                          isActive ? "active" : ""
-                        }`
-                      }
+                      end={item.end}
+                      className={getSubNavClass}
                     >
                       <span className="admin-subnav-icon">
                         <FontAwesomeIcon icon={item.icon} />
@@ -204,35 +259,24 @@ function AdminLayout() {
             </div>
 
             {/* Departments */}
-            {navigationItems
-              .filter((item) => item.label === "Departments")
-              .map((item) => (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) =>
-                    `admin-nav-link ${
-                      isActive ? "active" : ""
-                    }`
-                  }
-                >
-                  <span className="admin-nav-icon">
-                    <FontAwesomeIcon icon={item.icon} />
-                  </span>
+            <NavLink
+              to="/admin/departments"
+              className={getNavClass}
+            >
+              <span className="admin-nav-icon">
+                <FontAwesomeIcon icon={faBuilding} />
+              </span>
 
-                  <span className="admin-nav-label">
-                    {item.label}
-                  </span>
-                </NavLink>
-              ))}
+              <span className="admin-nav-label">
+                Departments
+              </span>
+            </NavLink>
 
             {/* Academic Management */}
             <div className="admin-nav-group">
               <button
                 type="button"
-                className={`admin-nav-link admin-nav-group-button ${
-                  isAcademicRoute ? "parent-active" : ""
-                }`}
+                className={getGroupClass(isAcademicRoute)}
                 onClick={handleAcademicToggle}
                 aria-expanded={academicOpen}
               >
@@ -257,40 +301,12 @@ function AdminLayout() {
 
               {academicOpen && (
                 <div className="admin-subnav">
-                  {[
-                    {
-                      label: "Courses",
-                      path: "/admin/academic-management/courses",
-                      icon: faBookOpen,
-                    },
-                    {
-                      label: "Course Offerings",
-                      path: "/admin/academic-management/course-offerings",
-                      icon: faBookOpen,
-                    },
-                    {
-                      label: "Course Enrollments",
-                      path: "/admin/academic-management/course-enrollments",
-                      icon: faGraduationCap,
-                    },
-                    {
-                      label: "Batches",
-                      path: "/admin/academic-management/batches",
-                      icon: faSchool,
-                    },
-                    {
-                      label: "Assignments",
-                      path: "/admin/academic-management/assignments",
-                      icon: faBookOpen,
-                    },
-                  ].map((item) => (
+                  {academicItems.map((item) => (
                     <NavLink
                       key={item.path}
                       to={item.path}
                       end
-                      className={({ isActive }) =>
-                        `admin-subnav-link ${isActive ? "active" : ""}`
-                      }
+                      className={getSubNavClass}
                     >
                       <span className="admin-subnav-icon">
                         <FontAwesomeIcon icon={item.icon} />
@@ -303,13 +319,25 @@ function AdminLayout() {
               )}
             </div>
 
+            {/* Timetable Management */}
+            <NavLink
+              to="/admin/timetable"
+              className={getNavClass}
+            >
+              <span className="admin-nav-icon">
+                <FontAwesomeIcon icon={faCalendarDays} />
+              </span>
+
+              <span className="admin-nav-label">
+                Timetable Management
+              </span>
+            </NavLink>
+
             {/* Attendance Reports */}
             <div className="admin-nav-group">
               <button
                 type="button"
-                className={`admin-nav-link admin-nav-group-button ${
-                  isAttendanceRoute ? "parent-active" : ""
-                }`}
+                className={getGroupClass(isAttendanceRoute)}
                 onClick={handleAttendanceToggle}
                 aria-expanded={attendanceOpen}
               >
@@ -336,11 +364,8 @@ function AdminLayout() {
                 <div className="admin-subnav">
                   <NavLink
                     to="/admin/attendance-reports"
-                    className={({ isActive }) =>
-                      `admin-subnav-link ${
-                        isActive ? "active" : ""
-                      }`
-                    }
+                    end
+                    className={getSubNavClass}
                   >
                     <span className="admin-subnav-icon">
                       <FontAwesomeIcon icon={faChartColumn} />
@@ -363,11 +388,8 @@ function AdminLayout() {
               <NavLink
                 key={item.path}
                 to={item.path}
-                className={({ isActive }) =>
-                  `admin-nav-link ${
-                    isActive ? "active" : ""
-                  }`
-                }
+                end
+                className={getNavClass}
               >
                 <span className="admin-nav-icon">
                   <FontAwesomeIcon icon={item.icon} />
