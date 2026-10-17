@@ -38,3 +38,34 @@ def generate_embedding(face_image):
         )
 
     return embedding
+
+
+if __name__ == "__main__":
+    import os
+    import sys
+    from pathlib import Path
+
+    # Set UTF-8 encoding on Windows console if needed
+    if sys.platform == "win32":
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
+    print(f"DeepFace Embedding Generator (Model: {MODEL_NAME}, Detector: {DETECTOR_BACKEND})")
+
+    # Determine test image path
+    default_img = Path(__file__).resolve().parents[2] / "tests" / "cv" / "images" / "person_a_1.jpg"
+    test_image = sys.argv[1] if len(sys.argv) > 1 else str(default_img)
+
+    if not os.path.exists(test_image):
+        print(f"Error: Face image not found at: {test_image}")
+        print("Usage: python embedding.py <path_to_face_image>")
+        sys.exit(1)
+
+    print(f"Loading image: {test_image}")
+    try:
+        embedding = generate_embedding(test_image)
+        print("\n✅ Embedding generated successfully!")
+        print(f"Embedding length (dimensions): {len(embedding)}")
+        print(f"Sample values (first 5): {embedding[:5]}")
+    except Exception as exc:
+        print(f"\n❌ Error generating embedding: {exc}")

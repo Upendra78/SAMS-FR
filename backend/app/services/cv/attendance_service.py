@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
@@ -59,6 +60,7 @@ def mark_face_attendance(
         session_id=session_id,
         student_id=student_id,
         status="PRESENT",
+        marked_at=datetime.now(timezone.utc).replace(tzinfo=None),
         confidence_score=confidence_score,
         recognition_method="FACE",
     )

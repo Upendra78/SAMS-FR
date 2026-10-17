@@ -1,5 +1,7 @@
+
 import io
 import unittest
+from datetime import date, datetime
 from unittest.mock import patch
 
 import cv2
@@ -47,7 +49,6 @@ class TestFaceRecognitionAPI(unittest.TestCase):
 
         db.init_app(cls.app)
         JWTManager(cls.app)
-
         cls.app.register_blueprint(recognition_bp)
 
         with cls.app.app_context():
@@ -132,15 +133,15 @@ class TestFaceRecognitionAPI(unittest.TestCase):
                 student_id=self.student.student_id,
                 offering_id=self.offering.offering_id,
                 status="ACTIVE",
-                )
+            )
             db.session.add(self.enrollment)
             db.session.flush()
 
             self.session = AttendanceSession(
                 offering_id=self.offering.offering_id,
                 faculty_id=self.faculty.faculty_id,
-                session_date=__import__("datetime").date.today(),
-                start_time=__import__("datetime").datetime.now().time(),
+                session_date=date.today(),
+                start_time=datetime.now().time(),
                 status="ACTIVE",
             )
             db.session.add(self.session)
@@ -156,7 +157,6 @@ class TestFaceRecognitionAPI(unittest.TestCase):
                 is_active=True,
             )
             db.session.add(self.face_profile)
-
             db.session.commit()
 
             self.session_id = self.session.session_id
@@ -185,38 +185,26 @@ class TestFaceRecognitionAPI(unittest.TestCase):
                 additional_claims={"role": "FACULTY"},
             )
 
-        return {
-            "Authorization": f"Bearer {token}",
-        }
+        return {"Authorization": f"Bearer {token}"}
 
     def _image_file(self):
-        image = np.zeros(
-            (100, 100, 3),
-            dtype=np.uint8,
-        )
-
-        success, encoded = cv2.imencode(
-            ".jpg",
-            image,
-        )
-
+        image = np.zeros((100, 100, 3), dtype=np.uint8)
+        success, encoded = cv2.imencode(".jpg", image)
         self.assertTrue(success)
 
-        return (
-            io.BytesIO(encoded.tobytes()),
-            "frame.jpg",
-        )
+        return io.BytesIO(encoded.tobytes()), "frame.jpg"
 
-    @patch("app.routes.recognition.face_service.recognize_student")
-    def test_recognized_face_marks_attendance(
-        self,
-        mock_recognize,
-    ):
+    @patch("app.routes.recognition.face_service.recognize_all_students")
+    def test_recognized_face_marks_attendance(self, mock_recognize):
         mock_recognize.return_value = {
-            "student_id": self.student_id,
-            "matched": True,
-            "similarity_score": 0.6955,
+            "matches": [
+                {
+                    "student_id": self.student_id,
+                    "similarity_score": 0.6955,
+                }
+            ],
             "status": "recognized",
+            "detected_count": 1,
         }
 
         response = self.client.post(
@@ -229,19 +217,16 @@ class TestFaceRecognitionAPI(unittest.TestCase):
             content_type="multipart/form-data",
         )
 
-        self.assertEqual(response.status_code, 201)
+        # The current route returns HTTP 200 on successful recognition.
+        self.assertEqual(response.status_code, 200)
 
         body = response.get_json()
-
         self.assertTrue(body["success"])
-        self.assertEqual(
-            body["data"]["student_id"],
-            self.student_id,
-        )
-        self.assertEqual(
-            body["data"]["recognition_method"],
-            "FACE",
-        )
+        self.assertEqual(body["status"], "recognized")
+        self.assertEqual(body["detected_count"], 1)
+        self.assertEqual(body["recognized_count"], 1)
+        self.assertEqual(body["data"]["student_id"], self.student_id)
+        self.assertEqual(body["data"]["recognition_method"], "FACE")
         self.assertAlmostEqual(
             body["data"]["confidence_score"],
             0.6955,
@@ -258,162 +243,177 @@ class TestFaceRecognitionAPI(unittest.TestCase):
 
             self.assertIsNotNone(record)
             self.assertEqual(record.status, "PRESENT")
-            self.assertEqual(
-                record.recognition_method,
-                "FACE",
-            )
+            self.assertEqual(record.recognition_method, "FACE")
 
-    @patch("app.routes.recognition.face_service.recognize_student")
-    def test_no_face_does_not_mark_attendance(
-        self,
-        mock_recognize,
-    ):
+    @patch("app.routes.recognition.face_service.recognize_all_students")
+    def test_no_face_does_not_mark_attendance(self, mock_recognize):
         mock_recognize.return_value = {
-            "student_id": None,
-            "matched": False,
-            "similarity_score": None,
+            "matches": [],
             "status": "no_face",
+            "detected_count": 0,
         }
+
         response = self.client.post(
             "/api/faculty/recognition/attendance",
-            headers = self._faculty_headers(),
-            data = {
+            headers=self._faculty_headers(),
+            data={
                 "session_id": str(self.session_id),
                 "image": self._image_file(),
             },
-            content_type = "multipart/form-data",
+            content_type="multipart/form-data",
         )
 
         self.assertEqual(response.status_code, 200)
+
         body = response.get_json()
-        self.assertFalse(body["success"])
+        self.assertTrue(body["success"])
         self.assertEqual(body["status"], "no_face")
-        self.assertIsNone(body["data"]["student_id"])
-        self.assertIsNone(body["data"]["similarity_score"])
+        self.assertEqual(body["detected_count"], 0)
+        self.assertEqual(body["recognized_count"], 0)
+        self.assertEqual(body["recognized"], [])
+        self.assertIsNone(body["data"])
 
         mock_recognize.assert_called_once()
 
         with self.app.app_context():
             record = AttendanceRecord.query.filter_by(
-                session_id = self.session_id,
+                session_id=self.session_id,
             ).first()
             self.assertIsNone(record)
 
-    @patch("app.routes.recognition.face_service.recognize_student")
-    def test_multiple_faces_does_not_mark_attendance(
+    @patch("app.routes.recognition.face_service.recognize_all_students")
+    def test_multiple_faces_without_matches_do_not_mark_attendance(
+        self,
+        mock_recognize,
+    ):
+        # The current route supports multiple faces. If none match a
+        # registered student, the route returns "not_recognized".
+        mock_recognize.return_value = {
+            "matches": [],
+            "status": "not_recognized",
+            "detected_count": 2,
+        }
+
+        response = self.client.post(
+            "/api/faculty/recognition/attendance",
+            headers=self._faculty_headers(),
+            data={
+                "session_id": str(self.session_id),
+                "image": self._image_file(),
+            },
+            content_type="multipart/form-data",
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["status"], "not_recognized")
+        self.assertEqual(body["detected_count"], 2)
+        self.assertEqual(body["recognized_count"], 0)
+        self.assertEqual(body["recognized"], [])
+        self.assertIsNone(body["data"])
+
+        mock_recognize.assert_called_once()
+
+        with self.app.app_context():
+            record = AttendanceRecord.query.filter_by(
+                session_id=self.session_id,
+            ).first()
+            self.assertIsNone(record)
+
+    @patch("app.routes.recognition.face_service.recognize_all_students")
+    def test_not_recognized_face_does_not_mark_attendance(
         self,
         mock_recognize,
     ):
         mock_recognize.return_value = {
-            "student_id": None,
-            "matched": False,
-            "similarity_score":None,
-            "status": "multiple_faces",
+            "matches": [],
+            "status": "not_recognized",
+            "detected_count": 1,
         }
 
         response = self.client.post(
             "/api/faculty/recognition/attendance",
-            headers = self._faculty_headers(),
-            data ={
-                "session_id":str(self.session_id),
+            headers=self._faculty_headers(),
+            data={
+                "session_id": str(self.session_id),
                 "image": self._image_file(),
             },
-            content_type = "multipart/form-data",
+            content_type="multipart/form-data",
         )
+
         self.assertEqual(response.status_code, 200)
-        body = response.get_json()
-        self.assertFalse(body["success"])
-        self.assertEqual(body["status"], "multiple_faces")
-        self.assertIsNone(body["data"]["student_id"])
-        self.assertIsNone(body["data"] ["similarity_score"])
-
-        mock_recognize.assert_called_once()
-
-        with self.app.app_context():
-            record = AttendanceRecord.query.filter_by(
-                session_id = self.session_id,
-            ).first()
-            self.assertIsNone(record)
-
-    @patch("app.routes.recognition.face_service.recognize_student")
-    def test_not_recognized_does_not_mark_attendance(self, mock_recognize,):
-        mock_recognize.return_value={
-            "student_id": None,
-            "matched": False,
-            "similarity_score":0.31,
-            "status": "not_recognized",
-        }
-        response = self.client.post(
-            "/api/faculty/recognition/attendance",
-            headers = self._faculty_headers(),
-            data={
-                "session_id":str(self.session_id),
-                "image":self._image_file(),
-
-            },
-            content_type = "multipart/form-data",
-        )
-        self.assertEqual(response.status_code,200)
 
         body = response.get_json()
-        self.assertFalse(body["success"])
+        self.assertTrue(body["success"])
         self.assertEqual(body["status"], "not_recognized")
-        self.assertIsNone(body["data"]["student_id"])
-        self.assertAlmostEqual(body["data"]["similarity_score"], 0.31, places = 2)
+        self.assertEqual(body["detected_count"], 1)
+        self.assertEqual(body["recognized_count"], 0)
+        self.assertEqual(body["recognized"], [])
+        self.assertIsNone(body["data"])
+
         mock_recognize.assert_called_once()
+
         with self.app.app_context():
             record = AttendanceRecord.query.filter_by(
-                session_id = self.session_id,
+                session_id=self.session_id,
             ).first()
             self.assertIsNone(record)
 
     def test_faculty_cannot_use_another_facultys_session(self):
         with self.app.app_context():
             other_faculty_user = User(
-                name = "Other Faculty",
-                email = "other.faculty@test.local",
-                password_hash = "test_password",
-                role ="FACULTY",
+                name="Other Faculty",
+                email="other.faculty@test.local",
+                password_hash="test_password",
+                role="FACULTY",
             )
             db.session.add(other_faculty_user)
             db.session.flush()
+
             other_faculty = Faculty(
-                user_id = other_faculty_user.user_id,
-                department_id = self.department_id,
-                employee_id = "FAC002",
-                designation = "Assistant Professor",
+                user_id=other_faculty_user.user_id,
+                department_id=self.department_id,
+                employee_id="FAC002",
+                designation="Assistant Professor",
             )
             db.session.add(other_faculty)
             db.session.flush()
-
             db.session.commit()
 
             other_faculty_user_id = other_faculty.user_id
+
         with self.app.app_context():
             token = create_access_token(
-                identity = str(other_faculty_user_id),
+                identity=str(other_faculty_user_id),
                 additional_claims={"role": "FACULTY"},
             )
+
         response = self.client.post(
             "/api/faculty/recognition/attendance",
-            headers = {"Authorization":f"Bearer {token}",},
-            data = {
+            headers={"Authorization": f"Bearer {token}"},
+            data={
                 "session_id": str(self.session_id),
                 "image": self._image_file(),
             },
-            content_type = "multipart/form-data",
+            content_type="multipart/form-data",
         )
-        self.assertEqual(response.status_code,403)
+
+        self.assertEqual(response.status_code, 403)
+
         body = response.get_json()
         self.assertFalse(body["success"])
-        self.assertEqual(body["message"], "Access forbidden")
+        self.assertEqual(
+            body["message"],
+            "Access forbidden",
+        )
 
         with self.app.app_context():
             record = AttendanceRecord.query.filter_by(
-                session_id = self.session_id,
+                session_id=self.session_id,
             ).first()
             self.assertIsNone(record)
-
 
 
 if __name__ == "__main__":

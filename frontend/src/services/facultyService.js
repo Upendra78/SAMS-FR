@@ -120,3 +120,9 @@ export async function recognizeFacultyAttendance(
 
   return response.data;
 }
+
+export async function getFacultyTimetable() {
+  const response = await api.get("/timetable/faculty");
+
+  return response.data;
+}

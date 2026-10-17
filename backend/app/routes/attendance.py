@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
@@ -11,6 +11,7 @@ from app.models import (
     Enrollment,
     Faculty,
     Student,
+    TimetableEntry,
 )
 from app.utils.auth import faculty_required
 
@@ -28,6 +29,64 @@ def get_current_faculty():
     return Faculty.query.filter_by(
         user_id=user_id
     ).first()
+
+
+def serialize_session(session):
+    if not session:
+        return None
+
+    offering = session.offering
+    course = offering.course if offering else None
+
+    today_day = (
+        session.session_date.strftime("%A")
+        if session.session_date
+        else datetime.now().strftime("%A")
+    )
+    timetable_entry = (
+        TimetableEntry.query
+        .filter(
+            TimetableEntry.offering_id == session.offering_id,
+            db.func.lower(TimetableEntry.day_of_week) == today_day.lower(),
+        )
+        .first()
+    ) if session.offering_id else None
+
+    if not timetable_entry and session.offering_id:
+        timetable_entry = (
+            TimetableEntry.query
+            .filter_by(offering_id=session.offering_id)
+            .order_by(TimetableEntry.timetable_entry_id.asc())
+            .first()
+        )
+
+    room = (
+        (timetable_entry.room if timetable_entry and timetable_entry.room else None)
+        or (offering.room if offering else None)
+    )
+
+    start_time_val = (
+        session.start_time
+        or (timetable_entry.start_time if timetable_entry else None)
+    )
+    end_time_val = (
+        session.end_time
+        or (timetable_entry.end_time if timetable_entry else None)
+    )
+
+    return {
+        "session_id": session.session_id,
+        "offering_id": session.offering_id,
+        "faculty_id": session.faculty_id,
+        "session_date": session.session_date.isoformat() if session.session_date else None,
+        "start_time": start_time_val.isoformat() if start_time_val else None,
+        "end_time": end_time_val.isoformat() if end_time_val else None,
+        "status": session.status,
+        "room": room,
+        "course_code": course.course_code if course else None,
+        "course_name": course.course_name if course else None,
+        "section": offering.section if offering else None,
+    }
 
 
 # ============================================================
@@ -89,22 +148,51 @@ def start_attendance_session():
         return jsonify({
             "success": False,
             "message": "An active attendance session already exists",
-            "data": {
-                "session_id": active_session.session_id,
-                "offering_id": active_session.offering_id,
-                "session_date": active_session.session_date.isoformat(),
-                "start_time": active_session.start_time.isoformat(),
-                "status": active_session.status,
-            },
+            "data": serialize_session(active_session),
         }), 409
 
-    now = datetime.utcnow()
+    local_now = datetime.now()
+    today_day = local_now.strftime("%A")
+
+    # Extract faculty assigned session time from the timetable
+    timetable_entry_id = data.get("timetable_entry_id")
+    timetable_entry = None
+    if timetable_entry_id:
+        timetable_entry = db.session.get(TimetableEntry, timetable_entry_id)
+        if timetable_entry and timetable_entry.offering_id != offering.offering_id:
+            timetable_entry = None
+
+    if not timetable_entry:
+        timetable_entry = (
+            TimetableEntry.query
+            .filter(
+                TimetableEntry.offering_id == offering.offering_id,
+                db.func.lower(TimetableEntry.day_of_week) == today_day.lower(),
+            )
+            .first()
+        )
+
+    if not timetable_entry:
+        timetable_entry = (
+            TimetableEntry.query
+            .filter_by(offering_id=offering.offering_id)
+            .order_by(TimetableEntry.timetable_entry_id.asc())
+            .first()
+        )
+
+    if timetable_entry:
+        session_start = timetable_entry.start_time
+        session_end = timetable_entry.end_time
+    else:
+        session_start = local_now.time()
+        session_end = (local_now + timedelta(hours=1)).time()
 
     session = AttendanceSession(
         offering_id=offering.offering_id,
         faculty_id=faculty.faculty_id,
-        session_date=now.date(),
-        start_time=now.time(),
+        session_date=local_now.date(),
+        start_time=session_start,
+        end_time=session_end,
         status="ACTIVE",
     )
 
@@ -114,16 +202,9 @@ def start_attendance_session():
     return jsonify({
         "success": True,
         "message": "Attendance session started successfully",
-        "data": {
-            "session_id": session.session_id,
-            "offering_id": session.offering_id,
-            "faculty_id": session.faculty_id,
-            "session_date": session.session_date.isoformat(),
-            "start_time": session.start_time.isoformat(),
-            "end_time": None,
-            "status": session.status,
-        },
+        "data": serialize_session(session),
     }), 201
+
 
 @attendance_bp.get("/sessions")
 @faculty_required
@@ -143,27 +224,11 @@ def get_attendance_sessions():
         .all()
     )
 
-    data = [
-        {
-            "session_id": session.session_id,
-            "offering_id": session.offering_id,
-            "faculty_id": session.faculty_id,
-            "session_date": session.session_date.isoformat(),
-            "start_time": session.start_time.isoformat(),
-            "end_time": (
-                session.end_time.isoformat()
-                if session.end_time
-                else None
-            ),
-            "status": session.status,
-        }
-        for session in sessions
-    ]
-
     return jsonify({
         "success": True,
-        "data": data,
+        "data": [serialize_session(session) for session in sessions],
     }), 200
+
 
 # ============================================================
 # GET ACTIVE ATTENDANCE SESSION
@@ -201,19 +266,7 @@ def get_active_attendance_session():
 
     return jsonify({
         "success": True,
-        "data": {
-            "session_id": session.session_id,
-            "offering_id": session.offering_id,
-            "faculty_id": session.faculty_id,
-            "session_date": session.session_date.isoformat(),
-            "start_time": session.start_time.isoformat(),
-            "end_time": (
-                session.end_time.isoformat()
-                if session.end_time
-                else None
-            ),
-            "status": session.status,
-        },
+        "data": serialize_session(session),
     }), 200
 
 
@@ -270,6 +323,8 @@ def close_attendance_session(session_id):
         record.student_id for record in existing_records
     }
 
+    local_now = datetime.now()
+
     # Automatically mark students without an attendance record as ABSENT.
     for enrollment in active_enrollments:
         if enrollment.student_id not in recorded_student_ids:
@@ -277,13 +332,14 @@ def close_attendance_session(session_id):
                 session_id=session.session_id,
                 student_id=enrollment.student_id,
                 status="ABSENT",
-                marked_at=datetime.utcnow(),
+                marked_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 recognition_method="SYSTEM",
             )
             db.session.add(absent_record)
 
     # Close the session and save all absence records together.
-    session.end_time = datetime.utcnow().time()
+    if not session.end_time:
+        session.end_time = local_now.time()
     session.status = "CLOSED"
 
     try:
@@ -292,19 +348,10 @@ def close_attendance_session(session_id):
         db.session.rollback()
         raise
 
-
     return jsonify({
         "success": True,
         "message": "Attendance session closed successfully",
-        "data": {
-            "session_id": session.session_id,
-            "offering_id": session.offering_id,
-            "faculty_id": session.faculty_id,
-            "session_date": session.session_date.isoformat(),
-            "start_time": session.start_time.isoformat(),
-            "end_time": session.end_time.isoformat(),
-            "status": session.status,
-        },
+        "data": serialize_session(session),
     }), 200
 
 
@@ -424,7 +471,7 @@ def mark_attendance(session_id):
         session_id=session_id,
         student_id=student_id,
         status="PRESENT",
-        marked_at=datetime.utcnow(),
+        marked_at=datetime.now(timezone.utc).replace(tzinfo=None),
         confidence_score=confidence_score,
         recognition_method=recognition_method,
     )
