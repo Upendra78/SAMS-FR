@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 
 import "./FacultyDashboard.css";
 import { getFacultyDashboard } from "../../services/portalService";
+import { getFacultyAttendanceAnalytics } from "../../services/reportService";
 import {
   getFacultyCourses,
   getFacultyAttendanceSessions,
@@ -54,6 +55,10 @@ function FacultyDashboard() {
   const [activeSession, setActiveSession] = useState(null);
   const [sessionStatus, setSessionStatus] = useState("loading");
   const [sessionError, setSessionError] = useState("");
+
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsStatus, setAnalyticsStatus] = useState("loading");
+  const [analyticsError, setAnalyticsError] = useState("");
 
   const [showStartDialog, setShowStartDialog] = useState(false);
   const [selectedOfferingId, setSelectedOfferingId] = useState("");
@@ -164,6 +169,29 @@ function FacultyDashboard() {
         getErrorMessage(error, "Unable to check attendance session status."),
       );
     }
+
+    try {
+      setAnalyticsStatus("loading");
+      setAnalyticsError("");
+
+      const result = await getFacultyAttendanceAnalytics();
+
+      if (!result?.success || !result?.data) {
+        throw new Error(
+          result?.message || "Unable to load attendance analytics."
+        );
+      }
+
+      setAnalytics(result.data);
+      setAnalyticsStatus("loaded");
+    } catch (error) {
+      setAnalytics(null);
+      setAnalyticsStatus("error");
+      setAnalyticsError(
+        getErrorMessage(error, "Unable to load attendance analytics.")
+      );
+    }
+
   }, []);
 
   useEffect(() => {
@@ -316,10 +344,17 @@ function FacultyDashboard() {
     },
     {
       title: "Average Attendance",
-      value: PENDING,
+      value:
+        analyticsStatus === "loaded"
+          ? `${Number(
+              analytics.overall_attendance_percentage ?? 0
+            ).toFixed(1)}%`
+          : analyticsStatus === "error"
+            ? "Unavailable"
+            : "Loading...",
       icon: "%",
       color: "orange",
-      description: "Attendance performance",
+      description: "Attendance across closed sessions",
     },
   ];
 
@@ -541,13 +576,61 @@ function FacultyDashboard() {
             </div>
 
             <div className="faculty-overview-grid">
-              {["Overall Attendance", "Present", "Absent", "Late"].map((label) => (
-                <div className="faculty-overview-item" key={label}>
-                  <span>{label}</span>
-                  <strong>{PENDING}</strong>
+              {[
+                {
+                  label: "Overall Attendance",
+                  value:
+                    analyticsStatus === "loaded"
+                      ? `${Number(
+                          analytics.overall_attendance_percentage ?? 0
+                        ).toFixed(1)}%`
+                      : analyticsStatus === "error"
+                        ? "Unavailable"
+                        : "Loading...",
+                },
+                {
+                  label: "Present",
+                  value:
+                    analyticsStatus === "loaded"
+                      ? String(analytics.total_present ?? 0)
+                      : analyticsStatus === "error"
+                        ? "Unavailable"
+                        : "Loading...",
+                },
+                {
+                  label: "Absent",
+                  value:
+                    analyticsStatus === "loaded"
+                      ? String(analytics.total_absent ?? 0)
+                      : analyticsStatus === "error"
+                        ? "Unavailable"
+                        : "Loading...",
+                },
+                {
+                  label: "Closed Sessions",
+                  value:
+                    analyticsStatus === "loaded"
+                      ? String(analytics.total_sessions ?? 0)
+                      : analyticsStatus === "error"
+                        ? "Unavailable"
+                        : "Loading...",
+                },
+              ].map((item) => (
+                <div className="faculty-overview-item" key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
                 </div>
               ))}
             </div>
+
+            {analyticsStatus === "error" && (
+              <p role="alert" className="faculty-dashboard-feedback faculty-feedback-error">
+                {analyticsError}
+                <button type="button" onClick={loadDashboardData}>
+                  Retry
+                </button>
+              </p>
+            )}
           </section>
         </div>
 

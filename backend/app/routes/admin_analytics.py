@@ -195,11 +195,19 @@ def get_admin_attendance_analytics():
                 "course_code": offering.course.course_code,
                 "course_name": offering.course.course_name,
             },
-            "faculty": {
-                "faculty_id": faculty.faculty_id,
-                "name": faculty.user.name,
-                "employee_id": faculty.employee_id,
-            },
+            "faculty": (
+                {
+                    "faculty_id": faculty.faculty_id,
+                    "name": (
+                        faculty.user.name
+                        if faculty.user
+                        else None
+                    ),
+                    "employee_id": faculty.employee_id,
+                }
+                if faculty
+                else None
+            ),
             "academic_year": offering.academic_year,
             "semester": offering.semester,
             "section": offering.section,

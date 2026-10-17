@@ -8,10 +8,8 @@ import {
   faPlus,
   faCheck,
   faCircleExclamation,
-  faCircleInfo,
   faXmark,
   faSpinner,
-  faPenToSquare,
   faTrash,
   faPen,
   faRotate,
@@ -21,10 +19,10 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 
 import {
-  bulkEnrollStudents,
-  createAdminEnrollment,
   deleteAdminEnrollment,
   getAdminEnrollments,
+  previewGroupEnrollment,
+  bulkEnrollGroup,
 } from "../../services/enrollmentService";
 
 import {
@@ -71,11 +69,6 @@ const EMPTY_OFFERING_FORM = {
   academic_year: "",
   semester: "",
   section: "",
-};
-
-const EMPTY_ENROLLMENT_FORM = {
-  studentId: "",
-  offeringId: "",
 };
 
 function getErrorMessage(error, fallback) {
@@ -170,23 +163,23 @@ function AcademicManagement() {
   const [enrollmentsError, setEnrollmentsError] = useState("");
   const [students, setStudents] = useState([]);
   const [studentsLoading, setStudentsLoading] = useState(false);
-  const [studentsError, setStudentsError] = useState("");
+  const [, setStudentsError] = useState("");
 
-  const [showEnrollmentModal, setShowEnrollmentModal] = useState(false);
-  const [enrollmentForm, setEnrollmentForm] = useState({
-    ...EMPTY_ENROLLMENT_FORM,
-  });
-  const [creatingEnrollment, setCreatingEnrollment] = useState(false);
-  const [bulkEnrollmentOfferingId, setBulkEnrollmentOfferingId] =
-    useState("");
-  const [bulkEnrollmentLoading, setBulkEnrollmentLoading] =
-    useState(false);
   const [deletingEnrollmentId, setDeletingEnrollmentId] = useState(null);
   const [enrollmentActionError, setEnrollmentActionError] = useState("");
   const [enrollmentActionMessage, setEnrollmentActionMessage] = useState("");
-  
-  const [studentSearch, setStudentSearch] = useState("");
-  const [offeringSearch, setOfferingSearch] = useState("");
+  const [showGroupEnrollment, setShowGroupEnrollment] = useState(false);
+
+  const [groupEnrollment, setGroupEnrollment] = useState({
+    department_id: "",
+    academic_year: "",
+    semester: "",
+    section: "",
+  });
+
+  const [groupPreview, setGroupPreview] = useState(null);
+  const [groupPreviewLoading, setGroupPreviewLoading] = useState(false);
+
   // Assignment API has not yet been verified.
   const [assignmentNotice, setAssignmentNotice] = useState("");
 
@@ -215,7 +208,7 @@ function AcademicManagement() {
 
     let cancelled = false;
 
-    async function load() {
+    const load = async () => {
       setCoursesLoading(true);
       setCoursesError("");
 
@@ -223,10 +216,14 @@ function AcademicManagement() {
         const result = await getAdminCourses();
 
         if (!result?.success || !Array.isArray(result.data)) {
-          throw new Error(result?.message || "Unable to load courses.");
+          throw new Error(
+            result?.message || "Unable to load courses."
+          );
         }
 
-        if (!cancelled) setCourses(result.data);
+        if (!cancelled) {
+          setCourses(result.data);
+        }
       } catch (error) {
         if (!cancelled) {
           setCoursesError(
@@ -234,11 +231,13 @@ function AcademicManagement() {
           );
         }
       } finally {
-        if (!cancelled) setCoursesLoading(false);
+        if (!cancelled) {
+          setCoursesLoading(false);
+        }
       }
-    }
+    };
 
-    load();
+    void load();
 
     return () => {
       cancelled = true;
@@ -291,7 +290,7 @@ function AcademicManagement() {
 
     let cancelled = false;
 
-    async function loadOfferingDataForTab() {
+    const load = async () => {
       setOfferingsLoading(true);
       setOfferingsError("");
       setOfferingActionError("");
@@ -305,18 +304,32 @@ function AcademicManagement() {
             getAdminFaculty(),
           ]);
 
-        if (!offeringResult?.success || !Array.isArray(offeringResult.data)) {
+        if (
+          !offeringResult?.success ||
+          !Array.isArray(offeringResult.data)
+        ) {
           throw new Error(
-            offeringResult?.message || "Unable to load course offerings."
+            offeringResult?.message ||
+              "Unable to load course offerings."
           );
         }
 
-        if (!courseResult?.success || !Array.isArray(courseResult.data)) {
-          throw new Error(courseResult?.message || "Unable to load courses.");
+        if (
+          !courseResult?.success ||
+          !Array.isArray(courseResult.data)
+        ) {
+          throw new Error(
+            courseResult?.message || "Unable to load courses."
+          );
         }
 
-        if (!facultyResult?.success || !Array.isArray(facultyResult.data)) {
-          throw new Error(facultyResult?.message || "Unable to load faculty.");
+        if (
+          !facultyResult?.success ||
+          !Array.isArray(facultyResult.data)
+        ) {
+          throw new Error(
+            facultyResult?.message || "Unable to load faculty."
+          );
         }
 
         if (cancelled) return;
@@ -327,7 +340,10 @@ function AcademicManagement() {
       } catch (error) {
         if (!cancelled) {
           setOfferingsError(
-            getErrorMessage(error, "Unable to load course offering data.")
+            getErrorMessage(
+              error,
+              "Unable to load course offering data."
+            )
           );
         }
       } finally {
@@ -335,9 +351,9 @@ function AcademicManagement() {
           setOfferingsLoading(false);
         }
       }
-    }
+    };
 
-    void loadOfferingDataForTab();
+    void load();
 
     return () => {
       cancelled = true;
@@ -393,12 +409,17 @@ function AcademicManagement() {
       setEnrollmentActionMessage("");
 
       try {
-        const [enrollmentResult, studentResult, offeringResult] =
-          await Promise.allSettled([
-            getAdminEnrollments(),
-            getAdminStudents(),
-            getAdminCourseOfferings(),
-          ]);
+        const [
+          enrollmentResult,
+          studentResult,
+          offeringResult,
+          departmentResult,
+        ] = await Promise.allSettled([
+          getAdminEnrollments(),
+          getAdminStudents(),
+          getAdminCourseOfferings(),
+          getAdminDepartments(),
+        ]);
 
         if (cancelled) return;
 
@@ -453,6 +474,27 @@ function AcademicManagement() {
         ) {
           setOfferings(offeringResult.value.data);
         }
+
+        if (
+          departmentResult.status === "fulfilled" &&
+          departmentResult.value?.success &&
+          Array.isArray(departmentResult.value.data)
+        ) {
+          setDepartments(departmentResult.value.data);
+        } else {
+          const error =
+            departmentResult.status === "rejected"
+              ? departmentResult.reason
+              : new Error(
+                  departmentResult.value?.message ||
+                    "Unable to load departments."
+                );
+
+          setDepartmentError(
+            getErrorMessage(error, "Unable to load departments.")
+          );
+        }
+
       } catch (error) {
         if (!cancelled) {
           setEnrollmentsError(
@@ -855,14 +897,6 @@ function AcademicManagement() {
     }
   };
 
-  const handleOpenEnrollmentModal = () => {
-    setEnrollmentActionError("");
-    setEnrollmentActionMessage("");
-    setEnrollmentForm({ ...EMPTY_ENROLLMENT_FORM });
-    setStudentSearch("");
-    setOfferingSearch("");
-    setShowEnrollmentModal(true);
-  };
 
   const handleRefreshEnrollments = async () => {
     setEnrollmentsLoading(true);
@@ -888,136 +922,139 @@ function AcademicManagement() {
     }
   };
 
-  const handleBulkEnrollStudents = async () => {
-    const offeringId = Number(bulkEnrollmentOfferingId);
+  const handlePreviewGroupEnrollment = async () => {
+    const { department_id, academic_year, semester, section } =
+      groupEnrollment;
 
-    if (
-      !Number.isInteger(offeringId) ||
-      offeringId <= 0 ||
-      !offerings.some((offering) => offering.offering_id === offeringId)
-    ) {
-      setEnrollmentActionError("Select a valid course offering.");
+    if (!department_id || !academic_year || !semester || !section) {
+      setEnrollmentActionError(
+        "Select a department, cohort, semester, and section first."
+      );
       return;
     }
 
-    const selectedOffering = offerings.find(
-      (offering) => offering.offering_id === offeringId
-    );
-
-    const confirmed = window.confirm(
-      `Bulk enroll eligible students in ${
-        selectedOffering.course_name || selectedOffering.course_code
-      } (Offering ID: ${offeringId})?\n\nStudents already enrolled will be skipped.`
-    );
-
-    if (!confirmed) return;
-
-    setBulkEnrollmentLoading(true);
+    setGroupPreviewLoading(true);
     setEnrollmentActionError("");
     setEnrollmentActionMessage("");
 
     try {
-      const result = await bulkEnrollStudents(offeringId);
+      // First load all matching offerings for the selected group.
+      // Load the full set of matching offerings. The checkbox selection is
+      // managed locally and must not filter the preview response.
+      const result = await previewGroupEnrollment(groupEnrollment, []);
+
+      if (!result?.success) {
+        throw new Error(
+          result?.message || "Unable to preview group enrollment."
+        );
+      }
+
+      const previewData = result.data ?? result;
+
+      setGroupPreview(previewData);
+
+    } catch (error) {
+      setEnrollmentActionError(
+        getErrorMessage(error, "Unable to preview group enrollment.")
+      );
+    } finally {
+      setGroupPreviewLoading(false);
+    }
+  };
+
+  const handleBulkEnrollGroup = async () => {
+    if (!groupPreview) {
+      setEnrollmentActionError("Preview the group before enrolling students.");
+      return;
+    }
+
+    const studentCount = groupPreview.eligible_students ?? 0;
+    const courseCount =
+      groupPreview.courses?.length ??
+      groupPreview.offerings?.length ??
+      0;
+
+    if (studentCount === 0 || courseCount === 0) {
+      setEnrollmentActionError(
+        "No eligible students or active courses were found."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Enroll ${studentCount} eligible students in all ${courseCount} active courses for this group? Missing course offerings may be created without faculty assignments.`
+    );
+
+    if (!confirmed) return;
+
+    setGroupPreviewLoading(true);
+    setEnrollmentActionError("");
+    setEnrollmentActionMessage("");
+
+    try {
+      const result = await bulkEnrollGroup(groupEnrollment);
 
       if (!result?.success) {
         throw new Error(result?.message || "Bulk enrollment failed.");
       }
 
-      const data = result.data || {};
+      const summary = result.data ?? {};
+
+      // Refresh both lists in parallel after the successful operation.
+      const [offeringResult, enrollmentResult] = await Promise.all([
+        getAdminCourseOfferings(),
+        getAdminEnrollments(),
+      ]);
+
+      if (
+        !offeringResult?.success ||
+        !Array.isArray(offeringResult.data)
+      ) {
+        throw new Error(
+          "Enrollment succeeded, but course offerings could not be refreshed."
+        );
+      }
+
+      if (
+        !enrollmentResult?.success ||
+        !Array.isArray(enrollmentResult.data)
+      ) {
+        throw new Error(
+          "Enrollment succeeded, but enrollment records could not be refreshed."
+        );
+      }
+
+      // Update React state immediately; no browser refresh is needed.
+      setOfferings(offeringResult.data);
+      setEnrollments(enrollmentResult.data);
+      setEnrollmentsLoaded(true);
 
       setEnrollmentActionMessage(
-        `${result.message || "Bulk enrollment completed."} ` +
-        `Eligible: ${data.eligible_students ?? 0}; ` +
-        `created: ${data.created ?? 0}; ` +
-        `already enrolled: ${data.already_enrolled ?? 0}.`
+        `Enrollment completed. Created ${summary.created ?? 0} enrollments, ` +
+        `skipped ${summary.already_enrolled ?? 0} existing enrollments, and ` +
+        `created ${summary.created_offerings ?? 0} course offerings.`
       );
 
-      await handleRefreshEnrollments();
+      // Refresh the group preview as well.
+      await handlePreviewGroupEnrollment();
     } catch (error) {
       setEnrollmentActionError(
-        getErrorMessage(error, "Unable to bulk enroll students.")
+        getErrorMessage(error, "Unable to complete bulk enrollment.")
       );
     } finally {
-      setBulkEnrollmentLoading(false);
+      setGroupPreviewLoading(false);
     }
   };
 
-  const handleCreateEnrollment = async (event) => {
-    event.preventDefault();
+  const handleGroupEnrollmentChange = (field, value) => {
+    setGroupEnrollment((current) => ({
+      ...current,
+      [field]: value,
+    }));
 
-    const studentId = Number(enrollmentForm.studentId);
-    const offeringId = Number(enrollmentForm.offeringId);
-
-    if (
-      !Number.isInteger(studentId) ||
-      studentId <= 0 ||
-      !students.some((student) => student.student_id === studentId)
-    ) {
-      setEnrollmentActionError("Select a valid student from the suggestions.");
-      return;
-    }
-
-    if (
-      !Number.isInteger(offeringId) ||
-      offeringId <= 0 ||
-      !offerings.some((offering) => offering.offering_id === offeringId)
-    ) {
-      setEnrollmentActionError(
-        "Select a valid course offering from the suggestions."
-      );
-      return;
-    }
-
-    setCreatingEnrollment(true);
+    setGroupPreview(null);
     setEnrollmentActionError("");
     setEnrollmentActionMessage("");
-
-    try {
-      const result = await createAdminEnrollment({
-        student_id: studentId,
-        offering_id: offeringId,
-      });
-
-      if (!result?.success) {
-        throw new Error(result?.message || "Unable to create enrollment.");
-      }
-
-      setEnrollmentActionMessage(
-        result.message || "Student enrolled successfully."
-      );
-      setShowEnrollmentModal(false);
-      setEnrollmentForm({ ...EMPTY_ENROLLMENT_FORM });
-
-      // Refresh instead of assuming the response contains a complete record.
-      const refreshed = await getAdminEnrollments();
-
-      if (refreshed?.success && Array.isArray(refreshed.data)) {
-        setEnrollments(refreshed.data);
-        setEnrollmentsLoaded(true);
-        setEnrollmentPage(1);
-      }
-    } catch (error) {
-      setEnrollmentActionError(
-        getErrorMessage(error, "Unable to create enrollment.")
-      );
-    } finally {
-      setCreatingEnrollment(false);
-    }
-  };
-
-  const handleEditEnrollment = (enrollment) => {
-    setEnrollmentActionError("");
-    setEnrollmentActionMessage("");
-
-    // Open the enrollment form with the selected record.
-    setEnrollmentForm({
-      student_id: String(enrollment.student_id),
-      offering_id: String(enrollment.offering_id),
-    });
-
-    setStudentSearch("");
-    setOfferingSearch("");
-    setShowEnrollmentModal(true);
   };
 
   const handleDeleteEnrollment = async (enrollmentId) => {
@@ -1133,6 +1170,22 @@ function AcademicManagement() {
           </p>
         </div>
 
+        {activeTab === "enrollments" && (
+          <button
+            type="button"
+            className="academic-primary-button"
+            onClick={() => {
+              setShowGroupEnrollment(true);
+              setEnrollmentActionError("");
+              setEnrollmentActionMessage("");
+            }}
+            disabled={groupPreviewLoading}
+          >
+            <FontAwesomeIcon icon={faPlus} />
+            Add Enrollment Student
+          </button>
+        )}
+
         {activeTab === "courses" && (
           <button
             type="button"
@@ -1152,17 +1205,6 @@ function AcademicManagement() {
           >
             <FontAwesomeIcon icon={faPlus} />
             Add Offering
-          </button>
-        )}
-
-        {activeTab === "enrollments" && (
-          <button
-            type="button"
-            className="academic-primary-button"
-            onClick={handleOpenEnrollmentModal}
-          >
-            <FontAwesomeIcon icon={faPlus} />
-            Add Course Enrollment
           </button>
         )}
 
@@ -1775,68 +1817,354 @@ function AcademicManagement() {
       {/* ENROLLMENTS */}
       {activeTab === "enrollments" && (
         <div className="academic-table-card">
-          <div className="enrollments-section-header">
-            <div className="enrollments-section-title">
-              <h2>Course Enrollments to Student</h2>
-              <p>
-                Manage student enrollments, update records, and monitor enrollment status.
-              </p>
-            </div>
-
-            <div className="enrollments-header-actions">
-              <select
-                className="bulk-enrollment-select"
-                aria-label="Select course offering for bulk enrollment"
-                value={bulkEnrollmentOfferingId}
-                onChange={(event) => setBulkEnrollmentOfferingId(event.target.value)}
-                disabled={bulkEnrollmentLoading}
+          <div className="enrollments-header-actions">
+            <button
+              type="button"
+              className="enrollments-refresh-btn"
+              onClick={handleRefreshEnrollments}
+              disabled={enrollmentsLoading || groupPreviewLoading}
+            >
+              <span
+                className={
+                  enrollmentsLoading ? "refresh-icon spinning" : "refresh-icon"
+                }
               >
-                <option value="">Select course offering in bulk</option>
-                {offerings.map((offering) => (
-                  <option
-                    key={offering.offering_id}
-                    value={offering.offering_id}
+                {"↻"}
+              </span>
+              {enrollmentsLoading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
+
+          
+          {showGroupEnrollment && (
+            <div className="group-enrollment-panel">
+              <div className="academic-section-header">
+                <div className="academic-section-heading">
+                  <h3>Enroll a Student Group</h3>
+                  <p>
+                    Select a department, cohort, semester, and section to review
+                    matching course offerings. This screen is preview-only until
+                    the backend enrollment-write endpoint is verified.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  className="academic-secondary-button"
+                  onClick={() => {
+                    setShowGroupEnrollment(false);
+                    setGroupPreview(null);
+                    setEnrollmentActionError("");
+                    setEnrollmentActionMessage("");
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="academic-form-grid">
+                <div className="academic-form-field">
+                  <label htmlFor="group-department">Department *</label>
+                  <select
+                    id="group-department"
+                    value={groupEnrollment.department_id}
+                    onChange={(event) =>
+                      handleGroupEnrollmentChange("department_id", event.target.value)
+                    }
+                    disabled={groupPreviewLoading}
                   >
-                    {offering.course_code} — {offering.course_name}
-                    {" | Sem "}
-                    {offering.semester}
-                    {" | Section "}
-                    {offering.section}
-                    {" | "}
-                    {offering.academic_year}
-                  </option>
-                ))}
-              </select>
+                    <option value="">Select department</option>
+                    {departments.map((department) => (
+                      <option
+                        key={department.department_id}
+                        value={department.department_id}
+                      >
+                        {department.department_code || department.department_id}
+                        {" — "}
+                        {department.department_name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              <button
-                type="button"
-                className="academic-primary-button"
-                onClick={handleBulkEnrollStudents}
-                disabled={!bulkEnrollmentOfferingId || bulkEnrollmentLoading}
-              >
-                <FontAwesomeIcon icon={faPlus} />
-                {bulkEnrollmentLoading ? "Enrolling..." : "Bulk Enroll Students"}
-              </button>
+                <div className="academic-form-field">
+                  <label htmlFor="group-cohort">Student Batch</label>
+                  <select
+                    id="group-cohort"
+                    value={groupEnrollment.academic_year}
+                    onChange={(event) =>
+                      handleGroupEnrollmentChange("academic_year", event.target.value)
+                    }
+                    disabled={groupPreviewLoading || studentsLoading}
+                  >
+                    <option value="">Select Batch</option>
+                    {[...new Set(
+                      students
+                        .filter(
+                          (student) =>
+                            String(student.department_id) ===
+                            String(groupEnrollment.department_id)
+                        )
+                        .map((student) => student.academic_year)
+                        .filter(Boolean)
+                    )]
+                      .sort()
+                      .map((cohort) => (
+                        <option key={cohort} value={cohort}>
+                          {cohort}
+                        </option>
+                      ))}
+                  </select>
+                </div>
 
-              <button
-                type="button"
-                className="enrollments-refresh-btn"
-                onClick={handleRefreshEnrollments}
-                disabled={enrollmentsLoading || bulkEnrollmentLoading}
-              >
-                <span
-                  className={
-                    enrollmentsLoading
-                      ? "refresh-icon spinning"
-                      : "refresh-icon"
+                <div className="academic-form-field">
+                  <label htmlFor="group-semester">Semester </label>
+                  <select
+                    id="group-semester"
+                    value={groupEnrollment.semester}
+                    onChange={(event) =>
+                      handleGroupEnrollmentChange("semester", event.target.value)
+                    }
+                    disabled={groupPreviewLoading || studentsLoading}
+                  >
+                    <option value="">Select semester</option>
+                    {[...new Set(
+                      students
+                        .filter(
+                          (student) =>
+                            String(student.department_id) ===
+                              String(groupEnrollment.department_id) &&
+                            String(student.academic_year) ===
+                              String(groupEnrollment.academic_year)
+                        )
+                        .map((student) => student.semester)
+                        .filter((semester) => semester != null)
+                    )]
+                      .sort((a, b) => Number(a) - Number(b))
+                      .map((semester) => (
+                        <option key={semester} value={semester}>
+                          Semester {semester}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div className="academic-form-field">
+                  <label htmlFor="group-section">Section </label>
+                  <select
+                    id="group-section"
+                    value={groupEnrollment.section}
+                    onChange={(event) =>
+                      handleGroupEnrollmentChange("section", event.target.value)
+                    }
+                    disabled={groupPreviewLoading || studentsLoading}
+                  >
+                    <option value="">Select section</option>
+                    {[...new Set(
+                      students
+                        .filter(
+                          (student) =>
+                            String(student.department_id) ===
+                              String(groupEnrollment.department_id) &&
+                            String(student.academic_year) ===
+                              String(groupEnrollment.academic_year) &&
+                            String(student.semester) ===
+                              String(groupEnrollment.semester)
+                        )
+                        .map((student) => student.section)
+                        .filter(Boolean)
+                    )]
+                      .sort()
+                      .map((section) => (
+                        <option key={section} value={section}>
+                          Section {section}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              {renderNotice("Preview failed", enrollmentActionError, true)}
+              {renderNotice("Enrollment status", enrollmentActionMessage)}
+
+              <div className="enrollments-header-actions">
+                <button
+                  type="button"
+                  className="academic-primary-button"
+                  onClick={handlePreviewGroupEnrollment}
+                  disabled={
+                    groupPreviewLoading ||
+                    studentsLoading ||
+                    !groupEnrollment.department_id ||
+                    !groupEnrollment.academic_year ||
+                    !groupEnrollment.semester ||
+                    !groupEnrollment.section
                   }
                 >
-                  {"↻"}
-                </span>
-                {enrollmentsLoading ? "Refreshing..." : "Refresh"}
-              </button>
+                  <FontAwesomeIcon
+                    icon={groupPreviewLoading ? faSpinner : faCheck}
+                    spin={groupPreviewLoading}
+                  />
+                  {groupPreviewLoading ? "Loading Preview..." : "Preview Courses"}
+                </button>
+              </div>
+
+              {groupPreview && (
+                <div className="group-enrollment-preview">
+                  <div className="group-preview-heading">
+                    <div>
+                      <span className="group-preview-eyebrow">GROUP SUMMARY</span>
+                      <h3>Enrollment Preview</h3>
+                      <p className="group-preview-context">
+                        Cohort {groupEnrollment.academic_year}
+                        {" · Semester "}
+                        {groupEnrollment.semester}
+                        {" · Section "}
+                        {groupEnrollment.section}
+                      </p>
+                    </div>
+                    <span className="group-preview-ready">
+                      <FontAwesomeIcon icon={faCheck} /> Preview ready
+                    </span>
+                  </div>
+
+                  <div className="group-preview-stats">
+                    <div className="group-preview-stat">
+                      <span className="group-preview-stat-icon group-preview-stat-blue">
+                        <FontAwesomeIcon icon={faGraduationCap} />
+                      </span>
+                      <div>
+                        <strong>{groupPreview.eligible_students ?? 0}</strong>
+                        <span>Eligible students</span>
+                      </div>
+                    </div>
+                    <div className="group-preview-stat">
+                      <span className="group-preview-stat-icon group-preview-stat-violet">
+                        <FontAwesomeIcon icon={faBookOpen} />
+                      </span>
+                      <div>
+                        <strong>
+                          {(groupPreview.courses || []).length ||
+                            (groupPreview.offerings || []).length}
+                        </strong>
+                        <span>Active courses</span>
+                      </div>
+                    </div>
+                    <div className="group-preview-stat">
+                      <span className="group-preview-stat-icon group-preview-stat-green">
+                        <FontAwesomeIcon icon={faCheck} />
+                      </span>
+                      <div>
+                        <strong>
+                          {(groupPreview.courses || []).filter(
+                            (course) => course.has_offering ?? Boolean(course.offering_id)
+                          ).length || (groupPreview.offerings || []).length}
+                        </strong>
+                        <span>Existing offerings</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="group-preview-course-heading">
+                    <div>
+                      <h4>Course offerings</h4>
+                      <p>Existing offerings are reused; missing ones will be created automatically.</p>
+                    </div>
+                    <span className="group-preview-course-count">
+                      {(groupPreview.courses || []).length ||
+                        (groupPreview.offerings || []).length} courses
+                    </span>
+                  </div>
+
+                  {(groupPreview.courses || []).length > 0 ? (
+                    <div className="group-enrollment-course-list">
+                      {groupPreview.courses.map((course) => {
+                        const hasOffering = course.has_offering ?? Boolean(course.offering_id);
+                        const facultyAssigned = course.faculty_assigned ?? false;
+
+                        return (
+                          <article
+                            key={course.course_id}
+                            className={`group-enrollment-course-option ${
+                              hasOffering ? "is-existing" : "is-new"
+                            }`}
+                          >
+                            <span className="group-course-icon">
+                              <FontAwesomeIcon icon={faBookOpen} />
+                            </span>
+                            <div className="group-course-content">
+                              <strong className="group-course-title">
+                                <span>{course.course_code}</span>
+                                <span className="group-course-dash"> — </span>
+                                {course.course_name}
+                              </strong>
+                              <p className="group-course-description">
+                                {hasOffering
+                                  ? `Course offering #${course.offering_id} will be reused.`
+                                  : "A new course offering will be created automatically."}
+                              </p>
+                              <div className="group-course-badges">
+                                <span className={`group-course-badge ${hasOffering ? "badge-existing" : "badge-new"}`}>
+                                  {hasOffering ? "Existing offering" : "New offering"}
+                                </span>
+                                {hasOffering ? (
+                                  <span className={`group-course-badge ${facultyAssigned ? "badge-faculty" : "badge-pending"}`}>
+                                    {facultyAssigned ? "Faculty assigned" : "Faculty assignment pending"}
+                                  </span>
+                                ) : (
+                                  <span className="group-course-badge badge-pending">
+                                    No Faculty Assign
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="group-preview-empty">
+                      <FontAwesomeIcon icon={faCircleExclamation} />
+                      <p>No course details were returned. Refresh the preview or check the backend response.</p>
+                    </div>
+                  )}
+
+                  <div className="group-preview-note">
+                    <FontAwesomeIcon icon={faCircleExclamation} />
+                    <p>
+                      <strong>Preview only.</strong> No enrollment records have been created yet.
+                      Faculty assignments on existing offerings will be preserved.
+                    </p>
+                  </div>
+
+                  <div className="group-preview-footer">
+                    <span>Review the group details before confirming enrollment.</span>
+                    <button
+                      type="button"
+                      className="academic-primary-button group-preview-enroll-button"
+                      onClick={handleBulkEnrollGroup}
+                      disabled={
+                        groupPreviewLoading ||
+                        (groupPreview.eligible_students ?? 0) === 0 ||
+                        (
+                          (groupPreview.courses || []).length === 0 &&
+                          (groupPreview.offerings || []).length === 0
+                        )
+                      }
+                    >
+                      <FontAwesomeIcon
+                        icon={groupPreviewLoading ? faSpinner : faCheck}
+                        spin={groupPreviewLoading}
+                      />
+                      {groupPreviewLoading
+                        ? "Processing..."
+                        : "Enroll All Eligible Students"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
 
           {enrollmentsLoading ? (
             <div className="academic-empty-state">
@@ -1881,16 +2209,6 @@ function AcademicManagement() {
                           </td>
                           <td>{formatDate(enrollment.enrolled_at)}</td>
                           <td className="enrollment-actions">
-                            <button
-                              type="button"
-                              className="academic-action-button enrollment-edit-button"
-                              title="Edit enrollment"
-                              aria-label={`Edit enrollment ${enrollment.enrollment_id}`}
-                              onClick={() => handleEditEnrollment(enrollment)}
-                            >
-                              <FontAwesomeIcon icon={faPenToSquare} />
-                            </button>
-
                             <button
                               type="button"
                               className="academic-action-button enrollment-delete-button"
@@ -2485,182 +2803,6 @@ function AcademicManagement() {
                     : editingOfferingId !== null
                       ? "Save Changes"
                       : "Create Offering"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ENROLLMENT MODAL */}
-      {showEnrollmentModal && (
-        <div
-          className="academic-modal-overlay"
-          role="presentation"
-          onMouseDown={(event) => {
-            if (
-              event.target === event.currentTarget &&
-              !creatingEnrollment
-            ) {
-              setShowEnrollmentModal(false);
-            }
-          }}
-        >
-          <div
-            className="academic-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="enrollment-modal-title"
-          >
-            <div className="academic-modal-header">
-              <div>
-                <span className="academic-eyebrow">Academic Management</span>
-                <h2 id="enrollment-modal-title">Add Course Enrollment</h2>
-                <p>Enter the student and course offering IDs.</p>
-              </div>
-              <button
-                type="button"
-                className="academic-modal-close"
-                onClick={() => setShowEnrollmentModal(false)}
-                disabled={creatingEnrollment}
-                aria-label="Close enrollment dialog"
-              >
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateEnrollment}>
-              <div className="academic-form-section">
-                <h3>Enrollment Information</h3>
-
-                <div className="academic-form-grid">
-                  <div className="academic-form-field">
-                    <label htmlFor="enrollment-student-search">Student *</label>
-                    <input
-                      id="enrollment-student-search"
-                      list="enrollment-student-options"
-                      value={studentSearch}
-                      onChange={(event) => {
-                        const search = event.target.value;
-                        setStudentSearch(search);
-
-                        const selectedStudent = students.find((student) => {
-                          const label =
-                            `${student.name} — ${student.enrollment_no || "No enrollment number"} — Sem ${student.semester ?? "N/A"} ${student.section || ""} (ID: ${student.student_id})`;
-                          return label === search;
-                        });
-
-                        setEnrollmentForm((current) => ({
-                          ...current,
-                          studentId: selectedStudent
-                            ? String(selectedStudent.student_id)
-                            : "",
-                        }));
-                      }}
-                      placeholder={
-                        studentsLoading
-                          ? "Loading students..."
-                          : "Search student by name or enrollment number"
-                      }
-                      autoComplete="off"
-                      required
-                      disabled={creatingEnrollment || studentsLoading}
-                    />
-                    <datalist id="enrollment-student-options">
-                      {students.map((student) => (
-                        <option
-                          key={student.student_id}
-                          value={`${student.name} — ${student.enrollment_no || "No enrollment number"} — Sem ${student.semester ?? "N/A"} ${student.section || ""} (ID: ${student.student_id})`}
-                        />
-                      ))}
-                    </datalist>
-                    {studentsError && (
-                      <p className="academic-field-hint" role="alert">
-                        {studentsError}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="academic-form-field">
-                    <label htmlFor="enrollment-offering-search">Course offering *</label>
-                    <input
-                      id="enrollment-offering-search"
-                      list="enrollment-offering-options"
-                      value={offeringSearch}
-                      onChange={(event) => {
-                        const search = event.target.value;
-                        setOfferingSearch(search);
-
-                        const selectedOffering = offerings.find((offering) => {
-                          const label =
-                            `${offering.course_code} — ${offering.course_name} — ${offering.faculty_name} — ${offering.academic_year} — Sem ${offering.semester} — Section ${offering.section} (ID: ${offering.offering_id})`;
-                          return label === search;
-                        });
-
-                        setEnrollmentForm((current) => ({
-                          ...current,
-                          offeringId: selectedOffering
-                            ? String(selectedOffering.offering_id)
-                            : "",
-                        }));
-                      }}
-                      placeholder="Search course, faculty, semester, or section"
-                      autoComplete="off"
-                      required
-                      disabled={creatingEnrollment || offeringsLoading}
-                    />
-                    <datalist id="enrollment-offering-options">
-                      {offerings.map((offering) => (
-                        <option
-                          key={offering.offering_id}
-                          value={`${offering.course_code} — ${offering.course_name} — ${offering.faculty_name} — ${offering.academic_year} — Sem ${offering.semester} — Section ${offering.section} (ID: ${offering.offering_id})`}
-                        />
-                      ))}
-                    </datalist>
-                    {offeringsError && (
-                      <p className="academic-field-hint" role="alert">
-                        {offeringsError}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="academic-modal-backend-note">
-                <span aria-hidden="true">
-                  <FontAwesomeIcon icon={faCircleInfo} />
-                </span>
-                <span>
-                  Use valid IDs from your database. The backend verifies whether
-                  the student and offering exist.
-                </span>
-              </div>
-
-              {renderNotice(
-                "Enrollment creation failed",
-                enrollmentActionError,
-                true
-              )}
-
-              <div className="academic-modal-footer">
-                <button
-                  type="button"
-                  className="academic-secondary-button"
-                  onClick={() => setShowEnrollmentModal(false)}
-                  disabled={creatingEnrollment}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="academic-primary-button"
-                  disabled={creatingEnrollment}
-                >
-                  <FontAwesomeIcon
-                    icon={creatingEnrollment ? faSpinner : faPlus}
-                    spin={creatingEnrollment}
-                  />
-                  {creatingEnrollment ? "Creating..." : "Create Enrollment"}
                 </button>
               </div>
             </form>

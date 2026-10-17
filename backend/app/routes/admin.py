@@ -2168,7 +2168,11 @@ def get_course_offerings():
             "course_code": offering.course.course_code,
             "course_name": offering.course.course_name,
             "faculty_id": offering.faculty_id,
-            "faculty_name": offering.faculty.user.name,
+            "faculty_name": (
+                offering.faculty.user.name
+                if offering.faculty and offering.faculty.user
+                else None
+            ),
             "academic_year": offering.academic_year,
             "semester": offering.semester,
             "section": offering.section,
@@ -2194,15 +2198,34 @@ def create_course_offering():
 
     try:
         course_id = int(data.get("course_id"))
-        faculty_id = int(data.get("faculty_id"))
         semester = int(data.get("semester"))
     except (TypeError, ValueError):
         return jsonify({
             "success": False,
-            "message": (
-                "Valid course_id, faculty_id and semester are required"
-            ),
+            "message": "Valid course_id and semester are required",
         }), 400
+
+    raw_faculty_id = data.get("faculty_id")
+
+    if raw_faculty_id is None or str(raw_faculty_id).strip() == "":
+        faculty_id = None
+        faculty = None
+    else:
+        try:
+            faculty_id = int(raw_faculty_id)
+        except (TypeError, ValueError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid faculty_id",
+            }), 400
+
+        faculty = db.session.get(Faculty, faculty_id)
+
+        if not faculty:
+            return jsonify({
+                "success": False,
+                "message": "Faculty not found",
+            }), 404
 
     academic_year = str(
         data.get("academic_year") or ""
@@ -2219,7 +2242,6 @@ def create_course_offering():
         }), 400
 
     course = db.session.get(Course, course_id)
-    faculty = db.session.get(Faculty, faculty_id)
 
     if not course:
         return jsonify({
@@ -2227,11 +2249,6 @@ def create_course_offering():
             "message": "Course not found",
         }), 404
 
-    if not faculty:
-        return jsonify({
-            "success": False,
-            "message": "Faculty not found",
-        }), 404
 
     offering = CourseOffering(
         course_id=course_id,
@@ -2304,21 +2321,28 @@ def update_course_offering(offering_id):
         offering.course_id = course_id
 
     if "faculty_id" in data:
-        try:
-            faculty_id = int(data["faculty_id"])
-        except (TypeError, ValueError):
-            return jsonify({
-                "success": False,
-                "message": "Invalid faculty_id",
-            }), 400
+        raw_faculty_id = data["faculty_id"]
 
-        if not db.session.get(Faculty, faculty_id):
-            return jsonify({
-                "success": False,
-                "message": "Faculty not found",
-            }), 404
+        # Allow the offering to have no assigned faculty.
+        if raw_faculty_id is None or str(raw_faculty_id).strip() == "":
+            offering.faculty_id = None
+        else:
+            try:
+                faculty_id = int(raw_faculty_id)
+            except (TypeError, ValueError):
+                return jsonify({
+                    "success": False,
+                    "message": "Invalid faculty_id",
+                }), 400
 
-        offering.faculty_id = faculty_id
+            if not db.session.get(Faculty, faculty_id):
+                return jsonify({
+                    "success": False,
+                    "message": "Faculty not found",
+                }), 404
+
+            offering.faculty_id = faculty_id
+
 
     if "semester" in data:
         try:

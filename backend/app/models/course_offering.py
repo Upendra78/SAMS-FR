@@ -18,7 +18,7 @@ class CourseOffering(db.Model):
     faculty_id = db.Column(
         db.Integer,
         db.ForeignKey("faculty.faculty_id"),
-        nullable=False,
+        nullable=True,
     )
 
     academic_year = db.Column(
