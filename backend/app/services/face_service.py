@@ -226,6 +226,87 @@ class FaceService:
             "status": "not_recognized",
         }
 
+    def recognize_all_students(
+        self,
+        image,
+        registered_students,
+        similarity_threshold,
+    ):
+        """
+        Detect and recognize all students present in an image frame.
+        Supports continuous live attendance recognition for single or multiple students.
+        """
+        if image is None or image.size == 0:
+            raise ValueError("Invalid or empty image.")
+        if not registered_students:
+            return {
+                "matches": [],
+                "status": "no_registered_students",
+                "detected_count": 0,
+            }
+
+        height, width = image.shape[:2]
+        self.detector.setInputSize((width, height))
+        _, faces = self.detector.detect(image)
+
+        if faces is None or len(faces) == 0:
+            return {
+                "matches": [],
+                "status": "no_face",
+                "detected_count": 0,
+            }
+
+        matches = []
+        matched_student_ids = set()
+
+        for face in faces:
+            try:
+                aligned_face = self.extract_face(image, face)
+                probe_feature = self.generate_encoding(aligned_face)
+            except (cv2.error, ValueError):
+                continue
+
+            best_student_id = None
+            best_similarity = -1.0
+
+            for student in registered_students:
+                student_id = student.get("student_id")
+                registered_feature = student.get("encoding")
+
+                if student_id is None or registered_feature is None:
+                    continue
+
+                try:
+                    comparison = self.compare_encoding(
+                        probe_feature,
+                        registered_feature,
+                    )
+                    similarity = comparison["cosine_similarity"]
+                    if similarity > best_similarity:
+                        best_similarity = similarity
+                        best_student_id = student_id
+                except (cv2.error, ValueError):
+                    continue
+
+            if (
+                best_student_id is not None
+                and best_similarity >= similarity_threshold
+                and best_student_id not in matched_student_ids
+            ):
+                matched_student_ids.add(best_student_id)
+                matches.append({
+                    "student_id": best_student_id,
+                    "similarity_score": float(best_similarity),
+                    "bbox": face[:4].tolist() if hasattr(face, "tolist") else list(face[:4]),
+                    "confidence": float(face[14]) if len(face) > 14 else 1.0,
+                })
+
+        return {
+            "matches": matches,
+            "status": "recognized" if matches else "not_recognized",
+            "detected_count": len(faces),
+        }
+
     def enroll_student(self, image):
         """
         Generate a face encoding for a student enrollment image.

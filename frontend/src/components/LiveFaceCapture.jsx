@@ -650,6 +650,34 @@ function LiveFaceCapture({
       [captureFrame, finishCaptureProcess],
     );
 
+  const handleManualCapture = useCallback(async () => {
+    if (disabled || cameraStatus !== "active") return;
+    try {
+      captureInProgressRef.current = true;
+      setCaptureMessage("Capturing current face frame...");
+      const frame = await captureFrame(95);
+      if (frame && frame.blob) {
+        const previewUrl = URL.createObjectURL(frame.blob);
+        setCapturedImage({
+          blob: frame.blob,
+          previewUrl,
+          score: 95,
+        });
+        setFaceScore(95);
+        setCaptureStep(CAPTURE_COUNT);
+        stopCamera();
+        if (onCapture) {
+          onCapture(frame.blob);
+        }
+      }
+    } catch (e) {
+      console.error("Manual face capture failed:", e);
+      setCameraError("Unable to capture frame. Please try again.");
+    } finally {
+      captureInProgressRef.current = false;
+    }
+  }, [captureFrame, disabled, cameraStatus, onCapture, stopCamera]);
+
   /*
    * =========================================================
    * DETECTION LOOP
@@ -864,7 +892,11 @@ function LiveFaceCapture({
           "loading",
         );
 
-        await initializeDetector();
+        try {
+          await initializeDetector();
+        } catch (detectorError) {
+          console.warn("Face detector model could not be loaded; manual capture available:", detectorError);
+        }
 
         if (
           !mountedRef.current
@@ -1229,6 +1261,19 @@ function LiveFaceCapture({
                   </span>
                 ),
               )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "center", marginTop: "12px", width: "100%" }}>
+              <button
+                type="button"
+                className="live-face-start-button"
+                style={{ padding: "8px 18px", fontSize: "12px", width: "auto" }}
+                onClick={handleManualCapture}
+                disabled={disabled}
+              >
+                <FontAwesomeIcon icon={faCamera} />
+                Capture Now
+              </button>
             </div>
           </div>
         )}

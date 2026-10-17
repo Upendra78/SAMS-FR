@@ -26,6 +26,9 @@ import {
   faXmark,
   faBolt,
   faFileLines,
+  faPlay,
+  faPause,
+  faUserPlus,
 } from "@fortawesome/free-solid-svg-icons";
 
 import "./Attendance.css";
@@ -37,10 +40,11 @@ import {
   getFacultyAttendanceSessions,
   getFacultyCourses,
   getFacultyStudents,
-  markFacultyAttendance,
+  getFacultyTimetable,
   recognizeFacultyAttendance,
   startFacultyAttendanceSession,
 } from "../../services/facultyService";
+import { enrollStudentFace } from "../../services/faceService";
 
 const getErrorMessage = (error, fallback) =>
   error?.response?.data?.message || error?.message || fallback;
@@ -147,10 +151,8 @@ function Attendance() {
   const [recordsError, setRecordsError] = useState("");
   const [startError, setStartError] = useState("");
   const [closeError, setCloseError] = useState("");
-  const [markAttendanceError, setMarkAttendanceError] = useState("");
   const [faceAttendanceError, setFaceAttendanceError] = useState("");
 
-  const [markingStudentId, setMarkingStudentId] = useState(null);
   const [showStartModal, setShowStartModal] = useState(false);
   const [selectedOfferingId, setSelectedOfferingId] = useState("");
   const [startingSession, setStartingSession] = useState(false);
@@ -159,6 +161,17 @@ function Attendance() {
   const [showFaceAttendance, setShowFaceAttendance] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
   const [recognizingFace, setRecognizingFace] = useState(false);
+  const [autoScanActive, setAutoScanActive] = useState(true);
+  const [lastRecognizedStudent, setLastRecognizedStudent] = useState(null);
+  const [recentDetections, setRecentDetections] = useState([]);
+  const [scanStatusMessage, setScanStatusMessage] = useState("Looking for students…");
+
+  // Face enrollment modal states
+  const [enrollingStudent, setEnrollingStudent] = useState(null);
+  const [enrollCameraReady, setEnrollCameraReady] = useState(false);
+  const [enrollSubmitting, setEnrollSubmitting] = useState(false);
+  const [enrollError, setEnrollError] = useState("");
+  const [enrollSuccess, setEnrollSuccess] = useState("");
 
   const [searchTerm, setSearchTerm] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
@@ -167,6 +180,9 @@ function Attendance() {
   const [status, setStatus] = useState("All");
   const [activeTab, setActiveTab] = useState("attendance");
   const [scheduleExpanded, setScheduleExpanded] = useState(true);
+  const [timetableEntries, setTimetableEntries] = useState([]);
+  const [timetableLoading, setTimetableLoading] = useState(true);
+  const [timetableError, setTimetableError] = useState("");
   const [page, setPage] = useState(1);
 
   const pageSize = 5;
@@ -176,6 +192,11 @@ function Attendance() {
   const cameraStreamRef = useRef(null);
   const recordsRequestRef = useRef(0);
   const recognitionRequestRef = useRef(false);
+
+  // Enrollment refs
+  const enrollVideoRef = useRef(null);
+  const enrollCanvasRef = useRef(null);
+  const enrollStreamRef = useRef(null);
 
   const stopCamera = useCallback(() => {
     if (cameraStreamRef.current) {
@@ -191,16 +212,90 @@ function Attendance() {
     setCameraReady(false);
   }, []);
 
+  const stopEnrollCamera = useCallback(() => {
+    if (enrollStreamRef.current) {
+      enrollStreamRef.current.getTracks().forEach((track) => track.stop());
+      enrollStreamRef.current = null;
+    }
+
+    if (enrollVideoRef.current) {
+      enrollVideoRef.current.pause();
+      enrollVideoRef.current.srcObject = null;
+    }
+
+    setEnrollCameraReady(false);
+  }, []);
+
+  const startEnrollCamera = useCallback(async () => {
+    setEnrollError("");
+    setEnrollCameraReady(false);
+    try {
+      if (enrollStreamRef.current) {
+        enrollStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      enrollStreamRef.current = stream;
+      if (enrollVideoRef.current) {
+        enrollVideoRef.current.srcObject = stream;
+        await enrollVideoRef.current.play();
+        setEnrollCameraReady(true);
+      }
+    } catch (err) {
+      setEnrollError(getErrorMessage(err, "Unable to access the camera for face enrollment."));
+    }
+  }, []);
+
   useEffect(
     () => () => {
       if (cameraStreamRef.current) {
         cameraStreamRef.current.getTracks().forEach((track) => track.stop());
         cameraStreamRef.current = null;
       }
+      if (enrollStreamRef.current) {
+        enrollStreamRef.current.getTracks().forEach((track) => track.stop());
+        enrollStreamRef.current = null;
+      }
     },
     []
   );
-
+  useEffect(() => {
+    let mounted =true;
+    const loadTimetable = async() => {
+      setTimetableLoading(true);
+      setTimetableLoading(true);
+      setTimetableError("");
+      try{
+        const result = await getFacultyTimetable();
+        if(!result?.success){
+          throw new Error(
+            result?.message || "Unable to load the faculty timetable."
+          );
+        }
+        if (mounted){
+          setTimetableEntries(
+            Array.isArray(result.data) ? result.data : []
+          );
+        }
+      } catch(error){
+        if (mounted){
+          setTimetableError(
+            getErrorMessage(error, "Unable to load the timetable.")
+          );
+        }
+      } finally{
+        if (mounted) {
+          setTimetableLoading(false);
+        }
+      }
+    };
+    loadTimetable();
+    return() => {
+      mounted = false;
+    };
+  }, []);
   useEffect(() => {
     if (!showFaceAttendance || !cameraStreamRef.current || !videoRef.current) {
       return undefined;
@@ -241,6 +336,131 @@ function Attendance() {
     };
   }, [showFaceAttendance]);
 
+  // Automated real-time face recognition scanner loop
+  useEffect(() => {
+    if (!showFaceAttendance || !cameraReady || !autoScanActive) {
+      return undefined;
+    }
+
+    const session = activeSession || selectedSession;
+    if (!session || session.status !== "ACTIVE") {
+      return undefined;
+    }
+
+    let isCancelled = false;
+    let timerId = null;
+
+    const performScanCycle = async () => {
+      if (
+        isCancelled ||
+        recognitionRequestRef.current ||
+        !videoRef.current ||
+        !canvasRef.current
+      ) {
+        return;
+      }
+
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+
+      if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
+        timerId = setTimeout(performScanCycle, 500);
+        return;
+      }
+
+      recognitionRequestRef.current = true;
+      setRecognizingFace(true);
+
+      try {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext("2d");
+        if (context) {
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const imageBlob = await new Promise((resolve, reject) => {
+            canvas.toBlob(
+              (blob) => (blob ? resolve(blob) : reject(new Error("Unable to capture frame"))),
+              "image/jpeg",
+              0.88
+            );
+          });
+
+          if (!isCancelled) {
+            const result = await recognizeFacultyAttendance(session.session_id, imageBlob);
+
+            if (!isCancelled && result?.success) {
+              const recognizedList = Array.isArray(result.recognized)
+                ? result.recognized
+                : result.data
+                ? [result.data]
+                : [];
+
+              if (recognizedList.length > 0) {
+                // Update local attendance records state
+                setAttendanceRecords((current) => {
+                  let updated = [...current];
+                  for (const rec of recognizedList) {
+                    if (rec.student_id) {
+                      const idx = updated.findIndex((item) => isSameId(item.student_id, rec.student_id));
+                      if (idx >= 0) {
+                        updated[idx] = { ...updated[idx], ...rec };
+                      } else {
+                        updated.push(rec);
+                      }
+                    }
+                  }
+                  return updated;
+                });
+
+                const firstStudent = recognizedList[0];
+                setLastRecognizedStudent(firstStudent);
+                setScanStatusMessage(
+                  firstStudent.is_new
+                    ? `✅ Marked: ${firstStudent.name || firstStudent.student_name} (${firstStudent.enrollment_no})`
+                    : `ℹ️ ${firstStudent.name || firstStudent.student_name} — Already Present`
+                );
+
+                setRecentDetections((prev) => {
+                  const items = [...recognizedList, ...prev];
+                  const seen = new Set();
+                  const deduplicated = [];
+                  for (const item of items) {
+                    if (item.student_id && !seen.has(item.student_id)) {
+                      seen.add(item.student_id);
+                      deduplicated.push(item);
+                    }
+                  }
+                  return deduplicated.slice(0, 6);
+                });
+              } else if (result.status === "no_face") {
+                setScanStatusMessage("Scanning for students…");
+              } else if (result.status === "not_recognized") {
+                setScanStatusMessage("Face detected — verifying identity…");
+              }
+            }
+          }
+        }
+      } catch (scanError) {
+        console.debug("Live auto-scan error:", scanError?.message);
+      } finally {
+        recognitionRequestRef.current = false;
+        if (!isCancelled) {
+          setRecognizingFace(false);
+          timerId = setTimeout(performScanCycle, 850);
+        }
+      }
+    };
+
+    timerId = setTimeout(performScanCycle, 400);
+
+    return () => {
+      isCancelled = true;
+      if (timerId) clearTimeout(timerId);
+      recognitionRequestRef.current = false;
+      setRecognizingFace(false);
+    };
+  }, [showFaceAttendance, cameraReady, autoScanActive, activeSession, selectedSession]);
+
   const refreshSessions = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -269,15 +489,30 @@ function Attendance() {
       setSessions(sessionList);
       setActiveSession(active);
 
+      let targetSession = null;
       setSelectedSession((current) => {
-        if (!current) return active;
-
-        return (
-          sessionList.find((item) =>
-            isSameId(item.session_id, current.session_id)
-          ) || current
-        );
+        targetSession = current
+          ? sessionList.find((item) => isSameId(item.session_id, current.session_id)) || current
+          : active || sessionList[0] || null;
+        return targetSession;
       });
+
+      const sessionToLoad = targetSession || active;
+      if (sessionToLoad?.session_id) {
+        setRecordsLoading(true);
+        try {
+          const recordsResult = await getFacultyAttendanceRecords(
+            sessionToLoad.session_id
+          );
+          if (recordsResult?.success) {
+            setAttendanceRecords(getList(recordsResult));
+          }
+        } catch {
+          // session records load failure handled gracefully
+        } finally {
+          setRecordsLoading(false);
+        }
+      }
     } catch (requestError) {
       setError(
         getErrorMessage(requestError, "Unable to load attendance sessions.")
@@ -447,6 +682,23 @@ function Attendance() {
     [attendanceRecords]
   );
 
+  const displayedRecentDetections = useMemo(() => {
+    if (recentDetections.length > 0) return recentDetections;
+    return attendanceRecords
+      .filter((r) => r.status === "PRESENT")
+      .sort((a, b) => new Date(b.marked_at) - new Date(a.marked_at))
+      .slice(0, 6)
+      .map((r) => {
+        const student = students.find((s) => isSameId(s.student_id, r.student_id));
+        return {
+          student_id: r.student_id,
+          name: student ? getStudentName(student) : `Student #${r.student_id}`,
+          marked_at: r.marked_at,
+          recognition_method: r.recognition_method,
+        };
+      });
+  }, [recentDetections, attendanceRecords, students]);
+
   const studentsPresent = useMemo(
     () =>
       attendanceRecords.filter((record) => record.status === "PRESENT").length,
@@ -472,13 +724,23 @@ function Attendance() {
 
     return students.filter(
       (student) =>
-        student.offering_id != null &&
-        isSameId(student.offering_id, selectedSession.offering_id)
+        (student.offering_id != null &&
+          isSameId(student.offering_id, selectedSession.offering_id)) ||
+        (Array.isArray(student.offering_ids) &&
+          student.offering_ids.some((id) =>
+            isSameId(id, selectedSession.offering_id)
+          ))
     );
   }, [students, selectedSession]);
 
   const studentEnrollmentScopeAvailable = useMemo(
-    () => students.some((student) => student.offering_id != null),
+    () =>
+      students.some(
+        (student) =>
+          student.offering_id != null ||
+          (Array.isArray(student.offering_ids) &&
+            student.offering_ids.length > 0)
+      ),
     [students]
   );
 
@@ -523,11 +785,11 @@ function Attendance() {
       return;
     }
 
-    setSelectedSession(session);
+    setSelectedSession((current) =>
+      isSameId(current?.session_id, session.session_id) ? current : session
+    );
     setRecordsLoading(true);
     setRecordsError("");
-    setMarkAttendanceError("");
-    setAttendanceRecords([]);
 
     try {
       const result = await getFacultyAttendanceRecords(session.session_id);
@@ -558,63 +820,6 @@ function Attendance() {
   const handleSessionSelect = (session) => {
     loadAttendanceRecords(session);
     setActiveTab("history");
-  };
-
-  const handleMarkAttendance = async (studentId) => {
-    const session = selectedSession;
-
-    if (!session?.session_id) {
-      setMarkAttendanceError("Select an attendance session first.");
-      return;
-    }
-
-    if (session.status !== "ACTIVE") {
-      setMarkAttendanceError(
-        "Attendance can only be marked for an active session."
-      );
-      return;
-    }
-
-    if (attendanceRecordMap.has(String(studentId))) {
-      setMarkAttendanceError(
-        "An attendance record already exists for this student."
-      );
-      return;
-    }
-
-    setMarkingStudentId(studentId);
-    setMarkAttendanceError("");
-
-    try {
-      const result = await markFacultyAttendance(session.session_id, {
-        student_id: studentId,
-        recognition_method: "MANUAL",
-      });
-
-      if (!result?.success || !result.data) {
-        throw new Error(result?.message || "Unable to mark attendance.");
-      }
-
-      setAttendanceRecords((current) => {
-        const exists = current.some((record) =>
-          isSameId(record.student_id, result.data.student_id)
-        );
-
-        return exists
-          ? current.map((record) =>
-              isSameId(record.student_id, result.data.student_id)
-                ? result.data
-                : record
-            )
-          : [...current, result.data];
-      });
-    } catch (requestError) {
-      setMarkAttendanceError(
-        getErrorMessage(requestError, "Unable to mark attendance.")
-      );
-    } finally {
-      setMarkingStudentId(null);
-    }
   };
 
   const handleStartFaceAttendance = async () => {
@@ -676,109 +881,69 @@ function Attendance() {
     setRecognizingFace(false);
     setFaceAttendanceError("");
     setShowFaceAttendance(false);
+    setScanStatusMessage("Camera stopped");
   };
 
-  const handleRecognizeFace = async () => {
-    const session = activeSession || selectedSession;
-
-    if (!session?.session_id || session.status !== "ACTIVE") {
-      setFaceAttendanceError("An active attendance session is required.");
-      return;
-    }
-
-    if (
-      recognitionRequestRef.current ||
-      !cameraReady ||
-      !videoRef.current ||
-      !canvasRef.current
-    ) {
-      if (!cameraReady) {
-        setFaceAttendanceError(
-          "Camera is not ready. Please wait and try again."
-        );
-      }
-      return;
-    }
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
+  const handleCaptureAndEnroll = async () => {
+    if (!enrollingStudent || !enrollVideoRef.current || !enrollCanvasRef.current) return;
+    const video = enrollVideoRef.current;
+    const canvas = enrollCanvasRef.current;
 
     if (!video.videoWidth || !video.videoHeight) {
-      setFaceAttendanceError(
-        "The camera has not produced a usable frame yet."
-      );
+      setEnrollError("Camera frame not ready yet.");
       return;
     }
 
-    recognitionRequestRef.current = true;
-    setRecognizingFace(true);
-    setFaceAttendanceError("");
+    setEnrollSubmitting(true);
+    setEnrollError("");
+    setEnrollSuccess("");
 
     try {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const context = canvas.getContext("2d");
-
-      if (!context) {
-        throw new Error("Unable to capture the camera frame.");
-      }
-
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const imageBlob = await new Promise((resolve, reject) => {
+      const blob = await new Promise((res, rej) =>
         canvas.toBlob(
-          (blob) =>
-            blob
-              ? resolve(blob)
-              : reject(
-                  new Error("Unable to create an image from the camera frame.")
-                ),
+          (b) => (b ? res(b) : rej(new Error("Failed to capture image"))),
           "image/jpeg",
-          0.9
-        );
-      });
-
-      const result = await recognizeFacultyAttendance(
-        session.session_id,
-        imageBlob
+          0.92
+        )
       );
 
-      if (!result?.success || !result.data) {
-        const detail = result?.data?.status
-          ? ` (${result.data.status})`
-          : "";
+      const res = await enrollStudentFace(enrollingStudent.student_id, blob);
 
-        throw new Error(
-          `${result?.message || "Face recognition did not identify a student."}${detail}`
+      if (res?.success) {
+        setEnrollSuccess(
+          `Face registered successfully for ${getStudentName(enrollingStudent)}!`
         );
+
+        setStudents((prev) =>
+          prev.map((s) =>
+            isSameId(s.student_id, enrollingStudent.student_id)
+              ? { ...s, has_face_profile: true }
+              : s
+          )
+        );
+
+        setTimeout(() => {
+          stopEnrollCamera();
+          setEnrollingStudent(null);
+          setEnrollSuccess("");
+        }, 1200);
+      } else {
+        throw new Error(res?.message || "Failed to enroll face.");
       }
-
-      setAttendanceRecords((current) => {
-        const exists = current.some((record) =>
-          isSameId(record.student_id, result.data.student_id)
-        );
-
-        return exists
-          ? current.map((record) =>
-              isSameId(record.student_id, result.data.student_id)
-                ? result.data
-                : record
-            )
-          : [...current, result.data];
-      });
-
-      handleCloseFaceAttendance();
-    } catch (requestError) {
-      setFaceAttendanceError(
+    } catch (err) {
+      setEnrollError(
         getErrorMessage(
-          requestError,
-          "Face recognition failed. Please try again."
+          err,
+          "Face enrollment failed. Ensure exactly one face is clearly visible."
         )
       );
     } finally {
-      recognitionRequestRef.current = false;
-      setRecognizingFace(false);
+      setEnrollSubmitting(false);
     }
   };
 
@@ -815,7 +980,6 @@ function Attendance() {
       setSelectedSession(newSession);
       setAttendanceRecords([]);
       setRecordsError("");
-      setMarkAttendanceError("");
       setShowStartModal(false);
     } catch (requestError) {
       setStartError(
@@ -1064,7 +1228,7 @@ function Attendance() {
               <div className="attendance-live-grid">
                 <div className="attendance-live-camera">
                   {showFaceAttendance ? (
-                    <>
+                    <div className="attendance-camera-scanner-frame">
                       <video
                         ref={videoRef}
                         autoPlay
@@ -1075,18 +1239,30 @@ function Attendance() {
                       <canvas
                         ref={canvasRef}
                         className="attendance-camera-canvas"
+                        style={{ display: "none" }}
                         aria-hidden="true"
                       />
+                      <div className="attendance-scanner-viewfinder">
+                        <div className="attendance-scanner-corner top-left" />
+                        <div className="attendance-scanner-corner top-right" />
+                        <div className="attendance-scanner-corner bottom-left" />
+                        <div className="attendance-scanner-corner bottom-right" />
+                        {autoScanActive && <div className="attendance-scanner-laser" />}
+                      </div>
                       <span className="attendance-live-badge">
-                        <span /> Camera
+                        <span /> LIVE SCANNER
                       </span>
-                    </>
+                      <div className="attendance-scanner-status-toast">
+                        <FontAwesomeIcon icon={recognizingFace ? faSpinner : faCircleInfo} spin={recognizingFace} />
+                        <span>{scanStatusMessage}</span>
+                      </div>
+                    </div>
                   ) : (
                     <div className="attendance-camera-placeholder">
                       <FontAwesomeIcon icon={faCamera} />
-                      <strong>Camera preview</strong>
+                      <strong>Continuous Face Recognition</strong>
                       <span>
-                        Start face attendance to activate the camera.
+                        Start camera to automatically detect and mark attendance for enrolled students. No capture button required.
                       </span>
                       <button
                         type="button"
@@ -1095,68 +1271,114 @@ function Attendance() {
                         disabled={closingSession}
                       >
                         <FontAwesomeIcon icon={faCamera} />
-                        Start Camera
+                        Start Live Attendance
                       </button>
                     </div>
                   )}
                 </div>
 
                 <div className="attendance-recognition-panel">
-                  <h3>Recognition Result</h3>
-                  <div className="attendance-recognition-symbol">
-                    <FontAwesomeIcon
-                      icon={recognizingFace ? faSpinner : faUserCheck}
-                      spin={recognizingFace}
-                    />
+                  <div className="attendance-scanner-header">
+                    <h3>Live Recognition</h3>
+                    {showFaceAttendance && (
+                      <span className="attendance-scanner-status-pill">
+                        <span className={`attendance-pulse-dot ${autoScanActive ? "active" : "paused"}`} />
+                        {autoScanActive ? "Auto-Scanning" : "Paused"}
+                      </span>
+                    )}
                   </div>
-                  <strong>
-                    {recognizingFace
-                      ? "Recognizing…"
-                      : showFaceAttendance && cameraReady
-                        ? "Camera Ready"
-                        : "Waiting for Camera"}
-                  </strong>
-                  <p>
-                    {showFaceAttendance
-                      ? "Capture a frame to send it to the face-recognition API."
-                      : "Face recognition requires an active session and camera access."}
-                  </p>
 
-                  {showFaceAttendance && (
-                    <button
-                      type="button"
-                      className="attendance-primary-button"
-                      onClick={handleRecognizeFace}
-                      disabled={!cameraReady || recognizingFace}
-                    >
-                      {recognizingFace ? (
-                        <>
-                          <FontAwesomeIcon icon={faSpinner} spin />
-                          Recognizing…
-                        </>
-                      ) : (
-                        <>
-                          <FontAwesomeIcon icon={faUserCheck} />
-                          Capture & Recognize
-                        </>
-                      )}
-                    </button>
+                  {showFaceAttendance && lastRecognizedStudent ? (
+                    <div className="attendance-recognized-card">
+                      <div className="attendance-recognized-avatar">
+                        {getInitials(lastRecognizedStudent.name || lastRecognizedStudent.student_name)}
+                      </div>
+                      <div className="attendance-recognized-info">
+                        <strong>{lastRecognizedStudent.name || lastRecognizedStudent.student_name}</strong>
+                        <span>Enrollment: {lastRecognizedStudent.enrollment_no}</span>
+                        <div className="attendance-recognized-tags">
+                          <span className={`attendance-tag ${lastRecognizedStudent.is_new ? "new" : "existing"}`}>
+                            <FontAwesomeIcon icon={faCircleCheck} />
+                            {lastRecognizedStudent.is_new ? "Present Marked" : "Already Marked"}
+                          </span>
+                          {lastRecognizedStudent.confidence_score && (
+                            <span className="attendance-tag score">
+                              {Math.round(lastRecognizedStudent.confidence_score * 100)}% Match
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="attendance-scanner-idle">
+                      <div className="attendance-recognition-symbol">
+                        <FontAwesomeIcon
+                          icon={recognizingFace ? faSpinner : faUserCheck}
+                          spin={recognizingFace}
+                        />
+                      </div>
+                      <strong>
+                        {recognizingFace
+                          ? "Verifying identity…"
+                          : showFaceAttendance && cameraReady
+                            ? "Camera Active & Scanning"
+                            : "Waiting for Camera"}
+                      </strong>
+                      <p>
+                        {showFaceAttendance
+                          ? scanStatusMessage
+                          : "Activate camera to automatically scan and mark student attendance."}
+                      </p>
+                    </div>
+                  )}
+
+                  {displayedRecentDetections.length > 0 && (
+                    <div className="attendance-recent-stream">
+                      <div className="attendance-recent-title">Recent Recognitions</div>
+                      <div className="attendance-recent-chips">
+                        {displayedRecentDetections.map((item, idx) => (
+                          <div key={item.student_id || idx} className="attendance-recent-chip">
+                            <FontAwesomeIcon icon={faCircleCheck} />
+                            <span>
+                              {item.name ||
+                                item.student_name ||
+                                getStudentName(
+                                  students.find((s) =>
+                                    isSameId(s.student_id, item.student_id)
+                                  )
+                                ) ||
+                                `Student #${item.student_id}`}
+                            </span>
+                            <small>{formatTime(item.marked_at)}</small>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
 
                   {showFaceAttendance && (
-                    <button
-                      type="button"
-                      className="attendance-secondary-button"
-                      onClick={handleCloseFaceAttendance}
-                      disabled={recognizingFace}
-                    >
-                      <FontAwesomeIcon icon={faXmark} />
-                      Stop Camera
-                    </button>
+                    <div className="attendance-scanner-controls">
+                      <button
+                        type="button"
+                        className="attendance-secondary-button"
+                        onClick={() => setAutoScanActive((prev) => !prev)}
+                      >
+                        <FontAwesomeIcon icon={autoScanActive ? faPause : faPlay} />
+                        {autoScanActive ? "Pause" : "Resume"}
+                      </button>
+                      <button
+                        type="button"
+                        className="attendance-primary-button danger"
+                        onClick={handleCloseFaceAttendance}
+                      >
+                        <FontAwesomeIcon icon={faXmark} />
+                        Stop Camera
+                      </button>
+                    </div>
                   )}
 
                   {faceAttendanceError && (
-                    <p className="attendance-error-text" role="alert">
+                    <p className="attendance-error-text" role="alert" style={{ marginTop: "10px" }}>
                       {faceAttendanceError}
                     </p>
                   )}
@@ -1211,7 +1433,7 @@ function Attendance() {
                 <button
                   type="button"
                   className="attendance-outline-button"
-                  onClick={() => loadAttendanceRecords(activeSession)}
+                  onClick={() => loadAttendanceRecords(selectedSession || activeSession)}
                   disabled={recordsLoading}
                 >
                   <FontAwesomeIcon
@@ -1528,13 +1750,6 @@ function Attendance() {
                   </div>
                 ) : (
                   <>
-                    {markAttendanceError && (
-                      <div className="attendance-inline-error" role="alert">
-                        <FontAwesomeIcon icon={faCircleExclamation} />
-                        {markAttendanceError}
-                      </div>
-                    )}
-
                     <div className="attendance-table-wrapper">
                       <table className="attendance-table">
                         <thead>
@@ -1552,12 +1767,6 @@ function Attendance() {
                           {displayStudents.map((student, index) => {
                             const record = attendanceRecordMap.get(
                               String(student.student_id)
-                            );
-                            const hasRecord = Boolean(record);
-                            const isPresent = record?.status === "PRESENT";
-                            const isMarking = isSameId(
-                              markingStudentId,
-                              student.student_id
                             );
 
                             return (
@@ -1584,33 +1793,22 @@ function Attendance() {
                                 <td>{formatTime(record?.marked_at)}</td>
                                 <td>{record?.recognition_method || "N/A"}</td>
                                 <td>
-                                  <button
-                                    type="button"
-                                    className="attendance-outline-button"
-                                    onClick={() =>
-                                      handleMarkAttendance(student.student_id)
-                                    }
-                                    disabled={
-                                      hasRecord ||
-                                      selectedSession.status !== "ACTIVE" ||
-                                      isMarking
-                                    }
-                                  >
-                                    {isMarking ? (
-                                      <FontAwesomeIcon icon={faSpinner} spin />
-                                    ) : isPresent ? (
-                                      <FontAwesomeIcon icon={faCircleCheck} />
-                                    ) : (
-                                      <FontAwesomeIcon icon={faUserCheck} />
-                                    )}
-                                    {isMarking
-                                      ? "Marking…"
-                                      : isPresent
-                                        ? "Present"
-                                        : hasRecord
-                                          ? "Recorded"
-                                          : "Mark Present"}
-                                  </button>
+                                  {!student.has_face_profile ? (
+                                    <button
+                                      type="button"
+                                      className="attendance-outline-button register-face"
+                                      title="Register student face profile for automatic recognition"
+                                      onClick={() => {
+                                        setEnrollingStudent(student);
+                                        startEnrollCamera();
+                                      }}
+                                    >
+                                      <FontAwesomeIcon icon={faUserPlus} />
+                                      Register Face
+                                    </button>
+                                  ) : (
+                                    <span style={{ color: "var(--attendance-muted, #72839e)" }}>—</span>
+                                  )}
                                 </td>
                               </tr>
                             );
@@ -1744,13 +1942,57 @@ function Attendance() {
 
         {scheduleExpanded && (
           <div className="attendance-schedule-pending">
-            <FontAwesomeIcon icon={faCircleInfo} />
-            <strong>API Integration Pending</strong>
-            <p>
-              A schedule API is not currently used by this page. No timetable
-              entries are displayed until a real schedule endpoint is
-              available.
-            </p>
+            {timetableLoading ?(
+              <p>Loading timetable...</p>
+            ) : timetableError ?(
+              <div className="attendance-schedule-pending">
+                <FontAwesomeIcon icon={faCircleExclamation} />
+                <p>{timetableError}</p>
+              </div>
+            ) :(
+              (() => {
+                const dayNames = [
+                  "Sunday",
+                  "Monday",
+                  "Tuesday",
+                  "Wednesday",
+                  "Thrusday",
+                  "Friday",
+                  "Saturday",
+                ];
+                const today = dayNames[new DataTransfer().getDay()];
+                const todayEntries = timetableEntries.filter(
+                  (entry) =>
+                    String(entry.day_of_week || "").trim().toLowerCase()===
+                  today.toLowerCase()
+                );
+                if (todayEntries.length == 0){
+                  return <p>No timetable entries found for {today}.</p>;
+                }
+                return (
+                  <div className="attendance-schedule-list">
+                    {todayEntries.map((entry) => (
+                      <div
+                      className = "attendance-schedule-item"
+                      key = {entry.timetable_entry_id}
+                      >
+                        <strong>
+                          {entry.course_code} - {entry.course_name}
+                        </strong>
+                        <p>
+                          {formatTime(entry.start_time)} -{" "}
+                          {formatTime(entry.end_time)}
+                        </p>
+                        <p>
+                          Section: {entry.section || "N/A"} . Room:{" "}
+                          {entry.room || "N/A"}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()
+            )}
           </div>
         )}
       </section>
@@ -1770,16 +2012,17 @@ function Attendance() {
       </section>
     </aside>
 
-    {showFaceAttendance && (
+    {enrollingStudent && (
       <div
         className="attendance-modal-backdrop"
         role="presentation"
         onMouseDown={(event) => {
           if (
             event.target === event.currentTarget &&
-            !recognizingFace
+            !enrollSubmitting
           ) {
-            handleCloseFaceAttendance();
+            stopEnrollCamera();
+            setEnrollingStudent(null);
           }
         }}
       >
@@ -1787,21 +2030,27 @@ function Attendance() {
           className="attendance-modal"
           role="dialog"
           aria-modal="true"
-          aria-labelledby="face-attendance-title"
+          aria-labelledby="enroll-student-face-title"
+          onMouseDown={(e) => e.stopPropagation()}
         >
           <div className="attendance-modal-header">
             <div>
-              <h2 id="face-attendance-title">Face Attendance</h2>
+              <span className="attendance-eyebrow">FACE REGISTRATION</span>
+              <h2 id="enroll-student-face-title">
+                Register Face: {getStudentName(enrollingStudent)}
+              </h2>
               <p>
-                Position one student in front of the camera and capture their
-                face.
+                Enrollment: {enrollingStudent.enrollment_no || "N/A"}
               </p>
             </div>
             <button
               type="button"
               className="attendance-modal-close"
-              onClick={handleCloseFaceAttendance}
-              disabled={recognizingFace}
+              onClick={() => {
+                stopEnrollCamera();
+                setEnrollingStudent(null);
+              }}
+              disabled={enrollSubmitting}
               aria-label="Close"
             >
               <FontAwesomeIcon icon={faXmark} />
@@ -1809,40 +2058,70 @@ function Attendance() {
           </div>
 
           <div className="attendance-modal-body">
-            <div className="attendance-camera-container">
+            <div className="attendance-camera-scanner-frame" style={{ minHeight: "260px" }}>
               <video
-                ref={videoRef}
+                ref={enrollVideoRef}
                 autoPlay
                 playsInline
                 muted
                 className="attendance-camera-video"
               />
               <canvas
-                ref={canvasRef}
-                className="attendance-camera-canvas"
+                ref={enrollCanvasRef}
+                style={{ display: "none" }}
                 aria-hidden="true"
               />
+              <div className="attendance-scanner-viewfinder">
+                <div className="attendance-scanner-corner top-left" />
+                <div className="attendance-scanner-corner top-right" />
+                <div className="attendance-scanner-corner bottom-left" />
+                <div className="attendance-scanner-corner bottom-right" />
+              </div>
+              <span className="attendance-live-badge">
+                <span /> REGISTRATION CAMERA
+              </span>
             </div>
 
-            {faceAttendanceError && (
-              <div className="attendance-session-pending" role="alert">
+            {enrollError && (
+              <div className="attendance-session-pending" role="alert" style={{ marginTop: "12px" }}>
                 <div className="attendance-pending-dot">
                   <FontAwesomeIcon icon={faCircleExclamation} />
                 </div>
                 <div>
-                  <strong>Face recognition unavailable</strong>
-                  <p>{faceAttendanceError}</p>
+                  <strong>Face Enrollment Error</strong>
+                  <p>{enrollError}</p>
                 </div>
               </div>
             )}
 
-            {!cameraReady && !faceAttendanceError && (
+            {enrollSuccess && (
+              <div
+                className="attendance-session-pending"
+                role="status"
+                style={{
+                  marginTop: "12px",
+                  borderColor: "#10b981",
+                  background: "#ecfdf5",
+                  color: "#065f46",
+                }}
+              >
+                <div className="attendance-pending-dot" style={{ background: "#d1fae5", color: "#10b981" }}>
+                  <FontAwesomeIcon icon={faCircleCheck} />
+                </div>
+                <div>
+                  <strong>Success</strong>
+                  <p>{enrollSuccess}</p>
+                </div>
+              </div>
+            )}
+
+            {!enrollCameraReady && !enrollError && (
               <p className="attendance-camera-help">Starting camera…</p>
             )}
 
-            {cameraReady && !faceAttendanceError && (
+            {enrollCameraReady && !enrollError && !enrollSuccess && (
               <p className="attendance-camera-help">
-                Camera ready. Ensure exactly one student is visible.
+                Position student directly in front of camera and click "Capture & Register Face".
               </p>
             )}
           </div>
@@ -1851,29 +2130,22 @@ function Attendance() {
             <button
               type="button"
               className="attendance-secondary-button"
-              onClick={handleCloseFaceAttendance}
-              disabled={recognizingFace}
+              onClick={() => {
+                stopEnrollCamera();
+                setEnrollingStudent(null);
+              }}
+              disabled={enrollSubmitting}
             >
-              <FontAwesomeIcon icon={faXmark} />
               Cancel
             </button>
             <button
               type="button"
               className="attendance-primary-button"
-              onClick={handleRecognizeFace}
-              disabled={!cameraReady || recognizingFace}
+              onClick={handleCaptureAndEnroll}
+              disabled={!enrollCameraReady || enrollSubmitting}
             >
-              {recognizingFace ? (
-                <>
-                  <FontAwesomeIcon icon={faSpinner} spin />
-                  Recognizing…
-                </>
-              ) : (
-                <>
-                  <FontAwesomeIcon icon={faUserCheck} />
-                  Capture & Recognize
-                </>
-              )}
+              <FontAwesomeIcon icon={enrollSubmitting ? faSpinner : faCamera} spin={enrollSubmitting} />
+              {enrollSubmitting ? "Registering…" : "Capture & Register Face"}
             </button>
           </div>
         </div>

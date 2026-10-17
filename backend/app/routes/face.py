@@ -1,12 +1,14 @@
+import base64
 import cv2
 import numpy as np
 
 from flask import Blueprint, jsonify, request
+from flask_jwt_extended import get_jwt, get_jwt_identity
 
 from app.extensions import db
 from app.models import FaceProfile, Student
 from app.services.face_service import FaceService
-from app.utils.auth import admin_required
+from app.utils.auth import role_required
 
 
 face_bp = Blueprint(
@@ -21,12 +23,25 @@ face_service = FaceService()
 FACE_MODEL_VERSION = "sface_2021dec"
 
 
-def _decode_image(file_storage):
-    """Decode an uploaded image into an OpenCV BGR image."""
-    if file_storage is None:
+def _decode_image(image_input):
+    """Decode an uploaded image (FileStorage, bytes, or base64 string) into an OpenCV BGR image."""
+    if image_input is None:
         return None
 
-    image_bytes = file_storage.read()
+    if isinstance(image_input, str):
+        b64_str = image_input
+        if "base64," in b64_str:
+            b64_str = b64_str.split("base64,")[1]
+        try:
+            image_bytes = base64.b64decode(b64_str)
+        except Exception:
+            return None
+    elif hasattr(image_input, "read"):
+        image_bytes = image_input.read()
+    elif isinstance(image_input, (bytes, bytearray)):
+        image_bytes = image_input
+    else:
+        return None
 
     if not image_bytes:
         return None
@@ -43,11 +58,12 @@ def _decode_image(file_storage):
 
 
 @face_bp.post("/enroll")
-@admin_required
+@role_required("ADMIN", "FACULTY", "STUDENT")
 def enroll_face():
     """Enroll or replace a student's face profile."""
+    json_data = request.get_json(silent=True) or {}
 
-    student_id = request.form.get("student_id")
+    student_id = request.form.get("student_id") or json_data.get("student_id")
 
     if not student_id:
         return jsonify({
@@ -63,6 +79,18 @@ def enroll_face():
             "message": "student_id must be an integer",
         }), 400
 
+    # Authorization check for student role
+    claims = get_jwt()
+    user_role = claims.get("role")
+    user_id = int(get_jwt_identity())
+    if user_role == "STUDENT":
+        current_student = Student.query.filter_by(user_id=user_id).first()
+        if not current_student or current_student.student_id != student_id:
+            return jsonify({
+                "success": False,
+                "message": "You can only enroll your own face",
+            }), 403
+
     student = db.session.get(Student, student_id)
 
     if not student:
@@ -71,15 +99,19 @@ def enroll_face():
             "message": "Student not found",
         }), 404
 
-    image_file = request.files.get("image")
+    image_input = (
+        request.files.get("image")
+        or request.form.get("image")
+        or json_data.get("image")
+    )
 
-    if image_file is None:
+    if image_input is None:
         return jsonify({
             "success": False,
             "message": "image is required",
         }), 400
 
-    image = _decode_image(image_file)
+    image = _decode_image(image_input)
     if image is not None:
         print(
             "[FACE DEBUG]",
@@ -163,7 +195,7 @@ def enroll_face():
     }), 201
 
 @face_bp.get("/status/<int:student_id>")
-@admin_required
+@role_required("ADMIN", "FACULTY", "STUDENT")
 def face_registration_status(student_id):
     """Return the active face registration status for a student."""
     student = db.session.get(Student, student_id)

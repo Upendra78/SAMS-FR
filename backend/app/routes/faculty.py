@@ -296,19 +296,28 @@ def get_faculty_students():
             "message": "Faculty profile not found",
         }), 404
 
-    enrollments = (
+    offering_id_filter = request.args.get("offering_id", type=int)
+
+    query = (
         Enrollment.query
         .join(CourseOffering, Enrollment.offering_id == CourseOffering.offering_id)
         .filter(CourseOffering.faculty_id == faculty.faculty_id)
-        .all()
     )
+
+    if offering_id_filter:
+        query = query.filter(Enrollment.offering_id == offering_id_filter)
+
+    enrollments = query.all()
 
     students = {}
 
     for enrollment in enrollments:
         student = enrollment.student
+        has_face = any(fp.is_active for fp in student.face_profiles)
 
         if student.student_id in students:
+            if enrollment.offering_id not in students[student.student_id]["offering_ids"]:
+                students[student.student_id]["offering_ids"].append(enrollment.offering_id)
             continue
 
         students[student.student_id] = {
@@ -320,6 +329,10 @@ def get_faculty_students():
             "semester": student.semester,
             "section": student.section,
             "academic_year": student.academic_year,
+            "offering_id": enrollment.offering_id,
+            "offering_ids": [enrollment.offering_id],
+            "has_face_profile": has_face,
+            "face_registered": has_face,
             "department": {
                 "department_id": student.department.department_id,
                 "department_name": student.department.department_name,
