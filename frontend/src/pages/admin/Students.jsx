@@ -17,8 +17,9 @@ import {
   faUsers,
   faXmark,
 } from "@fortawesome/free-solid-svg-icons";
-import { faTrash } from "@fortawesome/free-solid-svg-icons";
+
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { Eye, Pencil, Trash2 } from "lucide-react";
 
 import {
   createAdminStudent,
@@ -27,6 +28,7 @@ import {
   getAdminDepartments,
   deleteAdminStudent,
   getAdminBatches,
+  updateAdminStudent,
 } from "../../services/adminService";
 
 import {
@@ -118,6 +120,21 @@ function Student() {
   const [selectedStudent, setSelectedStudent] =
     useState(null);
 
+const [editingStudent, setEditingStudent] = useState(null);
+
+const [editStudentForm, setEditStudentForm] = useState({
+  enrollment_no: "",
+  semester: "",
+  section: "",
+  academic_year: "",
+  department_id: "",
+});
+
+const [editStudentLoading, setEditStudentLoading] = useState(false);
+const [editStudentError, setEditStudentError] = useState("");
+const [editStudentSuccess, setEditStudentSuccess] = useState("");
+
+
   // =========================================================
   // CREATE STUDENT MODAL
   // =========================================================
@@ -148,7 +165,7 @@ function Student() {
   // FACE ENROLLMENT MODAL
   // =========================================================
 
-  const [showFaceEnrollment, setShowFaceEnrollment] =
+  const [showFaceRegistrationView, setShowFaceRegistrationView] =
     useState(false);
 
   const [
@@ -822,13 +839,113 @@ function Student() {
   // =========================================================
   // STUDENT DETAILS HANDLERS
   // =========================================================
-
   function handleViewStudent(student) {
     setSelectedStudent(student);
   }
 
   function handleCloseStudent() {
     setSelectedStudent(null);
+    setShowFaceRegistrationView(false);
+    setFaceEnrollmentStudent(null);
+    setFaceCaptureBlob(null);
+    setFaceEnrollmentError("");
+    setFaceEnrollmentSuccess("");
+  }
+
+  function handleOpenEditStudent(student) {
+    setEditStudentError("");
+    setEditStudentSuccess("");
+
+    setEditStudentForm({
+      enrollment_no: student.enrollment_no ?? "",
+      semester: String(student.semester ?? ""),
+      section: student.section ?? "",
+      academic_year: student.academic_year ?? "",
+      department_id: String(
+        student.department_id ??
+        student.department?.department_id ??
+        ""
+      ),
+    });
+
+    setEditingStudent(student);
+  }
+
+  function handleCloseEditStudent() {
+    if (editStudentLoading) return;
+
+    setEditingStudent(null);
+    setEditStudentError("");
+    setEditStudentSuccess("");
+  }
+
+  function handleEditStudentChange(event) {
+    const { name, value } = event.target;
+
+    setEditStudentForm((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  }
+
+  async function handleSaveStudent(event) {
+    event.preventDefault();
+
+    if (!editingStudent) return;
+
+    setEditStudentError("");
+    setEditStudentSuccess("");
+
+    const semester = Number(editStudentForm.semester);
+    const departmentId = Number(editStudentForm.department_id);
+
+    if (
+      !editStudentForm.enrollment_no.trim() ||
+      !editStudentForm.section.trim() ||
+      !editStudentForm.academic_year.trim() ||
+      !Number.isInteger(semester) ||
+      semester < 1 ||
+      !Number.isInteger(departmentId) ||
+      departmentId < 1
+    ) {
+      setEditStudentError(
+        "Enter a valid roll number, semester, section, academic year, and department."
+      );
+      return;
+    }
+
+    setEditStudentLoading(true);
+
+    try {
+      const response = await updateAdminStudent(
+        editingStudent.student_id,
+        {
+          enrollment_no: editStudentForm.enrollment_no.trim(),
+          semester,
+          section: editStudentForm.section.trim(),
+          academic_year: editStudentForm.academic_year.trim(),
+          department_id: departmentId,
+        }
+      );
+
+      if (!response?.success) {
+        throw new Error(response?.message || "Unable to update student.");
+      }
+
+      await fetchStudentData();
+
+      setEditingStudent(null);
+      setEditStudentSuccess("");
+      setSelectedStudent(null);
+    } catch (requestError) {
+      setEditStudentError(
+        requestError?.response?.data?.message ||
+        requestError?.message ||
+        "Unable to update student."
+      );
+    } finally {
+      setEditStudentLoading(false);
+    }
   }
 
   async function handleDeleteStudent(student) {
@@ -879,19 +996,7 @@ function Student() {
     setFaceCaptureBlob(null);
     setFaceEnrollmentError("");
     setFaceEnrollmentSuccess("");
-    setShowFaceEnrollment(true);
-  }
-
-  function handleCloseFaceEnrollment() {
-    if (faceEnrollmentLoading) {
-      return;
-    }
-
-    setShowFaceEnrollment(false);
-    setFaceEnrollmentStudent(null);
-    setFaceCaptureBlob(null);
-    setFaceEnrollmentError("");
-    setFaceEnrollmentSuccess("");
+    setShowFaceRegistrationView(true);
   }
 
   // =========================================================
@@ -1303,10 +1408,10 @@ function Student() {
               <table className="student-table">
                 <thead>
                   <tr>
-                    <th>Student</th>
+                    <th>Student Id</th>
                     <th>Email</th>
                     <th>
-                      Enrollment No.
+                      Roll No.
                     </th>
                     <th>
                       Department
@@ -1419,30 +1524,36 @@ function Student() {
                           </td>
 
                           <td>
-                            <div className="student-action-buttons">
+                            <div className="student-row-actions">
                               <button
                                 type="button"
-                                className="student-view-button"
+                                className="student-icon-button student-details-icon"
                                 onClick={() => handleViewStudent(student)}
+                                title="View student details and face registration"
+                                aria-label={`View student details for ${student.name}`}
+
                               >
-                                View
+                                <Eye size={18} strokeWidth={2} />
+                              </button>
+                              <button
+                                type="button"
+                                className="student-icon-button student-edit-icon"
+                                onClick={() => handleOpenEditStudent(student)}
+                                title="Edit student"
+                                aria-label={`Edit student ${student.name}`}
+                              >
+                                <Pencil size={18} strokeWidth={2} />
                               </button>
 
                               <button
                                 type="button"
-                                className="student-delete-button"
+                                className="student-icon-button student-delete-icon"
                                 onClick={() => handleDeleteStudent(student)}
-                                disabled={deletingStudentId === student.student_id}
                                 title="Delete student"
+                                aria-label={`Delete student ${student.name}`}
+                                disabled={deletingStudentId === student.student_id}
                               >
-                                {deletingStudentId === student.student_id
-                                  ? "Deleting..."
-                                  : (
-                                    <>
-                                      <FontAwesomeIcon icon={faTrash} />
-                                      Delete
-                                    </>
-                                  )}
+                                <Trash2 size={18} strokeWidth={2} />
                               </button>
                             </div>
                           </td>
@@ -1634,7 +1745,7 @@ function Student() {
               <div className="student-form-grid">
                 <div className="student-form-field">
                   <label htmlFor="create-student-user">
-                    Student User *
+                    Student User
                   </label>
 
                   <select
@@ -1691,7 +1802,7 @@ function Student() {
 
                 <div className="student-form-field">
                   <label htmlFor="create-student-enrollment">
-                    Enrollment Number *
+                    Roll Number
                   </label>
 
                   <input
@@ -1713,7 +1824,7 @@ function Student() {
 
                 <div className="student-form-field">
                   <label htmlFor="create-student-semester">
-                    Semester *
+                    Semester
                   </label>
 
                   <input
@@ -1736,7 +1847,7 @@ function Student() {
 
                 <div className="student-form-field">
                   <label htmlFor="create-student-section">
-                    Section *
+                    Section
                   </label>
 
                   <input
@@ -1758,7 +1869,7 @@ function Student() {
 
                 <div className="student-form-field">
                   <label htmlFor="create-student-academic-year">
-                    Academic Year *
+                    Academic Year
                   </label>
 
                   <input
@@ -1781,7 +1892,7 @@ function Student() {
 
                 <div className="student-form-field">
                   <label htmlFor="create-student-department">
-                    Department *
+                    Department
                   </label>
 
                   <select
@@ -1868,7 +1979,7 @@ function Student() {
                 </div>
               )}
 
-              <div className="student-modal-footer">
+              <div className="student-modal-footer face-enrollment-footer">
                 <button
                   type="button"
                   className="student-secondary-button"
@@ -1915,6 +2026,149 @@ function Student() {
       {/* =====================================================
           STUDENT DETAILS MODAL
       ====================================================== */}
+
+      {editingStudent && (
+        <div
+          className="student-modal-overlay"
+          role="presentation"
+          onClick={handleCloseEditStudent}
+        >
+          <div
+            className="student-modal student-edit-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-student-title"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="student-modal-header">
+              <div>
+                <h2 id="edit-student-title">Edit Student</h2>
+                <p>Student ID: {editingStudent.student_id}</p>
+              </div>
+
+              <button
+                type="button"
+                className="student-modal-close"
+                onClick={handleCloseEditStudent}
+                disabled={editStudentLoading}
+                aria-label="Close edit student form"
+              >
+                ×
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveStudent}>
+              <div className="student-form-grid">
+                <div className="student-form-field">
+                  <label htmlFor="edit-enrollment-no">Roll Number</label>
+                  <input
+                    id="edit-enrollment-no"
+                    name="enrollment_no"
+                    value={editStudentForm.enrollment_no}
+                    onChange={handleEditStudentChange}
+                    disabled={editStudentLoading}
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="edit-semester">Semester</label>
+                  <input
+                    id="edit-semester"
+                    name="semester"
+                    type="number"
+                    min="1"
+                    value={editStudentForm.semester}
+                    onChange={handleEditStudentChange}
+                    disabled={editStudentLoading}
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="edit-section">Section</label>
+                  <input
+                    id="edit-section"
+                    name="section"
+                    value={editStudentForm.section}
+                    onChange={handleEditStudentChange}
+                    disabled={editStudentLoading}
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="edit-academic-year">Academic Year</label>
+                  <input
+                    id="edit-academic-year"
+                    name="academic_year"
+                    value={editStudentForm.academic_year}
+                    onChange={handleEditStudentChange}
+                    disabled={editStudentLoading}
+                    required
+                  />
+                </div>
+
+                <div className="student-form-field">
+                  <label htmlFor="edit-department">Department</label>
+                  <select
+                    id="edit-department"
+                    name="department_id"
+                    value={editStudentForm.department_id}
+                    onChange={handleEditStudentChange}
+                    disabled={editStudentLoading || departmentsLoading}
+                    required
+                  >
+                    <option value="">Select department</option>
+                    {departmentOptions.map((item) => (
+                      <option
+                        key={item.department_id}
+                        value={item.department_id}
+                      >
+                        {item.department_name}
+                        {item.department_code
+                          ? ` (${item.department_code})`
+                          : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {editStudentError && (
+                <p role="alert" className="student-form-error">
+                  {editStudentError}
+                </p>
+              )}
+
+              {editStudentSuccess && (
+                <p role="status" className="student-form-success">
+                  {editStudentSuccess}
+                </p>
+              )}
+
+              <div className="student-modal-footer">
+                <button
+                  type="button"
+                  className="student-secondary-button"
+                  onClick={handleCloseEditStudent}
+                  disabled={editStudentLoading}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="student-primary-button"
+                  disabled={editStudentLoading}
+                >
+                  {editStudentLoading ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {selectedStudent && (
         <div
@@ -1966,140 +2220,67 @@ function Student() {
               </button>
             </div>
 
+        {!showFaceRegistrationView ? (
+          <>
             <div className="student-details-grid">
               <article className="student-detail-card">
-                <span>
-                  Student ID
-                </span>
-
-                <strong>
-                  {
-                    selectedStudent.student_id ??
-                    "N/A"
-                  }
-                </strong>
+                <span>Student ID</span>
+                <strong>{selectedStudent.student_id ?? "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
                 <span>User ID</span>
-
-                <strong>
-                  {
-                    selectedStudent.user_id ??
-                    "N/A"
-                  }
-                </strong>
+                <strong>{selectedStudent.user_id ?? "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
                 <span>Name</span>
-
-                <strong>
-                  {
-                    selectedStudent.name ||
-                    "N/A"
-                  }
-                </strong>
+                <strong>{selectedStudent.name || "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
                 <span>Email</span>
-
-                <strong>
-                  {
-                    selectedStudent.email ||
-                    "N/A"
-                  }
-                </strong>
+                <strong>{selectedStudent.email || "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
-                <span>
-                  Enrollment Number
-                </span>
-
-                <strong>
-                  {
-                    selectedStudent.enrollment_no ||
-                    "N/A"
-                  }
-                </strong>
+                <span>Roll Number</span>
+                <strong>{selectedStudent.enrollment_no || "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
-                <span>
-                  Department
-                </span>
-
-                <strong>
-                  {
-                    selectedStudent.department_name ||
-                    "N/A"
-                  }
-                </strong>
+                <span>Department</span>
+                <strong>{selectedStudent.department_name || "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
-                <span>
-                  Department Code
-                </span>
-
-                <strong>
-                  {
-                    selectedStudent.department_code ||
-                    "N/A"
-                  }
-                </strong>
+                <span>Department Code</span>
+                <strong>{selectedStudent.department_code || "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
-                <span>
-                  Semester
-                </span>
-
+                <span>Semester</span>
                 <strong>
-                  {selectedStudent.semester !==
-                  undefined
+                  {selectedStudent.semester !== undefined
                     ? `Semester ${selectedStudent.semester}`
                     : "N/A"}
                 </strong>
               </article>
 
               <article className="student-detail-card">
-                <span>
-                  Section
-                </span>
-
-                <strong>
-                  {
-                    selectedStudent.section ||
-                    "N/A"
-                  }
-                </strong>
+                <span>Section</span>
+                <strong>{selectedStudent.section || "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
-                <span>
-                  Academic Year
-                </span>
-
-                <strong>
-                  {
-                    selectedStudent.academic_year ||
-                    "N/A"
-                  }
-                </strong>
+                <span>Academic Year</span>
+                <strong>{selectedStudent.academic_year || "N/A"}</strong>
               </article>
 
               <article className="student-detail-card">
-                <span>
-                  Face Profile
-                </span>
-
+                <span>Face Profile</span>
                 <strong>
-                  {getFaceProfileStatus(
-                    selectedStudent.student_id,
-                  )}
+                  {getFaceProfileStatus(selectedStudent.student_id)}
                 </strong>
               </article>
             </div>
@@ -2107,53 +2288,37 @@ function Student() {
             <div className="student-face-management-section">
               <div className="student-face-management-header">
                 <div>
-                  <strong>
-                    Face Recognition
-                  </strong>
-
-                  <span>
-                    Register the student
-                    using the live camera.
-                  </span>
+                  <strong>Face Recognition</strong>
+                  <span>Register the student using the live camera.</span>
                 </div>
 
                 <span
                   className={`student-face-status ${
-                    getFaceProfileStatus(
-                      selectedStudent.student_id,
-                    ) ===
+                    getFaceProfileStatus(selectedStudent.student_id) ===
                     "Registered"
                       ? "student-face-status-registered"
                       : "student-face-status-not-registered"
                   }`}
                 >
-                  {getFaceProfileStatus(
-                    selectedStudent.student_id,
-                  )}
+                  {getFaceProfileStatus(selectedStudent.student_id)}
                 </span>
               </div>
 
               <div className="student-face-management-content">
                 <div className="student-face-management-icon">
-                  <FontAwesomeIcon
-                    icon={faCamera}
-                  />
+                  <FontAwesomeIcon icon={faCamera} />
                 </div>
 
                 <div>
                   <strong>
-                    {getFaceProfileStatus(
-                      selectedStudent.student_id,
-                    ) ===
+                    {getFaceProfileStatus(selectedStudent.student_id) ===
                     "Registered"
                       ? "Face profile is registered"
                       : "No face profile registered"}
                   </strong>
 
                   <p>
-                    {getFaceProfileStatus(
-                      selectedStudent.student_id,
-                    ) ===
+                    {getFaceProfileStatus(selectedStudent.student_id) ===
                     "Registered"
                       ? "You can replace the existing face profile using the live camera."
                       : "Register the student's face using the live camera to enable face recognition attendance."}
@@ -2163,19 +2328,10 @@ function Student() {
                 <button
                   type="button"
                   className="student-primary-button"
-                  onClick={() =>
-                    handleOpenFaceEnrollment(
-                      selectedStudent,
-                    )
-                  }
+                  onClick={() => handleOpenFaceEnrollment(selectedStudent)}
                 >
-                  <FontAwesomeIcon
-                    icon={faCamera}
-                  />
-
-                  {getFaceProfileStatus(
-                    selectedStudent.student_id,
-                  ) ===
+                  <FontAwesomeIcon icon={faCamera} />
+                  {getFaceProfileStatus(selectedStudent.student_id) ===
                   "Registered"
                     ? "Replace Face"
                     : "Register Face"}
@@ -2217,231 +2373,124 @@ function Student() {
               <button
                 type="button"
                 className="student-secondary-button"
-                onClick={
-                  handleCloseStudent
-                }
+                onClick={handleCloseStudent}
               >
                 Close
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </>
+        ) : (
+          <div className="student-face-registration-view">
+            <div className="student-modal-header">
+              <div className="student-modal-profile">
+                <div className="student-modal-avatar">
+                  <FontAwesomeIcon icon={faCamera} />
+                </div>
 
-      {/* =====================================================
-          LIVE FACE ENROLLMENT MODAL
-      ====================================================== */}
+                <div>
+                  <span>Face Recognition</span>
+                  <h2>
+                    {getFaceProfileStatus(selectedStudent.student_id) ===
+                    "Registered"
+                      ? "Replace Face"
+                      : "Register Face"}
+                  </h2>
+                </div>
+              </div>
 
-      {showFaceEnrollment &&
-        faceEnrollmentStudent && (
-          <div
-            className="student-modal-overlay"
-            role="presentation"
-            onClick={handleCloseFaceEnrollment}
-          >
-            <div
-              className="student-modal student-face-enrollment-modal"
-              role="dialog"
-              aria-modal="true"
-              aria-labelledby="face-enrollment-modal-title"
-              onClick={(event) =>
-                event.stopPropagation()
-              }
+              <button
+                type="button"
+                className="student-modal-close"
+                onClick={() => {
+                  setShowFaceRegistrationView(false);
+                  setFaceCaptureBlob(null);
+                  setFaceEnrollmentError("");
+                  setFaceEnrollmentSuccess("");
+                }}
+                aria-label="Back to student details"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <div className="student-form-info">
+              Registering face for <strong>{selectedStudent.name}</strong>
+              {" — Student ID "}
+              {selectedStudent.student_id}
+            </div>
+
+            <form
+              className="student-create-form"
+              onSubmit={handleEnrollFace}
             >
-              <div className="student-modal-header">
-                <div className="student-modal-profile">
-                  <div className="student-modal-avatar">
-                    <FontAwesomeIcon
-                      icon={faCamera}
-                    />
-                  </div>
-
+              <div className="student-live-camera-section">
+                <div className="student-live-camera-header">
                   <div>
+                    <strong>Live Camera</strong>
                     <span>
-                      Face Recognition
+                      Position exactly one face inside the camera frame.
                     </span>
-
-                    <h2 id="face-enrollment-modal-title">
-                      {getFaceProfileStatus(
-                        faceEnrollmentStudent.student_id,
-                      ) === "Registered"
-                        ? "Replace Face"
-                        : "Register Face"}
-                    </h2>
                   </div>
                 </div>
 
+                <LiveFaceCapture
+                  onCapture={handleFaceCapture}
+                  onRetake={() => {
+                    setFaceCaptureBlob(null);
+                    setFaceEnrollmentError("");
+                    setFaceEnrollmentSuccess("");
+                  }}
+                  disabled={faceEnrollmentLoading}
+                  footerAction={(
+                    <button
+                      type="submit"
+                      className="student-primary-button"
+                      disabled={faceEnrollmentLoading || !faceCaptureBlob}
+                    >
+                      <FontAwesomeIcon
+                        icon={faceEnrollmentLoading ? faSpinner : faCamera}
+                        spin={faceEnrollmentLoading}
+                      />
+                      {faceEnrollmentLoading ? "Registering..." : "Register Face"}
+                    </button>
+                  )}
+                />
+              </div>
+
+              {faceEnrollmentError && (
+                <div className="student-form-error">
+                  {faceEnrollmentError}
+                </div>
+              )}
+
+              {faceEnrollmentSuccess && (
+                <div className="student-form-success">
+                  {faceEnrollmentSuccess}
+                </div>
+              )}
+
+              <div className="student-modal-footer">
                 <button
                   type="button"
-                  className="student-modal-close"
-                  onClick={
-                    handleCloseFaceEnrollment
-                  }
-                  disabled={
-                    faceEnrollmentLoading
-                  }
-                  aria-label="Close face enrollment"
+                  className="student-secondary-button"
+                  onClick={() => {
+                    setShowFaceRegistrationView(false);
+                    setFaceCaptureBlob(null);
+                    setFaceEnrollmentError("");
+                    setFaceEnrollmentSuccess("");
+                  }}
+                  disabled={faceEnrollmentLoading}
                 >
-                  <FontAwesomeIcon
-                    icon={faXmark}
-                  />
+                  Back to details
                 </button>
               </div>
-
-              <div className="student-form-info">
-                <FontAwesomeIcon
-                  icon={faCircleInfo}
-                />
-
-                <span>
-                  Registering face for{" "}
-                  <strong>
-                    {faceEnrollmentStudent.name}
-                  </strong>{" "}
-                  — Student ID{" "}
-                  <strong>
-                    {
-                      faceEnrollmentStudent.student_id
-                    }
-                  </strong>
-                  .
-                </span>
-              </div>
-
-              <form
-                className="student-create-form"
-                onSubmit={handleEnrollFace}
-              >
-                <div className="student-live-camera-section">
-                  <div className="student-live-camera-header">
-                    <div>
-                      <strong>
-                        Live Camera
-                      </strong>
-
-                      <span>
-                        Position exactly one face
-                        inside the camera frame.
-                      </span>
-                    </div>
-                  </div>
-
-                  <LiveFaceCapture
-                    onCapture={
-                      handleFaceCapture
-                    }
-                    disabled={
-                      faceEnrollmentLoading
-                    }
-                  />
-                </div>
-
-                {faceEnrollmentError && (
-                  <div
-                    className="student-form-error"
-                    role="alert"
-                  >
-                    <FontAwesomeIcon
-                      icon={
-                        faCircleExclamation
-                      }
-                    />
-
-                    <span>
-                      {faceEnrollmentError}
-                    </span>
-                  </div>
-                )}
-
-                {faceEnrollmentSuccess && (
-                  <div
-                    className="student-form-success"
-                    role="status"
-                  >
-                    <FontAwesomeIcon
-                      icon={faCircleInfo}
-                    />
-
-                    <span>
-                      {faceEnrollmentSuccess}
-                    </span>
-                  </div>
-                )}
-
-                <div className="student-face-guidelines">
-                  <strong>
-                    Face registration requirements
-                  </strong>
-
-                  <ul>
-                    <li>
-                      Use the live camera to capture
-                      the student's face.
-                    </li>
-
-                    <li>
-                      Keep exactly one face inside
-                      the camera frame.
-                    </li>
-
-                    <li>
-                      Face the camera directly.
-                    </li>
-
-                    <li>
-                      Avoid heavy blur, darkness or
-                      face obstruction.
-                    </li>
-
-                    <li>
-                      The backend will validate and
-                      process the captured face.
-                    </li>
-                  </ul>
-                </div>
-
-                <div className="student-modal-footer">
-                  <button
-                    type="button"
-                    className="student-secondary-button"
-                    onClick={
-                      handleCloseFaceEnrollment
-                    }
-                    disabled={
-                      faceEnrollmentLoading
-                    }
-                  >
-                    Close
-                  </button>
-
-                  <button
-                    type="submit"
-                    className="student-primary-button"
-                    disabled={
-                      faceEnrollmentLoading ||
-                      !faceCaptureBlob
-                    }
-                  >
-                    <FontAwesomeIcon
-                      icon={
-                        faceEnrollmentLoading
-                          ? faSpinner
-                          : faCamera
-                      }
-                      spin={
-                        faceEnrollmentLoading
-                      }
-                    />
-
-                    {faceEnrollmentLoading
-                      ? "Registering..."
-                      : "Register Face"}
-                  </button>
-                </div>
-              </form>
-            </div>
+            </form>
           </div>
         )}
+        </div>
+      </div>
+    )}
+
     </section>
   );
 }

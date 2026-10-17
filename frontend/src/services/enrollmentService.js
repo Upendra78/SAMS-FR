@@ -57,18 +57,7 @@ export async function previewGroupEnrollment(
  *
  * Do not call until the preview has been checked and confirmed.
  */
-export async function bulkEnrollGroup(
-  groupData,
-  offeringIds
-) {
-  const selectedIds = Array.isArray(offeringIds)
-    ? offeringIds
-    : groupData.offering_ids;
-
-  if (!Array.isArray(selectedIds) || selectedIds.length === 0) {
-    throw new Error("Select at least one course offering.");
-  }
-
+export async function bulkEnrollGroup(groupData) {
   const response = await api.post(
     "/admin/enrollments/group-bulk",
     {
@@ -76,7 +65,6 @@ export async function bulkEnrollGroup(
       academic_year: groupData.academic_year,
       semester: Number(groupData.semester),
       section: groupData.section,
-      offering_ids: selectedIds.map(Number),
     }
   );
 

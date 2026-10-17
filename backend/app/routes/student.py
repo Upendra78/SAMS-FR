@@ -112,12 +112,20 @@ def get_student_courses():
             "section": offering.section,
             "academic_year": offering.academic_year,
             "room": offering.room,
-            "faculty": {
-                "faculty_id": offering.faculty.faculty_id,
-                "name": offering.faculty.user.name,
-                "employee_id": offering.faculty.employee_id,
-                "designation": offering.faculty.designation,
-            },
+            "faculty": (
+                {
+                    "faculty_id": offering.faculty.faculty_id,
+                    "name": (
+                        offering.faculty.user.name
+                        if offering.faculty.user
+                        else None
+                    ),
+                    "employee_id": offering.faculty.employee_id,
+                    "designation": offering.faculty.designation,
+                }
+                if offering.faculty
+                else None
+            ),
         })
 
     return jsonify({

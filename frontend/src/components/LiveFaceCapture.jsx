@@ -222,6 +222,8 @@ function getScoreMessage(
 
 function LiveFaceCapture({
   onCapture,
+  onRetake,
+  footerAction,
   disabled = false,
 }) {
   const videoRef = useRef(null);
@@ -1054,10 +1056,17 @@ function LiveFaceCapture({
         "Position one face inside the oval.",
       );
 
+      // Clear the parent form's Blob too, so an old image
+      // cannot be submitted after the user chooses Retake.
+      onCapture?.(null);
+      onRetake?.();
+
       startCamera();
     },
     [
       capturedImage,
+      onCapture,
+      onRetake,
       startCamera,
     ],
   );
@@ -1257,18 +1266,19 @@ function LiveFaceCapture({
             </strong>
           </div>
 
-          <button
-            type="button"
-            className="live-face-retake-button"
-            onClick={retakePhoto}
-            disabled={disabled}
-          >
-            <FontAwesomeIcon
-              icon={faCameraRotate}
-            />
+          <div className="live-face-preview-actions">
+            <button
+              type="button"
+              className="live-face-retake-button"
+              onClick={retakePhoto}
+              disabled={disabled}
+            >
+              <FontAwesomeIcon icon={faCameraRotate} />
+              Retake
+            </button>
 
-            Retake
-          </button>
+            {footerAction}
+          </div>
         </div>
       )}
 

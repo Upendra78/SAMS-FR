@@ -22,6 +22,7 @@ import {
   deleteAdminEnrollment,
   getAdminEnrollments,
   previewGroupEnrollment,
+  bulkEnrollGroup,
 } from "../../services/enrollmentService";
 
 import {
@@ -176,7 +177,6 @@ function AcademicManagement() {
     section: "",
   });
 
-  const [selectedOfferingIds, setSelectedOfferingIds] = useState([]);
   const [groupPreview, setGroupPreview] = useState(null);
   const [groupPreviewLoading, setGroupPreviewLoading] = useState(false);
 
@@ -208,7 +208,7 @@ function AcademicManagement() {
 
     let cancelled = false;
 
-    async function load() {
+    const load = async () => {
       setCoursesLoading(true);
       setCoursesError("");
 
@@ -216,10 +216,14 @@ function AcademicManagement() {
         const result = await getAdminCourses();
 
         if (!result?.success || !Array.isArray(result.data)) {
-          throw new Error(result?.message || "Unable to load courses.");
+          throw new Error(
+            result?.message || "Unable to load courses."
+          );
         }
 
-        if (!cancelled) setCourses(result.data);
+        if (!cancelled) {
+          setCourses(result.data);
+        }
       } catch (error) {
         if (!cancelled) {
           setCoursesError(
@@ -227,11 +231,13 @@ function AcademicManagement() {
           );
         }
       } finally {
-        if (!cancelled) setCoursesLoading(false);
+        if (!cancelled) {
+          setCoursesLoading(false);
+        }
       }
-    }
+    };
 
-    load();
+    void load();
 
     return () => {
       cancelled = true;
@@ -284,7 +290,7 @@ function AcademicManagement() {
 
     let cancelled = false;
 
-    async function loadOfferingDataForTab() {
+    const load = async () => {
       setOfferingsLoading(true);
       setOfferingsError("");
       setOfferingActionError("");
@@ -298,18 +304,32 @@ function AcademicManagement() {
             getAdminFaculty(),
           ]);
 
-        if (!offeringResult?.success || !Array.isArray(offeringResult.data)) {
+        if (
+          !offeringResult?.success ||
+          !Array.isArray(offeringResult.data)
+        ) {
           throw new Error(
-            offeringResult?.message || "Unable to load course offerings."
+            offeringResult?.message ||
+              "Unable to load course offerings."
           );
         }
 
-        if (!courseResult?.success || !Array.isArray(courseResult.data)) {
-          throw new Error(courseResult?.message || "Unable to load courses.");
+        if (
+          !courseResult?.success ||
+          !Array.isArray(courseResult.data)
+        ) {
+          throw new Error(
+            courseResult?.message || "Unable to load courses."
+          );
         }
 
-        if (!facultyResult?.success || !Array.isArray(facultyResult.data)) {
-          throw new Error(facultyResult?.message || "Unable to load faculty.");
+        if (
+          !facultyResult?.success ||
+          !Array.isArray(facultyResult.data)
+        ) {
+          throw new Error(
+            facultyResult?.message || "Unable to load faculty."
+          );
         }
 
         if (cancelled) return;
@@ -320,7 +340,10 @@ function AcademicManagement() {
       } catch (error) {
         if (!cancelled) {
           setOfferingsError(
-            getErrorMessage(error, "Unable to load course offering data.")
+            getErrorMessage(
+              error,
+              "Unable to load course offering data."
+            )
           );
         }
       } finally {
@@ -328,9 +351,9 @@ function AcademicManagement() {
           setOfferingsLoading(false);
         }
       }
-    }
+    };
 
-    void loadOfferingDataForTab();
+    void load();
 
     return () => {
       cancelled = true;
@@ -930,18 +953,93 @@ function AcademicManagement() {
 
       setGroupPreview(previewData);
 
-      const availableIds = new Set(
-        (previewData.offerings || []).map((item) =>
-          String(item.offering_id)
-        )
-      );
-
-      setSelectedOfferingIds((current) =>
-        current.filter((id) => availableIds.has(String(id)))
-      );
     } catch (error) {
       setEnrollmentActionError(
         getErrorMessage(error, "Unable to preview group enrollment.")
+      );
+    } finally {
+      setGroupPreviewLoading(false);
+    }
+  };
+
+  const handleBulkEnrollGroup = async () => {
+    if (!groupPreview) {
+      setEnrollmentActionError("Preview the group before enrolling students.");
+      return;
+    }
+
+    const studentCount = groupPreview.eligible_students ?? 0;
+    const courseCount =
+      groupPreview.courses?.length ??
+      groupPreview.offerings?.length ??
+      0;
+
+    if (studentCount === 0 || courseCount === 0) {
+      setEnrollmentActionError(
+        "No eligible students or active courses were found."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Enroll ${studentCount} eligible students in all ${courseCount} active courses for this group? Missing course offerings may be created without faculty assignments.`
+    );
+
+    if (!confirmed) return;
+
+    setGroupPreviewLoading(true);
+    setEnrollmentActionError("");
+    setEnrollmentActionMessage("");
+
+    try {
+      const result = await bulkEnrollGroup(groupEnrollment);
+
+      if (!result?.success) {
+        throw new Error(result?.message || "Bulk enrollment failed.");
+      }
+
+      const summary = result.data ?? {};
+
+      // Refresh both lists in parallel after the successful operation.
+      const [offeringResult, enrollmentResult] = await Promise.all([
+        getAdminCourseOfferings(),
+        getAdminEnrollments(),
+      ]);
+
+      if (
+        !offeringResult?.success ||
+        !Array.isArray(offeringResult.data)
+      ) {
+        throw new Error(
+          "Enrollment succeeded, but course offerings could not be refreshed."
+        );
+      }
+
+      if (
+        !enrollmentResult?.success ||
+        !Array.isArray(enrollmentResult.data)
+      ) {
+        throw new Error(
+          "Enrollment succeeded, but enrollment records could not be refreshed."
+        );
+      }
+
+      // Update React state immediately; no browser refresh is needed.
+      setOfferings(offeringResult.data);
+      setEnrollments(enrollmentResult.data);
+      setEnrollmentsLoaded(true);
+
+      setEnrollmentActionMessage(
+        `Enrollment completed. Created ${summary.created ?? 0} enrollments, ` +
+        `skipped ${summary.already_enrolled ?? 0} existing enrollments, and ` +
+        `created ${summary.created_offerings ?? 0} course offerings.`
+      );
+
+      // Refresh the group preview as well.
+      await handlePreviewGroupEnrollment();
+    } catch (error) {
+      setEnrollmentActionError(
+        getErrorMessage(error, "Unable to complete bulk enrollment.")
       );
     } finally {
       setGroupPreviewLoading(false);
@@ -955,40 +1053,9 @@ function AcademicManagement() {
     }));
 
     setGroupPreview(null);
-    setSelectedOfferingIds([]);
     setEnrollmentActionError("");
     setEnrollmentActionMessage("");
   };
-
-  const handleToggleOfferingSelection = (offeringId) => {
-    setSelectedOfferingIds((current) => {
-      const id = String(offeringId);
-
-      return current.some((item) => String(item) === id)
-        ? current.filter((item) => String(item) !== id)
-        : [...current, id];
-    });
-
-    // Keep the offerings visible while the user selects courses.
-    setEnrollmentActionError("");
-  };
-
-  const handleToggleAllOfferings = () => {
-    const availableOfferings = groupPreview?.offerings || [];
-    const allIds = availableOfferings.map((item) =>
-      String(item.offering_id)
-    );
-
-    const allSelected =
-      allIds.length > 0 &&
-      allIds.every((id) =>
-        selectedOfferingIds.some((selectedId) => String(selectedId) === id)
-      );
-
-    setSelectedOfferingIds(allSelected ? [] : allIds);
-    setEnrollmentActionError("");
-  };
-
 
   const handleDeleteEnrollment = async (enrollmentId) => {
     if (!window.confirm(`Remove enrollment #${enrollmentId}?`)) return;
@@ -1787,7 +1854,6 @@ function AcademicManagement() {
                   onClick={() => {
                     setShowGroupEnrollment(false);
                     setGroupPreview(null);
-                    setSelectedOfferingIds([]);
                     setEnrollmentActionError("");
                     setEnrollmentActionMessage("");
                   }}
@@ -1822,7 +1888,7 @@ function AcademicManagement() {
                 </div>
 
                 <div className="academic-form-field">
-                  <label htmlFor="group-cohort">Student Cohort *</label>
+                  <label htmlFor="group-cohort">Student Batch</label>
                   <select
                     id="group-cohort"
                     value={groupEnrollment.academic_year}
@@ -1831,7 +1897,7 @@ function AcademicManagement() {
                     }
                     disabled={groupPreviewLoading || studentsLoading}
                   >
-                    <option value="">Select cohort</option>
+                    <option value="">Select Batch</option>
                     {[...new Set(
                       students
                         .filter(
@@ -1852,7 +1918,7 @@ function AcademicManagement() {
                 </div>
 
                 <div className="academic-form-field">
-                  <label htmlFor="group-semester">Semester *</label>
+                  <label htmlFor="group-semester">Semester </label>
                   <select
                     id="group-semester"
                     value={groupEnrollment.semester}
@@ -1884,7 +1950,7 @@ function AcademicManagement() {
                 </div>
 
                 <div className="academic-form-field">
-                  <label htmlFor="group-section">Section *</label>
+                  <label htmlFor="group-section">Section </label>
                   <select
                     id="group-section"
                     value={groupEnrollment.section}
@@ -1945,97 +2011,156 @@ function AcademicManagement() {
 
               {groupPreview && (
                 <div className="group-enrollment-preview">
-                  <h3>Enrollment Preview</h3>
-
-                  <p>
-                    Cohort: {groupEnrollment.academic_year}
-                    {" · Semester "}
-                    {groupEnrollment.semester}
-                    {" · Section "}
-                    {groupEnrollment.section}
-                  </p>
-
-                  <p>
-                    Eligible students:{" "}
-                    <strong>{groupPreview.eligible_students ?? 0}</strong>
-                    {" · Matching offerings: "}
-                    <strong>{(groupPreview.offerings || []).length}</strong>
-                  </p>
-
-                  {groupPreview.courses_without_offerings?.length > 0 && (
-                    <p role="status">
-                      Some active courses have no matching offering. Check the Course
-                      Offerings to Faculty section before proceeding.
-                    </p>
-                  )}
-
-                  {(groupPreview.offerings || []).length > 0 ? (
-                    <>
-                      <label className="group-enrollment-select-all">
-                        <input
-                          type="checkbox"
-                          checked={
-                            groupPreview.offerings.length > 0 &&
-                            groupPreview.offerings.every((offering) =>
-                              selectedOfferingIds.some(
-                                (id) => String(id) === String(offering.offering_id)
-                              )
-                            )
-                          }
-                          onChange={handleToggleAllOfferings}
-                        />
-                        Select all matching courses
-                      </label>
-
-                      <div className="group-enrollment-course-list">
-                        {groupPreview.offerings.map((offering) => (
-                          <label
-                            key={offering.offering_id}
-                            className="group-enrollment-course-option"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={selectedOfferingIds.some(
-                                (id) => String(id) === String(offering.offering_id)
-                              )}
-                              onChange={() =>
-                                handleToggleOfferingSelection(offering.offering_id)
-                              }
-                            />
-
-                            <span>
-                              <strong>
-                                {offering.course_code ||
-                                  `Offering #${offering.offering_id}`}
-                                {" — "}
-                                {offering.course_name || "Unnamed course"}
-                              </strong>
-                              <small>
-                                Semester {offering.semester}
-                                {" · Section "}
-                                {offering.section}
-                                {" · Academic year "}
-                                {offering.academic_year}
-                              </small>
-                            </span>
-                          </label>
-                        ))}
-                      </div>
-
-                      <p>
-                        Selected offerings: <strong>{selectedOfferingIds.length}</strong>
+                  <div className="group-preview-heading">
+                    <div>
+                      <span className="group-preview-eyebrow">GROUP SUMMARY</span>
+                      <h3>Enrollment Preview</h3>
+                      <p className="group-preview-context">
+                        Cohort {groupEnrollment.academic_year}
+                        {" · Semester "}
+                        {groupEnrollment.semester}
+                        {" · Section "}
+                        {groupEnrollment.section}
                       </p>
-                    </>
+                    </div>
+                    <span className="group-preview-ready">
+                      <FontAwesomeIcon icon={faCheck} /> Preview ready
+                    </span>
+                  </div>
+
+                  <div className="group-preview-stats">
+                    <div className="group-preview-stat">
+                      <span className="group-preview-stat-icon group-preview-stat-blue">
+                        <FontAwesomeIcon icon={faGraduationCap} />
+                      </span>
+                      <div>
+                        <strong>{groupPreview.eligible_students ?? 0}</strong>
+                        <span>Eligible students</span>
+                      </div>
+                    </div>
+                    <div className="group-preview-stat">
+                      <span className="group-preview-stat-icon group-preview-stat-violet">
+                        <FontAwesomeIcon icon={faBookOpen} />
+                      </span>
+                      <div>
+                        <strong>
+                          {(groupPreview.courses || []).length ||
+                            (groupPreview.offerings || []).length}
+                        </strong>
+                        <span>Active courses</span>
+                      </div>
+                    </div>
+                    <div className="group-preview-stat">
+                      <span className="group-preview-stat-icon group-preview-stat-green">
+                        <FontAwesomeIcon icon={faCheck} />
+                      </span>
+                      <div>
+                        <strong>
+                          {(groupPreview.courses || []).filter(
+                            (course) => course.has_offering ?? Boolean(course.offering_id)
+                          ).length || (groupPreview.offerings || []).length}
+                        </strong>
+                        <span>Existing offerings</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="group-preview-course-heading">
+                    <div>
+                      <h4>Course offerings</h4>
+                      <p>Existing offerings are reused; missing ones will be created automatically.</p>
+                    </div>
+                    <span className="group-preview-course-count">
+                      {(groupPreview.courses || []).length ||
+                        (groupPreview.offerings || []).length} courses
+                    </span>
+                  </div>
+
+                  {(groupPreview.courses || []).length > 0 ? (
+                    <div className="group-enrollment-course-list">
+                      {groupPreview.courses.map((course) => {
+                        const hasOffering = course.has_offering ?? Boolean(course.offering_id);
+                        const facultyAssigned = course.faculty_assigned ?? false;
+
+                        return (
+                          <article
+                            key={course.course_id}
+                            className={`group-enrollment-course-option ${
+                              hasOffering ? "is-existing" : "is-new"
+                            }`}
+                          >
+                            <span className="group-course-icon">
+                              <FontAwesomeIcon icon={faBookOpen} />
+                            </span>
+                            <div className="group-course-content">
+                              <strong className="group-course-title">
+                                <span>{course.course_code}</span>
+                                <span className="group-course-dash"> — </span>
+                                {course.course_name}
+                              </strong>
+                              <p className="group-course-description">
+                                {hasOffering
+                                  ? `Course offering #${course.offering_id} will be reused.`
+                                  : "A new course offering will be created automatically."}
+                              </p>
+                              <div className="group-course-badges">
+                                <span className={`group-course-badge ${hasOffering ? "badge-existing" : "badge-new"}`}>
+                                  {hasOffering ? "Existing offering" : "New offering"}
+                                </span>
+                                {hasOffering ? (
+                                  <span className={`group-course-badge ${facultyAssigned ? "badge-faculty" : "badge-pending"}`}>
+                                    {facultyAssigned ? "Faculty assigned" : "Faculty assignment pending"}
+                                  </span>
+                                ) : (
+                                  <span className="group-course-badge badge-pending">
+                                    No Faculty Assign
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
                   ) : (
-                    <p>
-                      No matching offerings were returned for this group. Verify the
-                      selected group and existing offerings.
-                    </p>
+                    <div className="group-preview-empty">
+                      <FontAwesomeIcon icon={faCircleExclamation} />
+                      <p>No course details were returned. Refresh the preview or check the backend response.</p>
+                    </div>
                   )}
 
-                  <p>
-                    <strong>Preview only:</strong> no enrollment records have been created.
-                  </p>
+                  <div className="group-preview-note">
+                    <FontAwesomeIcon icon={faCircleExclamation} />
+                    <p>
+                      <strong>Preview only.</strong> No enrollment records have been created yet.
+                      Faculty assignments on existing offerings will be preserved.
+                    </p>
+                  </div>
+
+                  <div className="group-preview-footer">
+                    <span>Review the group details before confirming enrollment.</span>
+                    <button
+                      type="button"
+                      className="academic-primary-button group-preview-enroll-button"
+                      onClick={handleBulkEnrollGroup}
+                      disabled={
+                        groupPreviewLoading ||
+                        (groupPreview.eligible_students ?? 0) === 0 ||
+                        (
+                          (groupPreview.courses || []).length === 0 &&
+                          (groupPreview.offerings || []).length === 0
+                        )
+                      }
+                    >
+                      <FontAwesomeIcon
+                        icon={groupPreviewLoading ? faSpinner : faCheck}
+                        spin={groupPreviewLoading}
+                      />
+                      {groupPreviewLoading
+                        ? "Processing..."
+                        : "Enroll All Eligible Students"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

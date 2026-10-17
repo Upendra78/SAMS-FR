@@ -296,16 +296,63 @@ def preview_group_enrollment():
             "message": error,
         }), 400
 
-    students, available_offerings, courses_without_offerings = (
+    students, available_offerings, _ = (
         _get_group_enrollment_context(group)
     )
 
+    # Retrieve every active course for the selected department,
+    # cohort, semester, and section's course group.
+    active_courses = (
+        Course.query
+        .filter(
+            Course.department_id == group["department_id"],
+            Course.semester == group["semester"],
+            Course.is_active.is_(True),
+            Course.batch == group["cohort_start_year"],
+        )
+        .order_by(Course.course_code.asc())
+        .all()
+    )
+
+    # Index matching offerings by course. Preserve multiple offerings
+    # in the response so existing data isn't silently hidden.
+    offerings_by_course = {}
+    for offering in available_offerings:
+        offerings_by_course.setdefault(
+            offering.course_id, []
+        ).append(offering)
+
+    courses = []
+    for course in active_courses:
+        matching = offerings_by_course.get(course.course_id, [])
+
+        courses.append({
+            "course_id": course.course_id,
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "offerings": [
+                _offering_to_dict(offering)
+                for offering in matching
+            ],
+            "offering_id": (
+                matching[0].offering_id if matching else None
+            ),
+            "has_offering": bool(matching),
+            "faculty_assigned": any(
+                offering.faculty_id is not None
+                for offering in matching
+            ),
+        })
+
+    # Keep support for older clients that pass offering_ids.
     available_by_id = {
         offering.offering_id: offering
         for offering in available_offerings
     }
 
-    requested_ids, error = _parse_offering_ids(data, required=False)
+    requested_ids, error = _parse_offering_ids(
+        data, required=False
+    )
 
     if error:
         return jsonify({
@@ -337,9 +384,12 @@ def preview_group_enrollment():
     else:
         selected_offerings = available_offerings
 
-    student_ids = [student.student_id for student in students]
+    student_ids = [
+        student.student_id for student in students
+    ]
     offering_ids = [
-        offering.offering_id for offering in selected_offerings
+        offering.offering_id
+        for offering in selected_offerings
     ]
 
     existing_pairs = _existing_enrollment_pairs(
@@ -350,17 +400,29 @@ def preview_group_enrollment():
     total_pairs = len(student_ids) * len(offering_ids)
     already_enrolled = len(existing_pairs)
 
+    courses_without_offerings = [
+        {
+            "course_id": course["course_id"],
+            "course_code": course["course_code"],
+            "course_name": course["course_name"],
+        }
+        for course in courses
+        if not course["has_offering"]
+    ]
+
     return jsonify({
         "success": True,
         "message": "Enrollment preview generated successfully",
         "data": {
             **group,
             "eligible_students": len(students),
+            "active_courses": len(active_courses),
             "available_offerings": len(available_offerings),
             "matched_offerings": len(selected_offerings),
             "total_matching_enrollment_pairs": total_pairs,
             "already_enrolled": already_enrolled,
             "to_create": total_pairs - already_enrolled,
+            "courses": courses,
             "courses_without_offerings": courses_without_offerings,
             "offerings": [
                 _offering_to_dict(offering)
@@ -368,6 +430,7 @@ def preview_group_enrollment():
             ],
         },
     }), 200
+
 
 
 # ---------------------------------------------------------------------------
@@ -386,75 +449,103 @@ def bulk_enroll_group():
             "message": error,
         }), 400
 
-    offering_ids, error = _parse_offering_ids(data, required=True)
+    students, _, _ = _get_group_enrollment_context(group)
 
-    if error:
+    # Only active courses belonging to the selected cohort and group.
+    courses = (
+        Course.query
+        .filter(
+            Course.department_id == group["department_id"],
+            Course.semester == group["semester"],
+            Course.is_active.is_(True),
+            Course.batch == group["cohort_start_year"],
+        )
+        .order_by(Course.course_code.asc())
+        .all()
+    )
+
+    if not courses:
         return jsonify({
             "success": False,
-            "message": error,
+            "message": "No active courses were found for this group.",
         }), 400
 
-    students, available_offerings, _ = _get_group_enrollment_context(group)
-
-    available_by_id = {
-        offering.offering_id: offering
-        for offering in available_offerings
-    }
-
-    invalid_ids = [
-        offering_id
-        for offering_id in offering_ids
-        if offering_id not in available_by_id
-    ]
-
-    if invalid_ids:
+    if not students:
         return jsonify({
             "success": False,
-            "message": (
-                "One or more selected offerings do not belong "
-                "to the selected cohort, semester, and section"
-            ),
-            "invalid_offering_ids": invalid_ids,
-        }), 400
-
-    student_ids = [student.student_id for student in students]
-
-    if not student_ids:
-        return jsonify({
-            "success": True,
-            "message": "No eligible active students were found",
+            "message": "No eligible active students were found.",
             "data": {
                 **group,
                 "eligible_students": 0,
-                "matched_offerings": len(offering_ids),
+                "matched_offerings": 0,
+                "created_offerings": 0,
                 "created": 0,
                 "already_enrolled": 0,
-                "selected_offering_ids": offering_ids,
             },
         }), 200
 
-    existing_pairs = _existing_enrollment_pairs(
-        student_ids,
-        offering_ids,
-    )
+    student_ids = [student.student_id for student in students]
+    created_offerings = []
+    matched_offerings = []
 
-    rows = [
-        {
-            "student_id": student_id,
-            "offering_id": offering_id,
-            "status": "ACTIVE",
-        }
-        for student_id in student_ids
-        for offering_id in offering_ids
-        if (student_id, offering_id) not in existing_pairs
-    ]
+    # New offerings use the existing academic-session convention.
+    start_year = int(group["cohort_start_year"])
+    session = f"{start_year} -{start_year + 1}"
 
     try:
-        if rows:
-            db.session.execute(
-                db.insert(Enrollment),
-                rows,
+        for course in courses:
+            existing = (
+                CourseOffering.query
+                .filter(
+                    CourseOffering.course_id == course.course_id,
+                    CourseOffering.semester == group["semester"],
+                    CourseOffering.section == group["section"],
+                )
+                .order_by(CourseOffering.offering_id.asc())
+                .first()
             )
+
+            if existing:
+                # Reuse the existing offering without changing its
+                # academic session, room, or faculty assignment.
+                offering = existing
+            else:
+                offering = CourseOffering(
+                    course_id=course.course_id,
+                    faculty_id=None,
+                    academic_year=session,
+                    semester=group["semester"],
+                    section=group["section"],
+                    room=None,
+                )
+                db.session.add(offering)
+                db.session.flush()
+                created_offerings.append(offering)
+
+            matched_offerings.append(offering)
+
+        offering_ids = [
+            offering.offering_id for offering in matched_offerings
+        ]
+
+        existing_pairs = _existing_enrollment_pairs(
+            student_ids,
+            offering_ids,
+        )
+
+        rows = [
+            {
+                "student_id": student_id,
+                "offering_id": offering_id,
+                "status": "ACTIVE",
+            }
+            for student_id in student_ids
+            for offering_id in offering_ids
+            if (student_id, offering_id) not in existing_pairs
+        ]
+
+        if rows:
+            db.session.execute(db.insert(Enrollment), rows)
 
         db.session.commit()
 
@@ -463,8 +554,8 @@ def bulk_enroll_group():
         return jsonify({
             "success": False,
             "message": (
-                "Enrollment conflicted with a database constraint. "
-                "The transaction was rolled back."
+                "A database conflict occurred. "
+                "The bulk enrollment transaction was rolled back."
             ),
         }), 409
 
@@ -473,23 +564,25 @@ def bulk_enroll_group():
         return jsonify({
             "success": False,
             "message": (
-                "Group bulk enrollment failed. "
+                "Bulk enrollment failed. "
                 "The transaction was rolled back."
             ),
         }), 500
 
     return jsonify({
         "success": True,
-        "message": "Group bulk enrollment completed successfully",
+        "message": "Group bulk enrollment completed successfully.",
         "data": {
             **group,
             "eligible_students": len(student_ids),
-            "matched_offerings": len(offering_ids),
+            "matched_offerings": len(matched_offerings),
+            "created_offerings": len(created_offerings),
             "created": len(rows),
             "already_enrolled": len(existing_pairs),
-            "selected_offering_ids": offering_ids,
+            "offering_ids": offering_ids,
         },
-    }), 201 if rows else 200
+    }), 201 if rows or created_offerings else 200
+
 
 
 # ---------------------------------------------------------------------------
