@@ -2,7 +2,6 @@
 import { useState } from "react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
-  faBell,
   faBookOpen,
   faBuilding,
   faCalendarDays,
@@ -89,10 +88,32 @@ const systemItems = [
   },
 ];
 
+function getInitials(name) {
+  if (!name) return "AD";
+  const cleanName = name
+    .replace(/^(dr\.|dr|prof\.|prof|mr\.|mr|mrs\.|mrs|ms\.|ms)\s+/i, "")
+    .trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "AD";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function AdminLayout() {
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  const displayName =
+    user?.name ||
+    user?.full_name ||
+    user?.fullName ||
+    user?.username ||
+    (user?.email ? user.email.split("@")[0] : "Admin");
+  const initials = getInitials(displayName);
+  const userRole = user?.role
+    ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+    : "Administrator";
 
   const pathname = location.pathname;
 
@@ -421,46 +442,17 @@ function AdminLayout() {
       {/* Main content */}
       <div className="admin-content">
         <header className="admin-header">
-          <div className="admin-header-brand">
-            <span className="admin-header-label">
-              Administration
-            </span>
-
-            <h1>SAMS-FR</h1>
-          </div>
-
           <div className="admin-header-actions">
-            <button
-              type="button"
-              className="admin-notification-button"
-              aria-label="Notifications"
-              title="Notifications"
-            >
-              <FontAwesomeIcon icon={faBell} />
-            </button>
-
-            <div className="admin-header-divider" />
-
-            <button
-              type="button"
-              className="admin-user"
-              onClick={handleLogout}
-              title="Logout"
-            >
+            <div className="admin-user-pill">
               <div className="admin-user-avatar">
-                <FontAwesomeIcon icon={faUser} />
+                <span>{initials}</span>
               </div>
 
               <div className="admin-user-info">
-                <strong>Admin</strong>
-                <span>Administrator</span>
+                <strong>{displayName}</strong>
+                <span>{userRole}</span>
               </div>
-
-              <FontAwesomeIcon
-                className="admin-user-chevron"
-                icon={faChevronDown}
-              />
-            </button>
+            </div>
           </div>
         </header>
 

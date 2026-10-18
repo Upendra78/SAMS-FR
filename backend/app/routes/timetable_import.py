@@ -42,6 +42,72 @@ def parse_time_range(value):
         return start, end
     except ValueError:
         return None, None
+    
+COURSE_CODE_PATTERN = re.compile(
+    r"(?<![A-Z0-9])"
+    r"([A-Z]{2,10}\s*-\s*[A-Z0-9]+L?)"
+    r"(?=\s|$|[.,(]|Dr\.|Mr\.|Ms\.)",
+    re.IGNORECASE,
+)
+
+
+
+def parse_assignment_lines(raw_cell):
+    """Split a timetable cell into separate, unverified assignments."""
+    assignments = []
+
+    for line in clean(raw_cell).splitlines():
+        line = line.strip()
+
+        if not line or line.upper() == "LUNCH BREAK":
+            continue
+
+        # Separate a faculty title attached directly to a course code.
+        search_line = re.sub(
+            r"(?i)(?<=\d)(?=Dr\.|Mr\.|Ms\.)",
+            " ",
+            line,
+        )
+
+        # Find every course-code candidate in the line.
+        matches = list(COURSE_CODE_PATTERN.finditer(search_line))
+
+        if not matches:
+            assignments.append({
+                "raw_assignment": line,
+                "course_code": None,
+                "status": "needs_review",
+                "review_reason": "No course code detected",
+            })
+            continue
+
+        for index, match in enumerate(matches):
+            course_code = re.sub(
+                r"\s+", "", match.group(1).upper()
+            )
+
+            start = match.start()
+            end = (
+                matches[index + 1].start()
+                if index + 1 < len(matches)
+                else len(search_line)
+            )
+
+            assignment_text = search_line[start:end].strip()
+
+            assignments.append({
+                "raw_assignment": assignment_text,
+                "course_code": course_code,
+                "status": "needs_review",
+                "review_reason": (
+                    "Course, faculty, and room mappings are not yet verified"
+                ),
+            })
+
+    return assignments
+
+
+    
 
 @timetable_import_bp.post("/preview")
 @admin_required
@@ -86,10 +152,16 @@ def preview_timetable_import():
             }),422
         sheet = workbook[SHEET_NAME]
         header_row =3
-        headers = [
-            clean(sheet.cell(row=header_row, column = col).value)
-            for col in range(1, sheet.max_column+1)
-        ]
+        header_values = next(
+            sheet.iter_rows(
+                min_row=header_row,
+                max_row=header_row,
+                values_only=True,
+            ),
+            (),
+        )
+
+        headers = [clean(value) for value in header_values]
         if (
             not headers
             or headers[0].upper()!= "DAY"
@@ -112,10 +184,16 @@ def preview_timetable_import():
         current_day = ""
         period_rows = 0
 
-        for row_number in range(header_row + 1, sheet.max_row + 1):
-            day_value = clean(sheet.cell(row=row_number, column = 1).value)
-            period_value = clean(sheet.cell(row=row_number, column=2).value)
-            time_value = clean(sheet.cell(row=row_number, column=3).value)
+        for row_number, row_values in enumerate(
+            sheet.iter_rows(
+                min_row=header_row + 1,
+                values_only=True,
+            ),
+            start=header_row + 1,
+        ):
+            day_value = clean(row_values[0] if len(row_values) > 0 else "")
+            period_value = clean(row_values[1] if len(row_values) > 1 else "")
+            time_value = clean(row_values[2] if len(row_values) > 2 else "")
 
             if day_value:
                 current_day = day_value.upper()
@@ -132,6 +210,7 @@ def preview_timetable_import():
                     "message": "No day could be determined for this period.",
                 })
                 continue
+
             if not start_time or not end_time:
                 errors.append({
                     "row": row_number,
@@ -139,33 +218,42 @@ def preview_timetable_import():
                     "value": time_value,
                 })
                 continue
-            if start_time>= end_time:
+
+            if start_time >= end_time:
                 errors.append({
                     "row": row_number,
                     "message": "The period end time must be after its start time.",
                     "value": time_value,
                 })
                 continue
+
             for group_info in groups:
+                column_index = group_info["column"] - 1
                 cell_value = clean(
-                    sheet.cell(
-                        row = row_number,
-                        column = group_info["column"],
-                    ).value
+                    row_values[column_index]
+                    if column_index < len(row_values)
+                    else ""
                 )
+
                 if not cell_value or cell_value.upper() == "LUNCH BREAK":
                     continue
 
-                entries.append({
-                    "source_row": row_number,
-                    "day_of_week": current_day,
-                    "period": period_value,
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "class_group": group_info["group"],
-                    "raw_cell": cell_value,
-                    "source_sheet": SHEET_NAME,
-                })
+                for assignment in parse_assignment_lines(cell_value):
+                    entries.append({
+                        "source_row": row_number,
+                        "day_of_week": current_day,
+                        "period": period_value,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "class_group": group_info["group"],
+                        "raw_cell": cell_value,
+                        "source_sheet": SHEET_NAME,
+                        "raw_assignment": assignment["raw_assignment"],
+                        "course_code": assignment["course_code"],
+                        "status": assignment["status"],
+                        "review_reason": assignment["review_reason"],
+                    })
+
         return jsonify({
             "success": True,
             "message": "Preview generated. No timetable records were saved.",

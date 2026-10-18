@@ -490,6 +490,10 @@ function TimetableManagement() {
       "start_time",
       "end_time",
       "class_group",
+      "course_code",
+      "raw_assignment",
+      "status",
+      "review_reason",
       "raw_cell",
     ];
 
@@ -924,12 +928,12 @@ function TimetableManagement() {
                   <thead>
                     <tr>
                       <th>Day</th>
+                      <th>Period</th>
                       <th>Time</th>
-                      <th>Subject Code</th>
-                      <th>Subject Name</th>
-                      <th>Faculty</th>
-                      <th>Classroom</th>
-                      <th>Section</th>
+                      <th>Class Group</th>
+                      <th>Course Code</th>
+                      <th>Extracted Assignment</th>
+                      <th>Status</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1165,11 +1169,12 @@ function TimetableManagement() {
                             <td>{titleCase(entry.day_of_week)}</td>
                             <td>{entry.period || "—"}</td>
                             <td>
-                              {displayTime(entry.start_time)} –{" "}
-                              {displayTime(entry.end_time)}
+                              {displayTime(entry.start_time)} – {displayTime(entry.end_time)}
                             </td>
                             <td>{entry.class_group || "—"}</td>
-                            <td>{entry.raw_cell || "—"}</td>
+                            <td>{entry.course_code || "Not detected"}</td>
+                            <td>{entry.raw_assignment || entry.raw_cell || "—"}</td>
+                            <td>{entry.status || "Needs review"}</td>
                           </tr>
                         ))
                       ) : (
