@@ -371,53 +371,57 @@
 
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
+  gap: 20px;
 
   width: 100%;
-  min-height: 60px;
-  padding: 0 22px 0 28px;
+  min-height: 64px;
+  padding: 0 32px;
 
   box-sizing: border-box;
-  border-bottom: 1px solid #e2e8f0;
-  box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.03);
-
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(12px) saturate(180%);
+  border-bottom: 1px solid #edf2f7;
+  background: #ffffff;
 }
 
-.admin-header h1,
-.admin-header h2 {
-  color: #64748b;
+.admin-header-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 380px;
+  max-width: 100%;
 }
 
-.admin-header p,
-.admin-header span {
-  color: #0f172a;
+.admin-search-icon {
+  position: absolute;
+  left: 16px;
+  color: #94a3b8;
+  font-size: 14px;
+  pointer-events: none;
 }
 
-.admin-header-brand {
-  min-width: 0;
+.admin-search-input {
+  width: 100%;
+  height: 40px;
+  padding: 0 16px 0 42px;
+
+  border: 1px solid #e2e8f0;
+  border-radius: 9999px;
+  background: #ffffff;
+  color: #1e293b;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
 
-.admin-header-label {
-  display: block;
-
-  color: #64748b;
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+.admin-search-input::placeholder {
+  color: #94a3b8;
+  font-size: 13px;
 }
 
-.admin-header-brand h1 {
-  margin: 2px 0 0;
-
-  color: #17263e;
-  font-family: "Space Grotesk", sans-serif;
-  font-size: 20px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: -0.02em;
+.admin-search-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
 }
 
 /* =========================================
@@ -427,12 +431,11 @@
 .admin-header-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 18px;
 }
 
 .admin-notification-button {
   position: relative;
-
   display: grid;
   flex-shrink: 0;
   place-items: center;
@@ -440,57 +443,48 @@
   width: 38px;
   height: 38px;
 
-  border: 1px solid transparent;
-  border-radius: 10px;
-
+  border: none;
+  border-radius: 50%;
   background: transparent;
-  color: #33445e;
+  color: #475569;
   font-size: 17px;
   cursor: pointer;
-
-  transition:
-    background-color 0.18s ease,
-    border-color 0.18s ease;
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 .admin-notification-button:hover {
-  border-color: #e1e7ef;
-  background: #f6f8fb;
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
-.admin-header-divider {
-  width: 1px;
-  height: 30px;
-  background: #e3e8ef;
+.admin-notification-badge {
+  position: absolute;
+  top: 4px;
+  right: 5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+
+  border-radius: 9999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  box-shadow: 0 0 0 2px #ffffff;
 }
 
 /* =========================================
    USER AREA
 ========================================= */
 
-.admin-user {
+.admin-user-pill {
   display: flex;
   align-items: center;
-  gap: 9px;
-
-  padding: 4px 4px 4px 5px;
-
-  border: 1px solid transparent;
-  border-radius: 10px;
-
-  background: transparent;
-  font-family: inherit;
-  text-align: left;
-  cursor: pointer;
-
-  transition:
-    background-color 0.18s ease,
-    border-color 0.18s ease;
-}
-
-.admin-user:hover {
-  border-color: #e0e7f0;
-  background: #f7f9fc;
+  gap: 11px;
+  padding: 3px 6px;
+  user-select: none;
 }
 
 .admin-user-avatar {
@@ -498,38 +492,31 @@
   flex-shrink: 0;
   place-items: center;
 
-  width: 36px;
-  height: 36px;
+  width: 38px;
+  height: 38px;
 
-  border: 1px solid #d9e5f4;
   border-radius: 50%;
-
-  background: #eaf2ff;
-  color: #3479e5;
+  background: #0f172a;
+  color: #ffffff;
   font-size: 13px;
-}
-
-.admin-user-info strong,
-.admin-user-info span {
-  display: block;
+  font-weight: 700;
+  letter-spacing: 0.5px;
 }
 
 .admin-user-info strong {
-  color: #273852;
+  display: block;
+  color: #0f172a;
   font-size: 13px;
   font-weight: 700;
+  line-height: 1.25;
 }
 
 .admin-user-info span {
-  margin-top: 2px;
-  color: #8997aa;
-  font-size: 10px;
-}
-
-.admin-user-chevron {
-  margin-left: 5px;
-  color: #7e8da2;
-  font-size: 8px;
+  display: block;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.25;
 }
 
 /* =========================================

@@ -1,43 +1,61 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  Users,
+  BookOpen,
+  BarChart3,
+  ExternalLink,
+  ArrowRight,
+  CheckCircle2,
+  Check,
+  Clock,
+  Zap,
+  Headphones,
+  ChevronRight,
+  Sparkles,
+  FileText,
+  AlertTriangle,
+} from "lucide-react";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { faChalkboardUser } from "@fortawesome/free-solid-svg-icons";
 
 import { getAdminDashboard } from "../../services/adminService";
-
+import useAuth from "../../hooks/useAuth";
 import "./AdminDashboard.css";
 
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  if (hour >= 17 && hour < 22) return "Good evening";
+  return "Welcome back";
+}
+
+function getInitials(name) {
+  if (!name) return "AD";
+  const cleanName = name
+    .replace(/^(dr\.|dr|prof\.|prof|mr\.|mr|mrs\.|mrs|ms\.|ms)\s+/i, "")
+    .trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "AD";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function AdminDashboard() {
+  const { user } = useAuth();
+  const displayName =
+    user?.name ||
+    user?.full_name ||
+    user?.fullName ||
+    user?.username ||
+    (user?.email ? user.email.split("@")[0] : "Admin");
+  const initials = getInitials(displayName);
+  const greeting = getGreeting();
+
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
-
-  async function loadDashboard({ isRefresh = false } = {}) {
-    if (isRefresh) {
-      setRefreshing(true);
-    }
-
-    try {
-      const result = await getAdminDashboard();
-
-      if (!result?.success) {
-        throw new Error(
-          result?.message || "Failed to load admin dashboard."
-        );
-      }
-
-      setDashboardData(result.data || null);
-      setErrorMessage("");
-    } catch (error) {
-      setErrorMessage(
-        error?.response?.data?.message ||
-          error?.message ||
-          "Unable to load dashboard data."
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -99,13 +117,8 @@ function AdminDashboard() {
     totalAttendanceRecords > 0;
 
   const attendancePercentage = hasAttendanceData
-    ? Math.round(
-        (presentAttendance / totalAttendanceRecords) * 100
-      )
+    ? Math.round((presentAttendance / totalAttendanceRecords) * 100)
     : null;
-
-  const hasTrendData = false;
-  const hasRecentActivity = false;
 
   if (loading) {
     return (
@@ -114,12 +127,9 @@ function AdminDashboard() {
           <div className="admin-loading-icon">
             <i className="fa-solid fa-spinner fa-spin" />
           </div>
-
           <h2>Loading dashboard</h2>
-
           <p>
-            Fetching the latest administration statistics from the
-            backend.
+            Fetching the latest administration statistics from the backend.
           </p>
         </div>
       </section>
@@ -133,11 +143,8 @@ function AdminDashboard() {
           <div className="admin-error-icon">
             <i className="fa-solid fa-triangle-exclamation" />
           </div>
-
           <h2>Unable to load dashboard</h2>
-
           <p>{errorMessage}</p>
-
           <span>API integration is currently unavailable.</span>
         </div>
       </section>
@@ -147,522 +154,386 @@ function AdminDashboard() {
   return (
     <section className="admin-dashboard">
       {/* =========================
-          HEADER
+          WELCOME BANNER
       ========================== */}
-
-      <header className="admin-dashboard-header">
-        <div className="admin-dashboard-heading">
-          <div className="admin-dashboard-heading-top">
-            <span className="admin-dashboard-eyebrow">
-              Administration
-            </span>
-          </div>
-
-          <h1>Welcome back, Admin!</h1>
-
-          <p>
-            Monitor students, faculty, courses, and attendance from one
-            centralized dashboard.
-          </p>
-        </div>
-        <div className="admin-dashboard-header-actions">
-          <button
-            type="button"
-            className="admin-dashboard-refresh"
-            onClick={() => loadDashboard({ isRefresh: true })}
-            disabled={refreshing}
-          >
-            <i
-              className={`fa-solid fa-rotate ${
-                refreshing ? "fa-spin" : ""
-              }`}
-              aria-hidden="true"
-            />
-            <span>{refreshing ? "Refreshing..." : "Refresh data"}</span>
-          </button>
-        </div>
-      </header>
-
-      {/* =========================
-          PRIMARY STATISTICS
-      ========================== */}
-
-      <div className="admin-stat-grid">
-        <Link
-          to="/admin/students"
-          className="admin-stat-card admin-stat-blue"
-        >
-          <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">
-              <i className="fa-solid fa-user-graduate" />
-            </div>
-
-            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
-          </div>
-
-          <span className="admin-stat-label">Total Students</span>
-
-          <strong
-            className={`admin-stat-value ${
-              totalStudents === null ||
-              totalStudents === undefined
-                ? "is-empty"
-                : ""
-            }`}
-          >
-            {formatMetric(totalStudents)}
-          </strong>
-
-          <span className="admin-stat-description">
-            Registered students
-          </span>
-        </Link>
-
-        <Link
-          to="/admin/faculty"
-          className="admin-stat-card admin-stat-purple"
-        >
-          <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">
-              <i className="fa-solid fa-chalkboard-user" />
-            </div>
-
-            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
-          </div>
-
-          <span className="admin-stat-label">Total Faculty</span>
-
-          <strong
-            className={`admin-stat-value ${
-              totalFaculty === null ||
-              totalFaculty === undefined
-                ? "is-empty"
-                : ""
-            }`}
-          >
-            {formatMetric(totalFaculty)}
-          </strong>
-
-          <span className="admin-stat-description">
-            Registered faculty members
-          </span>
-        </Link>
-
-        <Link
-          to="/admin/academic-management"
-          className="admin-stat-card admin-stat-green"
-        >
-          <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">
-              <i className="fa-solid fa-book-open" />
-            </div>
-
-            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
-          </div>
-
-          <span className="admin-stat-label">Total Courses</span>
-
-          <strong
-            className={`admin-stat-value ${
-              totalCourses === null ||
-              totalCourses === undefined
-                ? "is-empty"
-                : ""
-            }`}
-          >
-            {formatMetric(totalCourses)}
-          </strong>
-
-          <span className="admin-stat-description">
-            Courses in the system
-          </span>
-        </Link>
-
-        <Link
-          to="/admin/attendance-reports"
-          className="admin-stat-card admin-stat-orange"
-        >
-          <div className="admin-stat-card-top">
-            <div className="admin-stat-icon">
-              <i className="fa-solid fa-chart-line" />
-            </div>
-
-            <i className="fa-solid fa-arrow-up-right-from-square admin-stat-arrow" />
-          </div>
-
-          <span className="admin-stat-label">Overall Attendance</span>
-
-          <strong
-            className={`admin-stat-value ${
-              attendancePercentage === null ? "is-empty" : ""
-            }`}
-          >
-            {attendancePercentage === null
-              ? "N/A"
-              : `${attendancePercentage}%`}
-          </strong>
-
-          <span className="admin-stat-description">
-            Based on verified attendance records
-          </span>
-        </Link>
-      </div>
-
-      {/* =========================
-          ATTENDANCE OVERVIEW
-      ========================== */}
-
-      <div className="admin-dashboard-main-grid">
-        <section className="admin-dashboard-panel admin-attendance-panel">
-          <div className="admin-panel-header">
-            <div className="admin-panel-title-group">
-              <div className="admin-panel-icon admin-panel-icon-blue">
-                <i className="fa-solid fa-chart-area" />
-              </div>
-
-              <div>
-                <span className="admin-panel-eyebrow">
-                  Attendance Overview
-                </span>
-
-                <h2>Attendance Trend</h2>
-
-                <p>
-                  Attendance trend analytics require a dedicated trend API.
-                </p>
-              </div>
-            </div>
-
-            <Link
-              to="/admin/attendance-reports"
-              className="admin-panel-link"
-            >
-              View Reports
-              <i className="fa-solid fa-arrow-right" />
-            </Link>
-          </div>
-
-          <div className="admin-attendance-body">
-            {!hasTrendData ? (
-              <div className="admin-empty-state admin-trend-empty">
-                <div className="admin-empty-icon">
-                  <i className="fa-solid fa-chart-line" />
-                </div>
-
-                <h3>No attendance trend data</h3>
-
-                <p>
-                  API integration is pending for historical attendance
-                  trend data.
-                </p>
-
-                <Link
-                  to="/admin/attendance-reports"
-                  className="admin-empty-link"
-                >
-                  Open attendance reports
-                  <i className="fa-solid fa-arrow-right" />
-                </Link>
-              </div>
-            ) : (
-              <div>
-                {/* Attendance trend API integration */}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* =========================
-            CURRENT ATTENDANCE
-        ========================== */}
-
-        <section className="admin-dashboard-panel admin-attendance-status-panel">
-          <div className="admin-panel-header">
-            <div className="admin-panel-title-group">
-              <div className="admin-panel-icon admin-panel-icon-orange">
-                <i className="fa-solid fa-calendar-check" />
-              </div>
-
-              <div>
-                <span className="admin-panel-eyebrow">
-                  Current Status
-                </span>
-
-                <h2>Attendance</h2>
-              </div>
-            </div>
-
-            <span className="admin-data-badge">
-              <i className="fa-solid fa-database" />
-              Backend
-            </span>
-          </div>
-
-          <div className="admin-attendance-status-content">
-            <div
-              className={`admin-attendance-ring ${
-                !hasAttendanceData ? "is-empty" : ""
-              }`}
-              style={
-                hasAttendanceData
-                  ? {
-                      background: `conic-gradient(
-                        #e98a19 0deg ${attendancePercentage * 3.6}deg,
-                        #e2e8f0 ${attendancePercentage * 3.6}deg 360deg
-                      )`,
-                    }
-                  : undefined
-              }
-            >
-              <div className="admin-attendance-ring-inner">
-                <strong>
-                  {attendancePercentage === null
-                    ? "N/A"
-                    : `${attendancePercentage}%`}
-                </strong>
-
-                {attendancePercentage === null && (
-                  <span>No data</span>
-                )}
-              </div>
-            </div>
-
-            <h3>
-              {hasAttendanceData
-                ? "Attendance available"
-                : "No attendance records"}
-            </h3>
-
+      <section className="admin-welcome-banner">
+        <div className="admin-welcome-left">
+          <div className="admin-welcome-avatar">{initials}</div>
+          <div className="admin-welcome-text">
+            <h1>{greeting}, {displayName}!</h1>
             <p>
-              {hasAttendanceData
-                ? `${presentAttendance} present and ${absentAttendance} absent attendance records.`
-                : "Verified attendance records are not available yet."}
+              Monitor students, faculty, courses, and attendance from one centralized dashboard.
             </p>
           </div>
-
-          <Link
-            to="/admin/attendance-reports"
-            className="admin-status-footer-link"
-          >
-            <span>View attendance reports</span>
-            <i className="fa-solid fa-arrow-right" />
-          </Link>
-        </section>
-      </div>
-
-      {/* =========================
-          QUICK ACTIONS
-      ========================== */}
-
-      <section className="admin-dashboard-panel admin-quick-actions-panel">
-        <div className="admin-panel-header">
-          <div className="admin-panel-title-group">
-            <div className="admin-panel-icon admin-panel-icon-blue">
-              <i className="fa-solid fa-bolt" />
-            </div>
-
-            <div>
-              <span className="admin-panel-eyebrow">Shortcuts</span>
-
-              <h2>Quick Actions</h2>
-
-              <p>
-                Quickly access common administration sections
-              </p>
-            </div>
-          </div>
         </div>
 
-        <div className="admin-quick-actions-grid">
-          <Link to="/admin/students" className="admin-quick-action">
-            <div className="admin-quick-action-icon admin-icon-blue">
-              <i className="fa-solid fa-user-graduate" />
-            </div>
+        <div className="admin-welcome-quote">
+          <p>“Better data,</p>
+          <p>Smarter decisions.</p>
+          <p>A more connected campus.”</p>
+          <span>— SAMS-FR</span>
+        </div>
 
-            <div>
-              <strong>Students</strong>
-              <span>View and manage registered students</span>
-            </div>
 
-            <i className="fa-solid fa-chevron-right" />
-          </Link>
-
-          <Link to="/admin/faculty" className="admin-quick-action">
-            <div className="admin-quick-action-icon admin-icon-purple">
-              <i className="fa-solid fa-chalkboard-user" />
-            </div>
-
-            <div>
-              <strong>Faculty</strong>
-              <span>View and manage faculty members</span>
-            </div>
-
-            <i className="fa-solid fa-chevron-right" />
-          </Link>
-
-          <Link to="/admin/academic-management" className="admin-quick-action">
-            <div className="admin-quick-action-icon admin-icon-green">
-              <i className="fa-solid fa-book-open" />
-            </div>
-
-            <div>
-              <strong>Academic Management</strong>
-              <span>View courses and academic structure</span>
-            </div>
-
-            <i className="fa-solid fa-chevron-right" />
-          </Link>
-
-          <Link
-            to="/admin/attendance-reports"
-            className="admin-quick-action"
-          >
-            <div className="admin-quick-action-icon admin-icon-orange">
-              <i className="fa-solid fa-chart-column" />
-            </div>
-
-            <div>
-              <strong>Attendance Reports</strong>
-              <span>Review attendance records</span>
-            </div>
-
-            <i className="fa-solid fa-chevron-right" />
-          </Link>
+        <div className="admin-welcome-image-wrapper">
+          <img
+            src="/image/admin_campus_banner.jpg"
+            alt="Campus Architecture"
+            className="admin-welcome-campus-img"
+          />
         </div>
       </section>
 
       {/* =========================
-          ACTIVITY + QUICK STATS
+          PRIMARY 4 STAT CARDS
       ========================== */}
+      <div className="admin-stat-grid">
+        <Link to="/admin/students" className="admin-stat-card admin-stat-students">
+          <div className="admin-stat-icon-wrapper admin-icon-blue">
+            <Users size={18} />
+          </div>
+          <div className="admin-stat-details">
+            <span className="admin-stat-label">Total Students</span>
+            <strong className="admin-stat-value">
+              {formatMetric(totalStudents)}
+            </strong>
+            <span className="admin-stat-sub">Registered students</span>
+          </div>
+        </Link>
 
-      <div className="admin-dashboard-bottom-grid">
-        <section className="admin-dashboard-panel admin-recent-panel">
-          <div className="admin-panel-header">
-            <div className="admin-panel-title-group">
-              <div className="admin-panel-icon admin-panel-icon-blue">
-                <i className="fa-solid fa-clock-rotate-left" />
+        <Link to="/admin/faculty" className="admin-stat-card admin-stat-faculty">
+          <div className="admin-stat-icon-wrapper admin-icon-green">
+            <FontAwesomeIcon icon={faChalkboardUser} />
+          </div>
+          <div className="admin-stat-details">
+            <span className="admin-stat-label">Total Faculty</span>
+            <strong className="admin-stat-value">
+              {formatMetric(totalFaculty)}
+            </strong>
+            <span className="admin-stat-sub">Registered faculty members</span>
+          </div>
+        </Link>
+
+        <Link to="/admin/academic-management" className="admin-stat-card admin-stat-courses">
+          <div className="admin-stat-icon-wrapper admin-icon-purple">
+            <BookOpen size={18} />
+          </div>
+          <div className="admin-stat-details">
+            <span className="admin-stat-label">Total Courses</span>
+            <strong className="admin-stat-value">
+              {formatMetric(totalCourses)}
+            </strong>
+            <span className="admin-stat-sub">Courses in the system</span>
+          </div>
+        </Link>
+
+        <Link to="/admin/attendance-reports" className="admin-stat-card admin-stat-attendance">
+          <div className="admin-stat-icon-wrapper admin-icon-orange">
+            <BarChart3 size={18} />
+          </div>
+          <div className="admin-stat-details">
+            <span className="admin-stat-label">Overall Attendance</span>
+            <strong className="admin-stat-value">
+              {attendancePercentage === null ? "N/A" : `${attendancePercentage}%`}
+            </strong>
+            <span className="admin-stat-sub">Based on verified attendance records</span>
+          </div>
+        </Link>
+      </div>
+
+      {/* =========================
+          MIDDLE 3-COLUMN SECTION
+      ========================== */}
+      <div className="admin-middle-grid">
+        {/* Panel 1: Attendance Overview */}
+        <section className="admin-panel admin-attendance-overview-panel">
+          <div className="admin-panel-top">
+            <div className="admin-panel-title-area">
+              <BarChart3 size={18} className="admin-panel-header-icon text-blue" />
+              <div>
+                <h2>Attendance Overview</h2>
+                <p>Attendance trend analytics require a dedicated trend API.</p>
+              </div>
+            </div>
+            <Link to="/admin/attendance-reports" className="admin-panel-link-badge">
+              <span>View Reports</span>
+              <ExternalLink size={11} />
+            </Link>
+          </div>
+
+          <div className="admin-panel-inner-box">
+            <div className="admin-empty-icon-circle blue-circle">
+              <BarChart3 size={24} />
+            </div>
+            <h3>No attendance trend data</h3>
+            <p>API integration is pending for historical attendance trend data.</p>
+            <Link to="/admin/attendance-reports" className="admin-btn-primary">
+              <span>Open attendance reports</span>
+              <ArrowRight size={13} />
+            </Link>
+          </div>
+        </section>
+
+        {/* Panel 2: Current Status */}
+        <section className="admin-panel admin-current-status-panel">
+          <div className="admin-panel-top">
+            <div className="admin-panel-title-area">
+              <span className="admin-status-dot-icon">
+                <CheckCircle2 size={18} className="text-green" />
+              </span>
+              <div>
+                <h2>Current Status</h2>
+              </div>
+            </div>
+            <div className="admin-status-badges">
+              <span className="admin-badge-green">
+                <Check size={11} /> Attendance
+              </span>
+            </div>
+          </div>
+
+          <div className="admin-status-body">
+            <div className="admin-donut-wrapper">
+              <div
+                className="admin-donut-chart"
+                style={{
+                  background: hasAttendanceData
+                    ? `conic-gradient(#10b981 0% ${attendancePercentage}%, #e2e8f0 ${attendancePercentage}% 100%)`
+                    : "#e2e8f0",
+                }}
+              >
+                <div className="admin-donut-inner">
+                  <strong>
+                    {attendancePercentage !== null ? `${attendancePercentage}%` : "N/A"}
+                  </strong>
+                </div>
               </div>
 
-              <div>
-                <span className="admin-panel-eyebrow">
-                  Latest System Activities
-                </span>
-
-                <h2>Recent Activity</h2>
-
+              <div className="admin-donut-meta">
+                <div className="admin-status-indicator">
+                  <CheckCircle2 size={15} className="text-green" />
+                  <strong>
+                    {hasAttendanceData ? "Attendance available" : "No attendance records"}
+                  </strong>
+                </div>
                 <p>
-                  Activity history requires a dedicated backend API.
+                  {hasAttendanceData
+                    ? `${presentAttendance} present and ${absentAttendance} absent attendance records.`
+                    : "Verified attendance records are not available yet."}
                 </p>
+              </div>
+            </div>
+
+            <Link to="/admin/attendance-reports" className="admin-btn-primary admin-btn-status">
+              <span>View attendance reports</span>
+              <ArrowRight size={13} />
+            </Link>
+          </div>
+        </section>
+
+        {/* Panel 3: Quick Actions */}
+        <section className="admin-panel admin-quick-actions-panel">
+          <div className="admin-panel-top">
+            <div className="admin-panel-title-area">
+              <Zap size={18} className="text-blue" />
+              <div>
+                <h2>Quick Actions</h2>
+                <p>Quickly access common administration sections</p>
               </div>
             </div>
           </div>
 
-          <div className="admin-recent-content">
-            {!hasRecentActivity && (
-              <div className="admin-empty-state">
-                <div className="admin-empty-icon">
-                  <i className="fa-solid fa-clock" />
-                </div>
-
-                <h3>No recent activity</h3>
-
-                <p>
-                  API integration is pending for recent system activity.
-                </p>
+          <div className="admin-quick-links-list">
+            <Link to="/admin/students" className="admin-action-item">
+              <div className="admin-action-icon action-icon-green">
+                <Users size={16} />
               </div>
-            )}
+              <div className="admin-action-text">
+                <strong>Students</strong>
+                <span>View and manage registered students</span>
+              </div>
+              <ChevronRight size={14} className="admin-action-chevron" />
+            </Link>
+
+            <Link to="/admin/faculty" className="admin-action-item">
+              <div className="admin-action-icon action-icon-blue">
+                <FontAwesomeIcon icon={faChalkboardUser} />
+              </div>
+              <div className="admin-action-text">
+                <strong>Faculty</strong>
+                <span>View and manage faculty members</span>
+              </div>
+              <ChevronRight size={14} className="admin-action-chevron" />
+            </Link>
+
+            <Link to="/admin/academic-management" className="admin-action-item">
+              <div className="admin-action-icon action-icon-purple">
+                <BookOpen size={16} />
+              </div>
+              <div className="admin-action-text">
+                <strong>Academic Management</strong>
+                <span>View courses and academic structure</span>
+              </div>
+              <ChevronRight size={14} className="admin-action-chevron" />
+            </Link>
+
+            <Link to="/admin/attendance-reports" className="admin-action-item">
+              <div className="admin-action-icon action-icon-orange">
+                <BarChart3 size={16} />
+              </div>
+              <div className="admin-action-text">
+                <strong>Attendance Reports</strong>
+                <span>Review attendance records</span>
+              </div>
+              <ChevronRight size={14} className="admin-action-chevron" />
+            </Link>
           </div>
         </section>
+      </div>
 
-        <section className="admin-dashboard-panel admin-quick-stats-panel">
-          <div className="admin-panel-header">
-            <div className="admin-panel-title-group">
-              <div className="admin-panel-icon admin-panel-icon-blue">
-                <i className="fa-solid fa-chart-simple" />
-              </div>
-
+      {/* =========================
+          BOTTOM 3-COLUMN SECTION
+      ========================== */}
+      <div className="admin-bottom-grid">
+        {/* Column 1: Quick Stats */}
+        <section className="admin-panel admin-quick-stats-panel">
+          <div className="admin-panel-top">
+            <div className="admin-panel-title-area">
+              <Sparkles size={18} className="text-blue" />
               <div>
-                <span className="admin-panel-eyebrow">
-                  Key Metrics
-                </span>
-
                 <h2>Quick Stats</h2>
-
                 <p>Key metrics at a glance</p>
               </div>
             </div>
           </div>
 
-          <div className="admin-quick-stats-grid">
-            <div className="admin-quick-stat admin-quick-stat-blue">
-              <span>Total Courses</span>
-
-              <strong
-                className={
-                  totalCourses === null ||
-                  totalCourses === undefined
-                    ? "is-empty"
-                    : ""
-                }
-              >
-                {formatMetric(totalCourses)}
-              </strong>
-
-              <small>Backend data</small>
+          <div className="admin-quick-stats-2x2">
+            <div className="admin-mini-stat-card mini-stat-courses">
+              <div className="admin-mini-stat-content">
+                <div className="admin-mini-stat-icon-wrapper mini-icon-blue">
+                  <BookOpen size={15} />
+                </div>
+                <div className="admin-mini-stat-details">
+                  <span className="admin-mini-stat-label">Total Courses</span>
+                  <strong className="admin-mini-stat-value">
+                    {formatMetric(totalCourses)}
+                  </strong>
+                  <span className="admin-mini-stat-sub">Courses in system</span>
+                </div>
+              </div>
             </div>
 
-            <div className="admin-quick-stat admin-quick-stat-purple">
-              <span>Total Students</span>
-
-              <strong
-                className={
-                  totalStudents === null ||
-                  totalStudents === undefined
-                    ? "is-empty"
-                    : ""
-                }
-              >
-                {formatMetric(totalStudents)}
-              </strong>
-
-              <small>Backend data</small>
+            <div className="admin-mini-stat-card mini-stat-students">
+              <div className="admin-mini-stat-content">
+                <div className="admin-mini-stat-icon-wrapper mini-icon-green">
+                  <Users size={15} />
+                </div>
+                <div className="admin-mini-stat-details">
+                  <span className="admin-mini-stat-label">Total Students</span>
+                  <strong className="admin-mini-stat-value">
+                    {formatMetric(totalStudents)}
+                  </strong>
+                  <span className="admin-mini-stat-sub">Registered students</span>
+                </div>
+              </div>
             </div>
 
-            <div className="admin-quick-stat admin-quick-stat-green">
-              <span>Attendance Records</span>
-
-              <strong
-                className={
-                  totalAttendanceRecords === null ||
-                  totalAttendanceRecords === undefined
-                    ? "is-empty"
-                    : ""
-                }
-              >
-                {formatMetric(totalAttendanceRecords)}
-              </strong>
-
-              <small>Verified records</small>
+            <div className="admin-mini-stat-card mini-stat-records">
+              <div className="admin-mini-stat-content">
+                <div className="admin-mini-stat-icon-wrapper mini-icon-purple">
+                  <FileText size={15} />
+                </div>
+                <div className="admin-mini-stat-details">
+                  <span className="admin-mini-stat-label">Attendance Records</span>
+                  <strong className="admin-mini-stat-value">
+                    {formatMetric(totalAttendanceRecords)}
+                  </strong>
+                  <span className="admin-mini-stat-sub">Verified records</span>
+                </div>
+              </div>
             </div>
 
-            <div className="admin-quick-stat admin-quick-stat-neutral">
-              <span>Absent Records</span>
-
-              <strong
-                className={
-                  absentAttendance === null ||
-                  absentAttendance === undefined
-                    ? "is-empty"
-                    : ""
-                }
-              >
-                {formatMetric(absentAttendance)}
-              </strong>
-
-              <small>Attendance data</small>
+            <div className="admin-mini-stat-card mini-stat-absent">
+              <div className="admin-mini-stat-content">
+                <div className="admin-mini-stat-icon-wrapper mini-icon-orange">
+                  <AlertTriangle size={15} />
+                </div>
+                <div className="admin-mini-stat-details">
+                  <span className="admin-mini-stat-label">Absent Records</span>
+                  <strong className="admin-mini-stat-value">
+                    {formatMetric(absentAttendance)}
+                  </strong>
+                  <span className="admin-mini-stat-sub">Attendance data</span>
+                </div>
+              </div>
             </div>
           </div>
         </section>
+
+        {/* Column 2: Recent Activity */}
+        <section className="admin-panel admin-recent-activity-panel">
+          <div className="admin-panel-top">
+            <div className="admin-panel-title-area">
+              <Clock size={18} className="text-blue" />
+              <div>
+                <h2>Recent Activity</h2>
+                <p>Activity history requires a dedicated backend API.</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-panel-inner-box">
+            <div className="admin-empty-icon-circle blue-circle">
+              <Clock size={24} />
+            </div>
+            <h3>No recent activity</h3>
+            <p>API integration is pending for recent system activity.</p>
+            <button type="button" className="admin-btn-outline">
+              <span>Open activity logs</span>
+              <ExternalLink size={12} />
+            </button>
+          </div>
+        </section>
+
+        {/* Column 3: Faculty Help + System Status */}
+        <div className="admin-right-column">
+          <section className="admin-panel admin-help-panel">
+            <div className="admin-panel-top">
+              <div className="admin-panel-title-area">
+                <div className="admin-help-icon-wrapper">
+                  <Headphones size={18} />
+                </div>
+                <div>
+                  <h2>Faculty Help</h2>
+                </div>
+              </div>
+            </div>
+
+            <div className="admin-help-content">
+              <p>
+                If your courses, timetable, or attendance data are missing,
+                contact your administrator to verify the relevant records.
+              </p>
+              <Link to="/admin/faculty" className="admin-btn-outline-blue">
+                <span>View faculty profile</span>
+                <ArrowRight size={13} />
+              </Link>
+            </div>
+          </section>
+
+          <div className="admin-system-status-card">
+            <div className="admin-system-status-left">
+              <div className="admin-status-badge-circle">
+                <Check size={14} />
+              </div>
+              <div className="admin-status-text">
+                <strong>System Status</strong>
+                <span>All systems are connected and active.</span>
+              </div>
+            </div>
+            <ChevronRight size={16} className="admin-status-chevron" />
+          </div>
+        </div>
       </div>
     </section>
   );

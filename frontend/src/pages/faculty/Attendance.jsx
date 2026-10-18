@@ -1960,11 +1960,11 @@ function Attendance() {
                   "Friday",
                   "Saturday",
                 ];
-                const today = dayNames[new DataTransfer().getDay()];
+                const today = dayNames[new Date().getDay()];
                 const todayEntries = timetableEntries.filter(
                   (entry) =>
-                    String(entry.day_of_week || "").trim().toLowerCase()===
-                  today.toLowerCase()
+                    String(entry.day_of_week || "").trim().toLowerCase() ===
+                    today.toLowerCase()
                 );
                 if (todayEntries.length == 0){
                   return <p>No timetable entries found for {today}.</p>;
