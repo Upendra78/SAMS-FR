@@ -1,4 +1,3 @@
-
 import {
   useCallback,
   useEffect,
@@ -10,27 +9,43 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCalendarDays,
   faCheck,
+  faCheckCircle,
   faChevronRight,
   faCloudArrowUp,
   faDownload,
   faFileExcel,
   faFileLines,
+  faFilter,
   faInfoCircle,
+  faLayerGroup,
   faListCheck,
+  faRotateRight,
   faSave,
   faSearch,
+  faShieldHalved,
+  faTriangleExclamation,
   faUserClock,
   faUsers,
 } from "@fortawesome/free-solid-svg-icons";
 
 import {
   getAdminTimetable,
-  previewTimetableImport,
+  getImportAcademicYears,
+  getImportWorkbookSheets,
+  analyzeTimetableImport,
+  commitTimetableImport,
 } from "../../services/timetableService";
 
 import "./TimetableManagement.css";
 
-const steps = ["Upload File", "Extract & Preview", "Map & Assign", "Save Data"];
+const steps = [
+  "Upload & Year",
+  "Extract & Preview",
+  "Map & Resolve",
+  "Review & Commit",
+  "Import Summary",
+];
+
 const tabs = ["Timetable", "Courses", "Faculty", "Classrooms"];
 
 const dayOrder = [
@@ -92,10 +107,12 @@ function getMappingStatusLabel(status) {
   const labels = {
     pending: "Awaiting match",
     matched: "Auto-matched",
+    warning: "Matched with warning",
     unmatched: "Unmatched",
     ambiguous: "Multiple matches",
     conflict: "Conflict",
-    selected: "Selected — awaiting validation",
+    duplicate: "Duplicate",
+    selected: "Selected",
   };
 
   return labels[status] || "Needs review";
@@ -104,14 +121,29 @@ function getMappingStatusLabel(status) {
 function TimetableManagement() {
   const fileInputRef = useRef(null);
 
-  // Import workflow
+  // Import workflow state
   const [activeStep, setActiveStep] = useState(1);
   const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState(null);
+  const [academicYears, setAcademicYears] = useState(["2026-27", "2024-28"]);
+  const [academicYear, setAcademicYear] = useState("2026-27");
+  const [customAcademicYear, setCustomAcademicYear] = useState("");
+  const [availableSheets, setAvailableSheets] = useState([]);
+  const [selectedSheet, setSelectedSheet] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
 
-  // Saved timetable
+  // Analysis result from backend
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [entryOverrides, setEntryOverrides] = useState({});
+  const [selectedRows, setSelectedRows] = useState({});
+  const [importMode, setImportMode] = useState("add_missing");
+  const [confirmCommit, setConfirmCommit] = useState(false);
+  const [commitLoading, setCommitLoading] = useState(false);
+  const [commitResult, setCommitResult] = useState(null);
+  const [commitError, setCommitError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  // Saved timetable state
   const [activeTab, setActiveTab] = useState("Timetable");
   const [entries, setEntries] = useState([]);
   const [timetableLoading, setTimetableLoading] = useState(true);
@@ -121,37 +153,29 @@ function TimetableManagement() {
   const [section, setSection] = useState("All");
   const [search, setSearch] = useState("");
 
-  // Mapping review
-  const [mapping, setMapping] = useState({});
-  const [mappingMessage, setMappingMessage] = useState("");
+  // Step 3 mapping filters
   const [mappingSearch, setMappingSearch] = useState("");
   const [mappingStatusFilter, setMappingStatusFilter] = useState("All");
-  const [mappingDepartmentFilter, setMappingDepartmentFilter] = useState("All");
   const [mappingSemesterFilter, setMappingSemesterFilter] = useState("All");
   const [mappingSectionFilter, setMappingSectionFilter] = useState("All");
 
   // Emergency faculty replacement
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
-
   const [currentFacultySearch, setCurrentFacultySearch] = useState("");
   const [currentFacultyId, setCurrentFacultyId] = useState("");
   const [selectedCurrentFaculty, setSelectedCurrentFaculty] = useState("");
-
   const [adjustmentTargetId, setAdjustmentTargetId] = useState("");
-
   const [substituteSearch, setSubstituteSearch] = useState("");
   const [selectedSubstitute, setSelectedSubstitute] = useState("");
   const [adjustmentFacultyId, setAdjustmentFacultyId] = useState("");
-
-  const [adjustmentReason, setAdjustmentReason] = useState(
-    "Faculty unavailable"
-  );
+  const [adjustmentReason, setAdjustmentReason] = useState("Faculty unavailable");
   const [customAdjustmentReason, setCustomAdjustmentReason] = useState("");
   const [effectiveDate, setEffectiveDate] = useState("");
   const [requestApproval, setRequestApproval] = useState(true);
   const [adjustmentMessage, setAdjustmentMessage] = useState("");
 
-  const [notice, setNotice] = useState("");
+  const effectiveAcademicYear =
+    academicYear === "CUSTOM" ? customAcademicYear.trim() : academicYear;
 
   const loadTimetable = useCallback(async () => {
     setTimetableLoading(true);
@@ -181,6 +205,21 @@ function TimetableManagement() {
 
     return () => clearTimeout(timer);
   }, [loadTimetable]);
+
+  useEffect(() => {
+    async function loadYears() {
+      try {
+        const res = await getImportAcademicYears();
+        if (res?.success && Array.isArray(res.academic_years)) {
+          setAcademicYears(res.academic_years);
+          if (res.default) setAcademicYear(res.default);
+        }
+      } catch (err) {
+        console.debug("Could not load academic years:", err?.message);
+      }
+    }
+    void loadYears();
+  }, []);
 
   const semesters = useMemo(
     () =>
@@ -278,7 +317,6 @@ function TimetableManagement() {
     [entries]
   );
 
-  // Faculty searches currently use faculty names found in saved timetable data.
   const currentFacultyOptions = useMemo(() => {
     const query = currentFacultySearch.trim().toLowerCase();
 
@@ -286,12 +324,6 @@ function TimetableManagement() {
       name.toLowerCase().includes(query)
     );
   }, [distinctFaculty, currentFacultySearch]);
-
-  const selectedFacultyEntries = useMemo(
-    () =>
-      entries.filter((entry) => entry.faculty === selectedCurrentFaculty),
-    [entries, selectedCurrentFaculty]
-  );
 
   const selectedAdjustmentEntry = useMemo(
     () =>
@@ -310,126 +342,128 @@ function TimetableManagement() {
     );
   }, [distinctFaculty, selectedCurrentFaculty, substituteSearch]);
 
-  const previewEntries = useMemo(() => preview?.entries || [], [preview]);
+  // Merge analysis entries with admin overrides and selections
+  const processedRows = useMemo(() => {
+    if (!analysisResult?.entries) return [];
 
-  const mappingRows = useMemo(
-    () =>
-      previewEntries.map((entry, index) => {
-        const current = mapping[index] || {};
+    return analysisResult.entries.map((item) => {
+      const override = entryOverrides[item.index] || {};
+      const courseId =
+        override.course_id !== undefined ? override.course_id : item.course_id;
+      const facultyId =
+        override.faculty_id !== undefined ? override.faculty_id : item.faculty_id;
+      const room = override.room !== undefined ? override.room : item.room;
+      const sectionVal =
+        override.section !== undefined ? override.section : item.section;
+      const semesterVal =
+        override.semester !== undefined ? override.semester : item.semester;
 
-        return {
-          index,
-          entry,
-          status: current.status || "pending",
-          offeringId: current.offeringId || "",
-          candidates: current.candidates || [],
-          department: entry.department || entry.department_name || "",
-          semester: String(entry.semester ?? ""),
-          section: entry.section || entry.class_group || "",
-          courseCode: entry.course_code || entry.courseCode || "",
-          courseName: entry.course_name || entry.courseName || "",
-        };
-      }),
-    [previewEntries, mapping]
-  );
+      const courseObj = (analysisResult.available_courses || []).find(
+        (c) => c.course_id === Number(courseId)
+      );
+      const facultyObj = (analysisResult.available_faculty || []).find(
+        (f) => f.faculty_id === Number(facultyId)
+      );
+
+      let effectiveStatus = item.status;
+      if (override.course_id) {
+        effectiveStatus = "matched";
+      }
+
+      return {
+        ...item,
+        course_id: courseId,
+        course_code: courseObj ? courseObj.course_code : item.course_code,
+        course_name: courseObj ? courseObj.course_name : item.course_name,
+        semester: courseObj ? courseObj.semester : semesterVal,
+        faculty_id: facultyId,
+        faculty_name: facultyObj ? facultyObj.name : item.faculty_name,
+        room: room,
+        section: sectionVal,
+        status: effectiveStatus,
+        isSelected: selectedRows[item.index] !== false,
+      };
+    });
+  }, [analysisResult, entryOverrides, selectedRows]);
 
   const mappingCounts = useMemo(() => {
     const counts = {
-      pending: 0,
+      total: processedRows.length,
       matched: 0,
-      unmatched: 0,
+      warning: 0,
       ambiguous: 0,
+      unmatched: 0,
       conflict: 0,
-      needsReview: 0,
+      duplicate: 0,
+      selected: 0,
     };
 
-    mappingRows.forEach((row) => {
+    processedRows.forEach((row) => {
       if (Object.hasOwn(counts, row.status)) counts[row.status] += 1;
-
-      if (
-        ["pending", "unmatched", "ambiguous", "conflict"].includes(row.status)
-      ) {
-        counts.needsReview += 1;
-      }
+      if (row.isSelected) counts.selected += 1;
     });
 
     return counts;
-  }, [mappingRows]);
+  }, [processedRows]);
 
   const mappingFilterOptions = useMemo(
     () => ({
-      departments: [
-        ...new Set(mappingRows.map((row) => row.department).filter(Boolean)),
-      ].sort(),
       semesters: [
-        ...new Set(mappingRows.map((row) => row.semester).filter(Boolean)),
-      ].sort(),
+        ...new Set(processedRows.map((row) => String(row.semester)).filter(Boolean)),
+      ].sort((a, b) => Number(a) - Number(b)),
       sections: [
-        ...new Set(mappingRows.map((row) => row.section).filter(Boolean)),
+        ...new Set(processedRows.map((row) => String(row.section)).filter(Boolean)),
       ].sort(),
     }),
-    [mappingRows]
+    [processedRows]
   );
 
-  const filteredMappingRows = useMemo(() => {
+  const filteredProcessedRows = useMemo(() => {
     const query = mappingSearch.trim().toLowerCase();
 
-    return mappingRows.filter((row) => {
+    return processedRows.filter((row) => {
       const matchesStatus =
         mappingStatusFilter === "All" || row.status === mappingStatusFilter;
-      const matchesDepartment =
-        mappingDepartmentFilter === "All" ||
-        row.department === mappingDepartmentFilter;
       const matchesSemester =
         mappingSemesterFilter === "All" ||
-        row.semester === mappingSemesterFilter;
+        String(row.semester) === mappingSemesterFilter;
       const matchesSection =
         mappingSectionFilter === "All" ||
-        row.section === mappingSectionFilter;
+        String(row.section) === mappingSectionFilter;
 
       const matchesSearch = [
-        row.courseCode,
-        row.courseName,
-        row.department,
-        row.semester,
+        row.course_code,
+        row.course_name,
+        row.faculty_name,
+        row.room,
         row.section,
-        row.entry.day_of_week,
-        row.entry.raw_cell,
-      ].some((value) => String(value || "").toLowerCase().includes(query));
+        row.day_of_week,
+        row.raw_cell,
+      ].some((val) => String(val || "").toLowerCase().includes(query));
 
-      return (
-        matchesStatus &&
-        matchesDepartment &&
-        matchesSemester &&
-        matchesSection &&
-        matchesSearch
-      );
+      return matchesStatus && matchesSemester && matchesSection && matchesSearch;
     });
   }, [
-    mappingRows,
+    processedRows,
     mappingSearch,
     mappingStatusFilter,
-    mappingDepartmentFilter,
     mappingSemesterFilter,
     mappingSectionFilter,
   ]);
 
-  const mappedCount = mappingCounts.matched;
-
-  function handleFileChange(event) {
+  async function handleFileChange(event) {
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
 
     setPreviewError("");
     setNotice("");
-    setMappingMessage("");
-    setPreview(null);
-    setMapping({});
-    setMappingSearch("");
-    setMappingStatusFilter("All");
-    setMappingDepartmentFilter("All");
-    setMappingSemesterFilter("All");
-    setMappingSectionFilter("All");
+    setAnalysisResult(null);
+    setEntryOverrides({});
+    setSelectedRows({});
+    setCommitResult(null);
+    setCommitError("");
+    setAvailableSheets([]);
+    setSelectedSheet("");
 
     if (!selectedFile.name.toLowerCase().endsWith(".xlsx")) {
       setFile(null);
@@ -447,41 +481,73 @@ function TimetableManagement() {
 
     setFile(selectedFile);
     setActiveStep(1);
+
+    try {
+      const sheetsRes = await getImportWorkbookSheets(selectedFile);
+      if (sheetsRes?.success && Array.isArray(sheetsRes.sheets)) {
+        setAvailableSheets(sheetsRes.sheets);
+        if (sheetsRes.recommended) {
+          setSelectedSheet(sheetsRes.recommended);
+        } else if (sheetsRes.sheets.length > 0) {
+          setSelectedSheet(sheetsRes.sheets[0]);
+        }
+      }
+    } catch {
+      // Sheet auto-discovery will handle fallback gracefully
+    }
   }
 
-  async function handlePreview() {
+  async function handleAnalyze() {
     if (!file) {
       setPreviewError("Choose an Excel workbook first.");
       return;
     }
 
+    if (!effectiveAcademicYear) {
+      setPreviewError("Please select or enter a valid academic year.");
+      return;
+    }
+
     setPreviewLoading(true);
     setPreviewError("");
-    setMappingMessage("");
     setNotice("");
+    setCommitResult(null);
+    setCommitError("");
 
     try {
-      const response = await previewTimetableImport(file);
-
-      if (!response?.success || !Array.isArray(response.entries)) {
-        throw new Error(response?.message || "Could not preview this workbook.");
+      const res = await analyzeTimetableImport(
+        file,
+        effectiveAcademicYear,
+        selectedSheet
+      );
+      if (!res?.success || !Array.isArray(res.entries)) {
+        throw new Error(res?.message || "Could not analyze this timetable workbook.");
       }
 
-      setPreview(response);
-      setMapping({});
+      setAnalysisResult(res);
+      setEntryOverrides({});
+
+      // Pre-select rows that are matched or have warnings
+      const initialSelection = {};
+      res.entries.forEach((item) => {
+        initialSelection[item.index] =
+          item.status !== "conflict" && item.status !== "duplicate";
+      });
+      setSelectedRows(initialSelection);
+
       setActiveStep(2);
       setNotice(
-        "Preview generated successfully. No timetable records have been saved."
+        `Parsed ${res.total_rows} entries from sheet "${res.source_sheet}". Review the extracted data and mappings below.`
       );
     } catch (error) {
-      setPreviewError(getErrorMessage(error, "The timetable preview failed."));
+      setPreviewError(getErrorMessage(error, "Timetable analysis failed."));
     } finally {
       setPreviewLoading(false);
     }
   }
 
   function downloadPreviewCsv() {
-    if (!previewEntries.length) return;
+    if (!processedRows.length) return;
 
     const columns = [
       "source_row",
@@ -491,9 +557,10 @@ function TimetableManagement() {
       "end_time",
       "class_group",
       "course_code",
-      "raw_assignment",
+      "course_name",
+      "faculty_name",
+      "room",
       "status",
-      "review_reason",
       "raw_cell",
     ];
 
@@ -502,7 +569,7 @@ function TimetableManagement() {
 
     const lines = [
       columns.map(escapeCsv).join(","),
-      ...previewEntries.map((entry) =>
+      ...processedRows.map((entry) =>
         columns.map((column) => escapeCsv(entry[column])).join(",")
       ),
     ];
@@ -515,84 +582,122 @@ function TimetableManagement() {
     const link = document.createElement("a");
 
     link.href = url;
-    link.download = "timetable-preview.csv";
+    link.download = `timetable-preview-${effectiveAcademicYear}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
   }
 
-  function goToStep(step) {
-    setPreviewError("");
-    setMappingMessage("");
+  function toggleRowSelection(index) {
+    setSelectedRows((prev) => ({
+      ...prev,
+      [index]: !prev[index],
+    }));
+  }
 
-    if (step === 1) {
+  function toggleSelectAll(select) {
+    const updated = {};
+    processedRows.forEach((r) => {
+      updated[r.index] = select;
+    });
+    setSelectedRows(updated);
+  }
+
+  function updateEntryOverride(index, updates) {
+    setEntryOverrides((prev) => ({
+      ...prev,
+      [index]: {
+        ...(prev[index] || {}),
+        ...updates,
+      },
+    }));
+  }
+
+  async function handleCommitImport() {
+    const selectedEntries = processedRows.filter(
+      (r) => r.isSelected && r.course_id
+    );
+
+    if (!selectedEntries.length) {
+      setCommitError("Select at least one valid row with an assigned course to import.");
+      return;
+    }
+
+    setCommitLoading(true);
+    setCommitError("");
+
+    const payload = {
+      academic_year: effectiveAcademicYear,
+      import_mode: importMode,
+      entries: selectedEntries.map((r) => ({
+        course_id: r.course_id,
+        faculty_id: r.faculty_id || null,
+        semester: r.semester || 1,
+        section: r.section || "A",
+        room: r.room || null,
+        day_of_week: r.day_of_week,
+        start_time: r.start_time,
+        end_time: r.end_time,
+      })),
+    };
+
+    try {
+      const res = await commitTimetableImport(payload);
+      if (!res?.success) {
+        throw new Error(res?.message || "Import failed on the server.");
+      }
+
+      setCommitResult(res.data);
+      setActiveStep(5);
+      setNotice(res.message);
+      void loadTimetable();
+    } catch (err) {
+      setCommitError(getErrorMessage(err, "Failed to commit timetable import."));
+    } finally {
+      setCommitLoading(false);
+    }
+  }
+
+  function resetWizard() {
+    setActiveStep(1);
+    setFile(null);
+    setAnalysisResult(null);
+    setEntryOverrides({});
+    setSelectedRows({});
+    setCommitResult(null);
+    setCommitError("");
+    setPreviewError("");
+    setNotice("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function goToStep(targetStep) {
+    if (targetStep === 1) {
       setActiveStep(1);
       return;
     }
 
-    if (!preview) {
-      setPreviewError("Upload a workbook and generate its preview first.");
+    if (!analysisResult) {
+      setPreviewError("Upload a workbook and run analysis first.");
       return;
     }
 
-    if (step === 2) {
-      setActiveStep(2);
-      return;
-    }
-
-    if (step === 3) {
-      if (!previewEntries.length) {
-        setPreviewError("No extracted rows are available to map.");
-        return;
-      }
-
-      setActiveStep(3);
-      return;
-    }
-
-    if (step === 4 && !hasValidMappings()) {
-      setMappingMessage(
-        "Please assign a valid Offering ID to every timetable row."
-      );
+    if (targetStep <= 4 || (targetStep === 5 && commitResult)) {
+      setActiveStep(targetStep);
     }
   }
 
-  function hasValidMappings() {
-    return (
-      mappingRows.length > 0 &&
-      mappingRows.every(
-        (row) =>
-          row.status === "matched" &&
-          row.offeringId !== "" &&
-          row.offeringId !== null &&
-          row.offeringId !== undefined
-      )
-    );
-  }
-
-  function updateMapping(index, updates) {
-    setMapping((current) => ({
-      ...current,
-      [index]: { ...(current[index] || {}), ...updates },
-    }));
-
-    setMappingMessage("");
-    setNotice("");
-  }
-
+  // Emergency Faculty Replacement handlers
   function openAdjustment(entry = null) {
     setAdjustmentOpen(true);
-
     setCurrentFacultySearch(entry?.faculty || "");
     setCurrentFacultyId("");
     setSelectedCurrentFaculty(entry?.faculty || "");
     setAdjustmentTargetId(entry ? String(entry.id) : "");
-
     setSubstituteSearch("");
     setSelectedSubstitute("");
     setAdjustmentFacultyId("");
-
     setAdjustmentReason("Faculty unavailable");
     setCustomAdjustmentReason("");
     setEffectiveDate(new Date().toLocaleDateString("en-CA"));
@@ -653,25 +758,9 @@ function TimetableManagement() {
         : adjustmentReason;
 
     setAdjustmentMessage(
-      `Local validation passed. ${selectedCurrentFaculty} → ${selectedSubstitute}; ` +
-        `${selectedAdjustmentEntry.courseCode || selectedAdjustmentEntry.courseName || "Selected course"}; ` +
-        `effective ${effectiveDate}; reason: ${reason}. ` +
-        `Approval ${requestApproval ? "requested" : "not requested"}. ` +
-        "This has NOT been assigned, submitted, or saved because the backend endpoint is not connected."
-    );
-  }
-
-  function handleSaveStep() {
-    if (!hasValidMappings()) {
-      setActiveStep(3);
-      setMappingMessage(
-        "Complete the course-offering IDs for every extracted row before checking save readiness."
-      );
-      return;
-    }
-
-    setNotice(
-      "Frontend checks passed. Nothing has been saved. A backend endpoint must validate the offerings, detect schedule conflicts, and persist the import."
+      `Validation passed. Reassignment proposed: ${selectedCurrentFaculty} → ${selectedSubstitute} for ` +
+        `${selectedAdjustmentEntry.courseCode || selectedAdjustmentEntry.courseName}; ` +
+        `effective ${effectiveDate}; reason: ${reason}.`
     );
   }
 
@@ -685,21 +774,24 @@ function TimetableManagement() {
   return (
     <section className="timetable-page">
       <div className="timetable-workspace">
-        {/* SECTION 1: Upload and import workflow */}
+        {/* SECTION 1: Upload and Import Workflow */}
         <header className="timetable-import-heading">
           <div className="timetable-heading-icon">
             <FontAwesomeIcon icon={faFileLines} />
           </div>
           <div>
-            <h2>Upload Timetable File</h2>
+            <h2>Timetable Management & Excel Import</h2>
             <p>
-              Upload an Excel file to extract timetable data and prepare it for
-              validation.
+              Upload, parse, match database entities, review conflicts, and commit academic timetables.
             </p>
           </div>
         </header>
 
-        <nav className="timetable-stepper" aria-label="Timetable import steps">
+        <nav
+          className="timetable-stepper"
+          style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
+          aria-label="Timetable import steps"
+        >
           {steps.map((label, index) => {
             const step = index + 1;
             const completed = step < activeStep;
@@ -727,96 +819,146 @@ function TimetableManagement() {
           })}
         </nav>
 
-        <section className="timetable-upload-card">
-          <div className="timetable-file-summary">
-            <div className="timetable-excel-icon">
-              <FontAwesomeIcon icon={faFileExcel} />
-            </div>
+        {/* STEP 1: Upload & Academic Year */}
+        {activeStep === 1 && (
+          <section className="timetable-upload-card">
+            <div className="timetable-file-summary">
+              <div className="timetable-excel-icon">
+                <FontAwesomeIcon icon={faFileExcel} />
+              </div>
 
-            <div className="timetable-file-copy">
-              <strong>{file?.name || "No timetable file selected"}</strong>
-              <span>
-                {file
-                  ? `Excel (.xlsx) · ${(file.size / (1024 * 1024)).toFixed(2)} MB`
-                  : "Supported format: .xlsx · Maximum size: 10 MB"}
-              </span>
-              <span>
-                {file
-                  ? "File selected and ready for preview."
-                  : "Choose the workbook used by your institution."}
-              </span>
-              {file && (
-                <span className="timetable-success-label">
-                  <FontAwesomeIcon icon={faCheck} /> File selected
+              <div className="timetable-file-copy">
+                <strong>{file?.name || "No timetable file selected"}</strong>
+                <span>
+                  {file
+                    ? `Excel (.xlsx) · ${(file.size / (1024 * 1024)).toFixed(2)} MB`
+                    : "Supported format: .xlsx · Maximum size: 10 MB"}
                 </span>
-              )}
+                <span>
+                  {file
+                    ? "File ready for analysis."
+                    : "Choose the master timetable workbook to import."}
+                </span>
+                {file && (
+                  <span className="timetable-success-label">
+                    <FontAwesomeIcon icon={faCheck} /> File selected
+                  </span>
+                )}
+              </div>
+
+              <div className="timetable-upload-actions">
+                <input
+                  ref={fileInputRef}
+                  className="timetable-hidden-input"
+                  type="file"
+                  accept=".xlsx"
+                  onChange={handleFileChange}
+                />
+                <button
+                  type="button"
+                  className="timetable-outline-button"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <FontAwesomeIcon icon={faCloudArrowUp} />
+                  {file ? "Change File" : "Choose File"}
+                </button>
+                <button
+                  type="button"
+                  className="timetable-primary-button"
+                  onClick={handleAnalyze}
+                  disabled={!file || previewLoading || !effectiveAcademicYear}
+                >
+                  <FontAwesomeIcon icon={faFileLines} />
+                  {previewLoading ? "Analyzing Workbook..." : "Extract & Analyze"}
+                </button>
+              </div>
             </div>
 
-            <div className="timetable-upload-actions">
-              <input
-                ref={fileInputRef}
-                className="timetable-hidden-input"
-                type="file"
-                accept=".xlsx"
-                onChange={handleFileChange}
-              />
-              <button
-                type="button"
-                className="timetable-outline-button"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <FontAwesomeIcon icon={faCloudArrowUp} />
-                {file ? "Change File" : "Choose File"}
-              </button>
-              <button
-                type="button"
-                className="timetable-primary-button"
-                onClick={handlePreview}
-                disabled={!file || previewLoading}
-              >
-                <FontAwesomeIcon icon={faFileLines} />
-                {previewLoading ? "Generating Preview..." : "Extract & Preview"}
-              </button>
-            </div>
-          </div>
+            <div className="timetable-file-information">
+              <div className="timetable-information-heading">
+                <FontAwesomeIcon icon={faInfoCircle} />
+                <strong>Import Settings & Metadata</strong>
+              </div>
 
-          <div className="timetable-file-information">
-            <div className="timetable-information-heading">
-              <FontAwesomeIcon icon={faInfoCircle} />
-              <strong>File Information</strong>
+              <div className="timetable-import-controls-row">
+                <div className="timetable-control-group">
+                  <label htmlFor="academic-year-select">Academic Year</label>
+                  <select
+                    id="academic-year-select"
+                    value={academicYear}
+                    onChange={(e) => setAcademicYear(e.target.value)}
+                  >
+                    {academicYears.map((yr) => (
+                      <option key={yr} value={yr}>
+                        {yr}
+                      </option>
+                    ))}
+                    <option value="CUSTOM">+ Custom Academic Year</option>
+                  </select>
+                </div>
+
+                {academicYear === "CUSTOM" && (
+                  <div className="timetable-control-group">
+                    <label htmlFor="custom-year-input">Enter Year (e.g. 2027-28)</label>
+                    <input
+                      id="custom-year-input"
+                      type="text"
+                      placeholder="e.g. 2027-28"
+                      value={customAcademicYear}
+                      onChange={(e) => setCustomAcademicYear(e.target.value)}
+                    />
+                  </div>
+                )}
+
+                {availableSheets.length > 0 && (
+                  <div className="timetable-control-group">
+                    <label htmlFor="sheet-select">Worksheet</label>
+                    <select
+                      id="sheet-select"
+                      value={selectedSheet}
+                      onChange={(e) => setSelectedSheet(e.target.value)}
+                    >
+                      {availableSheets.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              <div className="timetable-file-metadata" style={{ marginTop: 14 }}>
+                <div>
+                  <span>File Name</span>
+                  <strong>{file?.name || "—"}</strong>
+                </div>
+                <div>
+                  <span>Academic Year</span>
+                  <strong>{effectiveAcademicYear || "—"}</strong>
+                </div>
+                <div>
+                  <span>Target Sheet</span>
+                  <strong>{selectedSheet || "Auto-detect"}</strong>
+                </div>
+                <div>
+                  <span>Analysis Status</span>
+                  <strong>
+                    {previewLoading
+                      ? "Processing..."
+                      : analysisResult
+                        ? "Ready for review"
+                        : "Not analyzed"}
+                  </strong>
+                </div>
+              </div>
             </div>
-            <div className="timetable-file-metadata">
-              <div>
-                <span>File Name</span>
-                <strong>{file?.name || "—"}</strong>
-              </div>
-              <div>
-                <span>File Type</span>
-                <strong>{file ? "Excel (.xlsx)" : "—"}</strong>
-              </div>
-              <div>
-                <span>File Size</span>
-                <strong>
-                  {file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : "—"}
-                </strong>
-              </div>
-              <div>
-                <span>Preview Status</span>
-                <strong>
-                  {previewLoading
-                    ? "Processing..."
-                    : preview
-                      ? "Preview ready"
-                      : "Not processed"}
-                </strong>
-              </div>
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         {previewError && (
           <div className="timetable-alert timetable-alert-error" role="alert">
-            <strong>Unable to continue</strong>
+            <FontAwesomeIcon icon={faTriangleExclamation} />
             <span>{previewError}</span>
           </div>
         )}
@@ -828,12 +970,597 @@ function TimetableManagement() {
           </div>
         )}
 
-        {/* SECTION 2: Saved timetable management */}
+        {/* STEP 2: Extract & Preview */}
+        {activeStep === 2 && analysisResult && (
+          <section className="timetable-stage-card timetable-preview-card">
+            <div className="timetable-preview-toolbar">
+              <div>
+                <h3>Extracted Timetable Preview</h3>
+                <p>
+                  Found {analysisResult.total_rows} periods in sheet &quot;
+                  {analysisResult.source_sheet}&quot; for academic year{" "}
+                  <strong>{effectiveAcademicYear}</strong>. No database records have been written yet.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="timetable-outline-button"
+                onClick={downloadPreviewCsv}
+                disabled={!processedRows.length}
+              >
+                <FontAwesomeIcon icon={faDownload} />
+                Download Preview CSV
+              </button>
+            </div>
+
+            <div className="timetable-review-stats">
+              <div className="timetable-review-stat-box">
+                <span>Total Periods</span>
+                <strong>{mappingCounts.total}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Auto-Matched</span>
+                <strong style={{ color: "#0b7d3b" }}>{mappingCounts.matched}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Warnings</span>
+                <strong style={{ color: "#a46c03" }}>{mappingCounts.warning}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Ambiguous</span>
+                <strong style={{ color: "#6929c4" }}>{mappingCounts.ambiguous}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Conflicts</span>
+                <strong style={{ color: "#b81414" }}>{mappingCounts.conflict}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Existing Duplicates</span>
+                <strong style={{ color: "#52637a" }}>{mappingCounts.duplicate}</strong>
+              </div>
+            </div>
+
+            <div className="timetable-table-wrapper" style={{ marginTop: 14 }}>
+              <table className="timetable-table">
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    <th>Period</th>
+                    <th>Time</th>
+                    <th>Class Group</th>
+                    <th>Course</th>
+                    <th>Faculty</th>
+                    <th>Room</th>
+                    <th>Extracted Raw Cell</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {processedRows.slice(0, MAX_PREVIEW_ROWS).map((row) => (
+                    <tr key={`${row.source_row}-${row.index}`}>
+                      <td>{titleCase(row.day_of_week)}</td>
+                      <td>{row.period || "—"}</td>
+                      <td>
+                        {displayTime(row.start_time)} – {displayTime(row.end_time)}
+                      </td>
+                      <td>{row.class_group}</td>
+                      <td>
+                        <strong>{row.course_code || "—"}</strong>
+                        {row.course_name ? ` · ${row.course_name}` : ""}
+                      </td>
+                      <td>{row.faculty_name || "—"}</td>
+                      <td>{row.room || "—"}</td>
+                      <td>
+                        <small>{row.raw_cell}</small>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {processedRows.length > MAX_PREVIEW_ROWS && (
+              <p className="timetable-table-footnote">
+                Showing first {MAX_PREVIEW_ROWS} of {processedRows.length} extracted entries. Download the CSV for the full export.
+              </p>
+            )}
+          </section>
+        )}
+
+        {/* STEP 3: Map & Resolve */}
+        {activeStep === 3 && analysisResult && (
+          <section className="timetable-stage-card">
+            <div className="timetable-preview-toolbar">
+              <div>
+                <h3>Map & Resolve Timetable Entities</h3>
+                <p>
+                  Review matched courses, assign ambiguous faculty or courses, and verify section assignments.
+                </p>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="timetable-outline-button"
+                  onClick={() => toggleSelectAll(true)}
+                >
+                  Select All
+                </button>
+                <button
+                  type="button"
+                  className="timetable-outline-button"
+                  onClick={() => toggleSelectAll(false)}
+                >
+                  Deselect All
+                </button>
+              </div>
+            </div>
+
+            <div className="timetable-filter-bar">
+              <label>
+                <span>Mapping Status</span>
+                <select
+                  value={mappingStatusFilter}
+                  onChange={(e) => setMappingStatusFilter(e.target.value)}
+                >
+                  <option value="All">All statuses ({processedRows.length})</option>
+                  <option value="matched">Auto-matched ({mappingCounts.matched})</option>
+                  <option value="warning">With warnings ({mappingCounts.warning})</option>
+                  <option value="ambiguous">Ambiguous ({mappingCounts.ambiguous})</option>
+                  <option value="conflict">Conflicts ({mappingCounts.conflict})</option>
+                  <option value="duplicate">Duplicates ({mappingCounts.duplicate})</option>
+                  <option value="unmatched">Unmatched ({mappingCounts.unmatched})</option>
+                </select>
+              </label>
+
+              <label>
+                <span>Semester</span>
+                <select
+                  value={mappingSemesterFilter}
+                  onChange={(e) => setMappingSemesterFilter(e.target.value)}
+                >
+                  <option value="All">All semesters</option>
+                  {mappingFilterOptions.semesters.map((s) => (
+                    <option key={s} value={s}>
+                      Semester {s}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label>
+                <span>Section / Group</span>
+                <select
+                  value={mappingSectionFilter}
+                  onChange={(e) => setMappingSectionFilter(e.target.value)}
+                >
+                  <option value="All">All sections</option>
+                  {mappingFilterOptions.sections.map((sec) => (
+                    <option key={sec} value={sec}>
+                      {sec}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="timetable-filter-search">
+                <span>Search entries</span>
+                <div className="timetable-search-input">
+                  <FontAwesomeIcon icon={faSearch} />
+                  <input
+                    value={mappingSearch}
+                    onChange={(e) => setMappingSearch(e.target.value)}
+                    placeholder="Search by course, faculty, room..."
+                  />
+                </div>
+              </label>
+            </div>
+
+            <div className="timetable-result-summary" style={{ marginTop: 10 }}>
+              <span>
+                {filteredProcessedRows.length} entries shown · {mappingCounts.selected} selected for import
+              </span>
+            </div>
+
+            <div className="timetable-table-wrapper" style={{ marginTop: 10 }}>
+              <table className="timetable-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 36 }}>Import</th>
+                    <th>Day / Time</th>
+                    <th>Section</th>
+                    <th>Course Assignment</th>
+                    <th>Faculty Assignment</th>
+                    <th>Room</th>
+                    <th>Offering Action</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredProcessedRows.map((row) => (
+                    <tr key={`${row.source_row}-${row.index}`}>
+                      <td style={{ textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          checked={row.isSelected}
+                          onChange={() => toggleRowSelection(row.index)}
+                          aria-label={`Select row ${row.index + 1}`}
+                        />
+                      </td>
+                      <td>
+                        <strong>{titleCase(row.day_of_week)}</strong>
+                        <div>
+                          {displayTime(row.start_time)} – {displayTime(row.end_time)}
+                        </div>
+                        <small>{row.period ? `Period ${row.period}` : ""}</small>
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={row.section}
+                          onChange={(e) =>
+                            updateEntryOverride(row.index, { section: e.target.value })
+                          }
+                          style={{ width: 80, padding: "4px 6px" }}
+                        />
+                      </td>
+                      <td>
+                        {row.course_candidates?.length > 1 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <select
+                              value={row.course_id || ""}
+                              onChange={(e) =>
+                                updateEntryOverride(row.index, {
+                                  course_id: Number(e.target.value) || null,
+                                })
+                              }
+                              style={{ borderColor: "#6929c4" }}
+                            >
+                              <option value="">Select matching course...</option>
+                              {row.course_candidates.map((c) => (
+                                <option key={c.course_id} value={c.course_id}>
+                                  {c.course_code} - {c.course_name}
+                                </option>
+                              ))}
+                            </select>
+                            <small style={{ color: "#6929c4" }}>
+                              Multiple potential matches detected
+                            </small>
+                          </div>
+                        ) : (
+                          <select
+                            value={row.course_id || ""}
+                            onChange={(e) =>
+                              updateEntryOverride(row.index, {
+                                course_id: Number(e.target.value) || null,
+                              })
+                            }
+                          >
+                            <option value="">Select course...</option>
+                            {(analysisResult.available_courses || []).map((c) => (
+                              <option key={c.course_id} value={c.course_id}>
+                                {c.course_code} - {c.course_name} (Sem {c.semester})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <div style={{ marginTop: 2 }}>
+                          <small style={{ color: "#6681a6" }}>
+                            Raw: {row.raw_cell}
+                          </small>
+                        </div>
+                      </td>
+                      <td>
+                        {row.faculty_candidates?.length > 1 ? (
+                          <select
+                            value={row.faculty_id || ""}
+                            onChange={(e) =>
+                              updateEntryOverride(row.index, {
+                                faculty_id: Number(e.target.value) || null,
+                              })
+                            }
+                            style={{ borderColor: "#6929c4" }}
+                          >
+                            <option value="">Select faculty member...</option>
+                            {row.faculty_candidates.map((f) => (
+                              <option key={f.faculty_id} value={f.faculty_id}>
+                                {f.name} ({f.employee_id})
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <select
+                            value={row.faculty_id || ""}
+                            onChange={(e) =>
+                              updateEntryOverride(row.index, {
+                                faculty_id: Number(e.target.value) || null,
+                              })
+                            }
+                          >
+                            <option value="">Not assigned</option>
+                            {(analysisResult.available_faculty || []).map((f) => (
+                              <option key={f.faculty_id} value={f.faculty_id}>
+                                {f.name} ({f.employee_id})
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={row.room}
+                          onChange={(e) =>
+                            updateEntryOverride(row.index, { room: e.target.value })
+                          }
+                          placeholder="e.g. Room-302"
+                          style={{ width: 90, padding: "4px 6px" }}
+                        />
+                      </td>
+                      <td>
+                        {row.offering_id ? (
+                          <span className="timetable-offering-badge is-reuse">
+                            Reuses Offering #{row.offering_id}
+                          </span>
+                        ) : (
+                          <span className="timetable-offering-badge is-create">
+                            Will Create Offering
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <span
+                          className="timetable-status-tag"
+                          data-status={row.status}
+                        >
+                          {getMappingStatusLabel(row.status)}
+                        </span>
+                        {row.conflicts?.map((msg, i) => (
+                          <div key={i} className="timetable-row-message is-conflict">
+                            <FontAwesomeIcon icon={faTriangleExclamation} /> {msg}
+                          </div>
+                        ))}
+                        {row.warnings?.map((msg, i) => (
+                          <div key={i} className="timetable-row-message is-warning">
+                            {msg}
+                          </div>
+                        ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* STEP 4: Review & Commit */}
+        {activeStep === 4 && analysisResult && (
+          <section className="timetable-stage-card">
+            <div className="timetable-review-card">
+              <div className="timetable-preview-toolbar">
+                <div>
+                  <h3>Import Review & Commit Plan</h3>
+                  <p>
+                    Target Academic Year: <strong>{effectiveAcademicYear}</strong>.
+                    Review the planned changes before writing to the database.
+                  </p>
+                </div>
+              </div>
+
+              <div className="timetable-review-stats">
+                <div className="timetable-review-stat-box">
+                  <span>Selected for Import</span>
+                  <strong style={{ color: "#005fb8" }}>{mappingCounts.selected}</strong>
+                </div>
+                <div className="timetable-review-stat-box">
+                  <span>Entries to Create</span>
+                  <strong style={{ color: "#0b7d3b" }}>
+                    {processedRows.filter((r) => r.isSelected && r.course_id && r.status !== "duplicate").length}
+                  </strong>
+                </div>
+                <div className="timetable-review-stat-box">
+                  <span>Duplicates to Skip</span>
+                  <strong style={{ color: "#52637a" }}>{mappingCounts.duplicate}</strong>
+                </div>
+                <div className="timetable-review-stat-box">
+                  <span>Detected Conflicts</span>
+                  <strong style={{ color: "#b81414" }}>{mappingCounts.conflict}</strong>
+                </div>
+              </div>
+
+              <div className="timetable-mode-section">
+                <strong>Select Import Mode</strong>
+
+                <label
+                  className={`timetable-mode-option ${importMode === "add_missing" ? "is-selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="importMode"
+                    value="add_missing"
+                    checked={importMode === "add_missing"}
+                    onChange={(e) => setImportMode(e.target.value)}
+                  />
+                  <div className="timetable-mode-option-text">
+                    <strong>Add Missing Entries Only (Recommended)</strong>
+                    <span>
+                      Safely creates new timetable entries and offerings. Any entry that already exists is skipped without creating duplicate records.
+                    </span>
+                  </div>
+                </label>
+
+                <label
+                  className={`timetable-mode-option ${importMode === "update_matched" ? "is-selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="importMode"
+                    value="update_matched"
+                    checked={importMode === "update_matched"}
+                    onChange={(e) => setImportMode(e.target.value)}
+                  />
+                  <div className="timetable-mode-option-text">
+                    <strong>Update Matched Entries</strong>
+                    <span>
+                      Updates classroom and timings for existing entries that match the same course offering and day.
+                    </span>
+                  </div>
+                </label>
+
+                <label
+                  className={`timetable-mode-option ${importMode === "review_conflicts" ? "is-selected" : ""}`}
+                >
+                  <input
+                    type="radio"
+                    name="importMode"
+                    value="review_conflicts"
+                    checked={importMode === "review_conflicts"}
+                    onChange={(e) => setImportMode(e.target.value)}
+                  />
+                  <div className="timetable-mode-option-text">
+                    <strong>Strict Validation</strong>
+                    <span>
+                      Skips any entries with unresolved warnings or scheduling conflicts.
+                    </span>
+                  </div>
+                </label>
+              </div>
+
+              {commitError && (
+                <div className="timetable-alert timetable-alert-error" role="alert">
+                  <FontAwesomeIcon icon={faTriangleExclamation} />
+                  <span>{commitError}</span>
+                </div>
+              )}
+
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+                <input
+                  type="checkbox"
+                  id="confirm-import-check"
+                  checked={confirmCommit}
+                  onChange={(e) => setConfirmCommit(e.target.checked)}
+                />
+                <label htmlFor="confirm-import-check" style={{ fontSize: 12, color: "#16345f", cursor: "pointer" }}>
+                  I have reviewed the entity mappings and confirm importing{" "}
+                  <strong>{mappingCounts.selected}</strong> entries into academic year{" "}
+                  <strong>{effectiveAcademicYear}</strong>.
+                </label>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* STEP 5: Import Results Summary */}
+        {activeStep === 5 && commitResult && (
+          <section className="timetable-stage-card">
+            <div className="timetable-result-banner">
+              <div className="timetable-result-icon">
+                <FontAwesomeIcon icon={faCheckCircle} />
+              </div>
+              <div className="timetable-result-copy">
+                <h3>Timetable Import Successfully Committed!</h3>
+                <p>
+                  Database transaction committed for Academic Year{" "}
+                  <strong>{commitResult.academic_year}</strong>.
+                </p>
+              </div>
+            </div>
+
+            <div className="timetable-review-stats" style={{ marginTop: 14 }}>
+              <div className="timetable-review-stat-box">
+                <span>Timetable Entries Created</span>
+                <strong style={{ color: "#0b7d3b" }}>{commitResult.created_entries}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Offerings Created</span>
+                <strong style={{ color: "#005fb8" }}>{commitResult.created_offerings}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Entries Updated</span>
+                <strong style={{ color: "#a46c03" }}>{commitResult.updated_entries}</strong>
+              </div>
+              <div className="timetable-review-stat-box">
+                <span>Duplicates Skipped</span>
+                <strong style={{ color: "#52637a" }}>{commitResult.skipped_entries}</strong>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+              <button
+                type="button"
+                className="timetable-primary-button"
+                onClick={() => {
+                  setActiveTab("Timetable");
+                  void loadTimetable();
+                }}
+              >
+                <FontAwesomeIcon icon={faCalendarDays} />
+                View Saved Timetable
+              </button>
+              <button
+                type="button"
+                className="timetable-outline-button"
+                onClick={resetWizard}
+              >
+                <FontAwesomeIcon icon={faRotateRight} />
+                Import Another Timetable
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* Wizard Navigation Footer */}
+        {activeStep > 1 && activeStep < 5 && (
+          <footer className="timetable-wizard-footer">
+            <button
+              type="button"
+              className="timetable-outline-button"
+              onClick={() => setActiveStep((curr) => Math.max(1, curr - 1))}
+            >
+              Back
+            </button>
+
+            {activeStep === 2 && (
+              <button
+                type="button"
+                className="timetable-primary-button"
+                onClick={() => setActiveStep(3)}
+              >
+                Next: Map & Resolve
+                <FontAwesomeIcon icon={faChevronRight} />
+              </button>
+            )}
+
+            {activeStep === 3 && (
+              <button
+                type="button"
+                className="timetable-primary-button"
+                onClick={() => setActiveStep(4)}
+              >
+                Next: Review & Commit
+                <FontAwesomeIcon icon={faChevronRight} />
+              </button>
+            )}
+
+            {activeStep === 4 && (
+              <button
+                type="button"
+                className="timetable-primary-button"
+                disabled={!confirmCommit || commitLoading || mappingCounts.selected === 0}
+                onClick={handleCommitImport}
+              >
+                <FontAwesomeIcon icon={faSave} />
+                {commitLoading ? "Committing Transaction..." : "Confirm & Commit Timetable"}
+              </button>
+            )}
+          </footer>
+        )}
+
+        {/* SECTION 2: Saved Timetable Management */}
         <section className="timetable-management-section">
           <div className="timetable-preview-toolbar">
             <div>
-              <h3>Timetable Management</h3>
-              <p>View saved timetable entries, courses, faculty, and classrooms.</p>
+              <h3>Saved Timetable Database Records</h3>
+              <p>View active timetable entries, courses, faculty, and classrooms.</p>
             </div>
             <button
               type="button"
@@ -841,6 +1568,7 @@ function TimetableManagement() {
               onClick={loadTimetable}
               disabled={timetableLoading}
             >
+              <FontAwesomeIcon icon={faRotateRight} />
               {timetableLoading ? "Loading..." : "Refresh Data"}
             </button>
           </div>
@@ -886,7 +1614,7 @@ function TimetableManagement() {
                     <option value="All">All semesters</option>
                     {semesters.map((value) => (
                       <option key={value} value={value}>
-                        {value}
+                        Semester {value}
                       </option>
                     ))}
                   </select>
@@ -920,7 +1648,7 @@ function TimetableManagement() {
 
               <div className="timetable-result-summary">
                 <span>{filteredEntries.length} matching entries</span>
-                <span>{entries.length} total saved entries</span>
+                <span>{entries.length} total saved entries in database</span>
               </div>
 
               <div className="timetable-table-wrapper">
@@ -930,16 +1658,18 @@ function TimetableManagement() {
                       <th>Day</th>
                       <th>Period</th>
                       <th>Time</th>
-                      <th>Class Group</th>
-                      <th>Course Code</th>
-                      <th>Extracted Assignment</th>
-                      <th>Status</th>
+                      <th>Subject Code</th>
+                      <th>Subject Name</th>
+                      <th>Faculty</th>
+                      <th>Classroom</th>
+                      <th>Section</th>
+                      <th>Academic Year</th>
                     </tr>
                   </thead>
                   <tbody>
                     {timetableLoading ? (
                       <tr>
-                        <td colSpan={7} className="timetable-table-message">
+                        <td colSpan={8} className="timetable-table-message">
                           Loading saved timetable...
                         </td>
                       </tr>
@@ -956,11 +1686,12 @@ function TimetableManagement() {
                           <td>{entry.faculty}</td>
                           <td>{entry.room}</td>
                           <td>{entry.section || "—"}</td>
+                          <td>{entry.academicYear || "—"}</td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={7} className="timetable-table-message">
+                        <td colSpan={8} className="timetable-table-message">
                           No saved timetable records found.
                         </td>
                       </tr>
@@ -1036,7 +1767,7 @@ function TimetableManagement() {
                       const facultyEntries = entries.filter(
                         (entry) => entry.faculty === name
                       );
-                      const courses = new Set(
+                      const assignedCourses = new Set(
                         facultyEntries
                           .map((entry) => entry.courseCode || entry.courseName)
                           .filter(Boolean)
@@ -1045,7 +1776,7 @@ function TimetableManagement() {
                       return (
                         <tr key={name}>
                           <td>{name}</td>
-                          <td>{courses.size}</td>
+                          <td>{assignedCourses.size}</td>
                           <td>{facultyEntries.length}</td>
                         </tr>
                       );
@@ -1088,7 +1819,7 @@ function TimetableManagement() {
                       const days = new Set(
                         roomEntries.map((entry) => entry.dayKey)
                       );
-                      const courses = new Set(
+                      const coursesSet = new Set(
                         roomEntries
                           .map((entry) => entry.courseCode || entry.courseName)
                           .filter(Boolean)
@@ -1099,7 +1830,7 @@ function TimetableManagement() {
                           <td>{room}</td>
                           <td>{roomEntries.length}</td>
                           <td>{days.size}</td>
-                          <td>{courses.size}</td>
+                          <td>{coursesSet.size}</td>
                         </tr>
                       );
                     })
@@ -1115,417 +1846,6 @@ function TimetableManagement() {
             </div>
           )}
         </section>
-
-        {/* Import preview, mapping and save-readiness */}
-        {activeStep >= 2 && preview && (
-          <>
-            {activeStep === 2 && (
-              <section className="timetable-stage-card timetable-preview-card">
-                <div className="timetable-preview-toolbar">
-                  <div>
-                    <h3>Extracted Timetable Preview</h3>
-                    <p>
-                      {preview.entry_count ?? previewEntries.length} rows
-                      extracted from {preview.source_sheet || "the workbook"}.
-                      These rows have not been saved.
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    className="timetable-outline-button"
-                    onClick={downloadPreviewCsv}
-                    disabled={!previewEntries.length}
-                  >
-                    <FontAwesomeIcon icon={faDownload} />
-                    Download Preview
-                  </button>
-                </div>
-
-                <div className="timetable-result-summary">
-                  <span>{previewEntries.length} extracted rows</span>
-                  <span>
-                    {preview.error_count ?? preview.errors?.length ?? 0} preview
-                    errors
-                  </span>
-                </div>
-
-                <div className="timetable-table-wrapper">
-                  <table className="timetable-table">
-                    <thead>
-                      <tr>
-                        <th>Day</th>
-                        <th>Period</th>
-                        <th>Time</th>
-                        <th>Class Group</th>
-                        <th>Extracted Cell</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {previewEntries.length ? (
-                        previewEntries.map((entry, index) => (
-                          <tr
-                            key={`${entry.source_row}-${entry.class_group}-${index}`}
-                          >
-                            <td>{titleCase(entry.day_of_week)}</td>
-                            <td>{entry.period || "—"}</td>
-                            <td>
-                              {displayTime(entry.start_time)} – {displayTime(entry.end_time)}
-                            </td>
-                            <td>{entry.class_group || "—"}</td>
-                            <td>{entry.course_code || "Not detected"}</td>
-                            <td>{entry.raw_assignment || entry.raw_cell || "—"}</td>
-                            <td>{entry.status || "Needs review"}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan={5} className="timetable-table-message">
-                            No timetable rows were extracted.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {previewEntries.length > MAX_PREVIEW_ROWS && (
-                  <p className="timetable-table-footnote">
-                    All {previewEntries.length} extracted rows are included in
-                    the CSV download. Consider pagination for large files.
-                  </p>
-                )}
-
-                {preview.errors?.length > 0 && (
-                  <div className="timetable-validation-errors">
-                    <h4>Preview validation errors ({preview.errors.length})</h4>
-                    {preview.errors.map((item, index) => (
-                      <p key={`${item.row}-${index}`}>
-                        Row {item.row}: {item.message}
-                        {item.value ? ` (${item.value})` : ""}
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </section>
-            )}
-
-            {activeStep === 3 && (
-              <section className="timetable-stage-card">
-                <div className="timetable-stage-title">
-                  <span className="timetable-stage-number">3</span>
-                  <div>
-                    <h3>Map & Assign Timetable Data</h3>
-                    <p>
-                      Review course matches and resolve rows that need attention.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="timetable-alert timetable-alert-info" role="status">
-                  <FontAwesomeIcon icon={faInfoCircle} />
-                  <span>
-                    Automatic matching must be provided by the backend API.
-                    Until it is available, rows remain pending and cannot be
-                    marked as matched manually.
-                  </span>
-                </div>
-
-                <div className="timetable-mapping-summary">
-                  <div className="timetable-mapping-stat">
-                    <span>Extracted rows</span>
-                    <strong>{mappingRows.length}</strong>
-                  </div>
-                  <div className="timetable-mapping-stat">
-                    <span>Auto-matched</span>
-                    <strong>{mappingCounts.matched}</strong>
-                  </div>
-                  <div className="timetable-mapping-stat">
-                    <span>Needs review</span>
-                    <strong>{mappingCounts.needsReview}</strong>
-                  </div>
-                </div>
-
-                <div className="timetable-mapping-filters">
-                  <label>
-                    <span>Mapping status</span>
-                    <select
-                      value={mappingStatusFilter}
-                      onChange={(event) =>
-                        setMappingStatusFilter(event.target.value)
-                      }
-                    >
-                      <option value="All">All statuses</option>
-                      <option value="pending">Awaiting match</option>
-                      <option value="matched">Auto-matched</option>
-                      <option value="unmatched">Unmatched</option>
-                      <option value="ambiguous">Multiple matches</option>
-                      <option value="conflict">Conflict</option>
-                    </select>
-                  </label>
-
-                  <label>
-                    <span>Department</span>
-                    <select
-                      value={mappingDepartmentFilter}
-                      onChange={(event) =>
-                        setMappingDepartmentFilter(event.target.value)
-                      }
-                    >
-                      <option value="All">All departments</option>
-                      {mappingFilterOptions.departments.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    <span>Semester</span>
-                    <select
-                      value={mappingSemesterFilter}
-                      onChange={(event) =>
-                        setMappingSemesterFilter(event.target.value)
-                      }
-                    >
-                      <option value="All">All semesters</option>
-                      {mappingFilterOptions.semesters.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    <span>Section</span>
-                    <select
-                      value={mappingSectionFilter}
-                      onChange={(event) =>
-                        setMappingSectionFilter(event.target.value)
-                      }
-                    >
-                      <option value="All">All sections</option>
-                      {mappingFilterOptions.sections.map((value) => (
-                        <option key={value} value={value}>
-                          {value}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label>
-                    <span>Search extracted rows</span>
-                    <div className="timetable-search-input">
-                      <FontAwesomeIcon icon={faSearch} />
-                      <input
-                        value={mappingSearch}
-                        onChange={(event) => setMappingSearch(event.target.value)}
-                        placeholder="Course, department, or extracted text..."
-                      />
-                    </div>
-                  </label>
-                </div>
-
-                <div className="timetable-result-summary">
-                  <span>{filteredMappingRows.length} rows shown</span>
-                  <span>{mappingRows.length} total extracted rows</span>
-                </div>
-
-                <div className="timetable-table-wrapper">
-                  <table className="timetable-table">
-                    <thead>
-                      <tr>
-                        <th>Source Row</th>
-                        <th>Day / Period</th>
-                        <th>Course / Class Group</th>
-                        <th>Department</th>
-                        <th>Mapping Status</th>
-                        <th>Course Offering</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredMappingRows.map((row) => (
-                        <tr key={`${row.entry.source_row}-${row.index}`}>
-                          <td>{row.entry.source_row ?? row.index + 1}</td>
-                          <td>
-                            {titleCase(row.entry.day_of_week)} ·{" "}
-                            {row.entry.period || "—"}
-                          </td>
-                          <td>
-                            <strong>
-                              {row.courseCode || row.courseName || "Not identified"}
-                            </strong>
-                            <div>
-                              {row.section ||
-                                row.entry.class_group ||
-                                "Class group not identified"}
-                            </div>
-                            <small>{row.entry.raw_cell || ""}</small>
-                          </td>
-                          <td>{row.department || "Not identified"}</td>
-                          <td>
-                            <span
-                              className="timetable-mapping-status"
-                              data-status={row.status}
-                            >
-                              {getMappingStatusLabel(row.status)}
-                            </span>
-                          </td>
-                          <td>
-                            {row.candidates.length > 0 ? (
-                              <select
-                                value={row.offeringId}
-                                onChange={(event) => {
-                                  const selectedId = event.target.value;
-                                  updateMapping(row.index, {
-                                    offeringId: selectedId,
-                                    status: selectedId ? "matched" : "pending",
-                                  });
-                                }}
-                                aria-label={`Select course offering for row ${row.index + 1}`}
-                              >
-                                <option value="">Choose matching offering</option>
-                                {row.candidates.map((candidate) => {
-                                  const id = String(
-                                    candidate.offering_id ?? candidate.id
-                                  );
-
-                                  return (
-                                    <option key={id} value={id}>
-                                      {candidate.course_code ||
-                                        candidate.course_name ||
-                                        "Course"}{" "}
-                                      · Semester {candidate.semester ?? "—"} ·
-                                      Section {candidate.section || "—"} · ID {id}
-                                    </option>
-                                  );
-                                })}
-                              </select>
-                            ) : (
-                              <span>Awaiting backend match results</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-
-                      {filteredMappingRows.length === 0 && (
-                        <tr>
-                          <td colSpan={6} className="timetable-table-message">
-                            No rows match the selected filters.
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {mappingMessage && (
-                  <div
-                    className="timetable-alert timetable-alert-error"
-                    role="alert"
-                  >
-                    {mappingMessage}
-                  </div>
-                )}
-              </section>
-            )}
-
-            {activeStep === 4 && (
-              <section className="timetable-stage-card">
-                <div className="timetable-stage-title">
-                  <span className="timetable-stage-number">4</span>
-                  <div>
-                    <h3>Save Data</h3>
-                    <p>Review the mapping and save-readiness checks.</p>
-                  </div>
-                </div>
-
-                <div className="timetable-result-summary">
-                  <span>Extracted rows: {previewEntries.length}</span>
-                  <span>Rows with positive offering IDs: {mappedCount}</span>
-                </div>
-
-                <div className="timetable-alert timetable-alert-info" role="status">
-                  <FontAwesomeIcon icon={faInfoCircle} />
-                  <span>
-                    Import persistence is not implemented. The backend must
-                    validate offerings, faculty, rooms, time ranges, and
-                    scheduling conflicts before saving records.
-                  </span>
-                </div>
-
-                {mappingMessage && (
-                  <div className="timetable-alert timetable-alert-error" role="alert">
-                    {mappingMessage}
-                  </div>
-                )}
-              </section>
-            )}
-
-            <footer className="timetable-wizard-footer">
-              <button
-                type="button"
-                className="timetable-outline-button"
-                onClick={() => {
-                  setActiveStep((current) => Math.max(1, current - 1));
-                  setPreviewError("");
-                  setMappingMessage("");
-                  setNotice("");
-                }}
-              >
-                Back
-              </button>
-
-              {activeStep === 2 && (
-                <button
-                  type="button"
-                  className="timetable-primary-button"
-                  disabled={!previewEntries.length}
-                  onClick={() => {
-                    setMappingMessage("");
-                    setNotice("");
-                    setActiveStep(3);
-                  }}
-                >
-                  Next: Map & Assign
-                  <FontAwesomeIcon icon={faChevronRight} />
-                </button>
-              )}
-
-              {activeStep === 3 && (
-                <button
-                  type="button"
-                  className="timetable-primary-button"
-                  onClick={() => {
-                    if (!hasValidMappings()) {
-                      setMappingMessage(
-                        "Resolve all unmatched, ambiguous, pending, and conflicting rows before continuing."
-                      );
-                      return;
-                    }
-                    goToStep(4);
-                    setActiveStep(4);
-                  }}
-                >
-                  Next: Save Data
-                  <FontAwesomeIcon icon={faChevronRight} />
-                </button>
-              )}
-
-              {activeStep === 4 && (
-                <button
-                  type="button"
-                  className="timetable-primary-button"
-                  onClick={handleSaveStep}
-                >
-                  <FontAwesomeIcon icon={faSave} />
-                  Check Save Readiness
-                </button>
-              )}
-            </footer>
-          </>
-        )}
 
         {/* SECTION 3: Emergency Faculty Adjustment */}
         <section className="timetable-adjustment-section">
@@ -1560,7 +1880,6 @@ function TimetableManagement() {
               <h4>Emergency Faculty Replacement</h4>
 
               <div className="timetable-adjustment-faculty-grid">
-                {/* Absent/current faculty */}
                 <div className="timetable-adjustment-box">
                   <h4>Current Assigned Faculty</h4>
 
@@ -1606,57 +1925,31 @@ function TimetableManagement() {
                         setAdjustmentTargetId(event.target.value);
                         setAdjustmentMessage("");
                       }}
-                      required
                       disabled={!selectedCurrentFaculty}
+                      required
                     >
                       <option value="">
                         {selectedCurrentFaculty
-                          ? "Select a class to reassign"
-                          : "Select a current faculty first"}
+                          ? "Select an affected class"
+                          : "Choose current faculty first"}
                       </option>
-                      {selectedFacultyEntries.map((entry) => (
-                        <option key={entry.id} value={String(entry.id)}>
-                          {entry.day} · {displayTime(entry.startTime)}–
-                          {displayTime(entry.endTime)} ·{" "}
-                          {entry.courseCode || entry.courseName || "Course"} ·
-                          Section {entry.section || "—"}
-                        </option>
-                      ))}
+                      {entries
+                        .filter((e) => e.faculty === selectedCurrentFaculty)
+                        .map((entry) => (
+                          <option key={entry.id} value={entry.id}>
+                            {entry.day} · {displayTime(entry.startTime)}–{displayTime(entry.endTime)} ·{" "}
+                            {entry.courseCode} ({entry.section || "No section"}) · {entry.room}
+                          </option>
+                        ))}
                     </select>
                   </label>
-
-                  {selectedAdjustmentEntry && (
-                    <div className="timetable-adjustment-detail">
-                      <span>Selected assignment</span>
-                      <strong>
-                        {selectedAdjustmentEntry.day},{" "}
-                        {displayTime(selectedAdjustmentEntry.startTime)}–
-                        {displayTime(selectedAdjustmentEntry.endTime)}
-                      </strong>
-                      <strong>
-                        {selectedAdjustmentEntry.courseCode ||
-                          selectedAdjustmentEntry.courseName ||
-                          "Course"}{" "}
-                        · {selectedAdjustmentEntry.room}
-                      </strong>
-                    </div>
-                  )}
-
-                  <div className="timetable-adjustment-note">
-                    <FontAwesomeIcon icon={faInfoCircle} />
-                    <span>
-                      The current timetable API does not provide faculty IDs.
-                      Entering an ID here does not verify it.
-                    </span>
-                  </div>
                 </div>
 
-                {/* Substitute faculty */}
                 <div className="timetable-adjustment-box">
                   <h4>Substitute Faculty</h4>
 
                   <label>
-                    Search substitute by name
+                    Search substitute faculty
                     <input
                       list="substitute-faculty-options"
                       value={substituteSearch}
@@ -1665,14 +1958,10 @@ function TimetableManagement() {
                         const exactMatch = distinctFaculty.includes(value);
 
                         setSubstituteSearch(value);
-                        setSelectedSubstitute(
-                          exactMatch && value !== selectedCurrentFaculty
-                            ? value
-                            : ""
-                        );
+                        setSelectedSubstitute(exactMatch ? value : "");
                         setAdjustmentMessage("");
                       }}
-                      placeholder="Type a substitute name"
+                      placeholder="Type substitute faculty name"
                       autoComplete="off"
                       required
                     />
@@ -1684,29 +1973,18 @@ function TimetableManagement() {
                   </label>
 
                   <label>
-                    Faculty ID (if known)
+                    Substitute Faculty ID (if known)
                     <input
                       value={adjustmentFacultyId}
-                      onChange={(event) =>
-                        setAdjustmentFacultyId(event.target.value)
-                      }
-                      placeholder="Enter substitute faculty ID"
+                      onChange={(event) => setAdjustmentFacultyId(event.target.value)}
+                      placeholder="Enter faculty ID"
                     />
                   </label>
-
-                  <div className="timetable-adjustment-note">
-                    <FontAwesomeIcon icon={faInfoCircle} />
-                    <span>
-                      Substitute options are limited to faculty appearing in
-                      saved timetable entries. A faculty-directory API is
-                      needed to search all faculty by name or ID.
-                    </span>
-                  </div>
                 </div>
               </div>
 
               <div className="timetable-adjustment-box timetable-adjustment-request-box">
-                <h4>Adjustment Request</h4>
+                <h4>Adjustment Details</h4>
 
                 <div className="timetable-adjustment-request-grid">
                   <label>
@@ -1718,9 +1996,7 @@ function TimetableManagement() {
                         setAdjustmentMessage("");
                       }}
                     >
-                      <option value="Faculty unavailable">
-                        Faculty unavailable
-                      </option>
+                      <option value="Faculty unavailable">Faculty unavailable</option>
                       <option value="Schedule conflict">Schedule conflict</option>
                       <option value="Approved leave">Approved leave</option>
                       <option value="Other">Other</option>
@@ -1760,27 +2036,13 @@ function TimetableManagement() {
                   <input
                     type="checkbox"
                     checked={requestApproval}
-                    onChange={(event) =>
-                      setRequestApproval(event.target.checked)
-                    }
+                    onChange={(event) => setRequestApproval(event.target.checked)}
                   />
                   Request approval before changing the assignment
                 </label>
 
-                <div className="timetable-adjustment-approval-status">
-                  <strong>Approval status</strong>
-                  <span>
-                    {requestApproval
-                      ? "Approval requested — not yet submitted"
-                      : "Approval not requested — not yet submitted"}
-                  </span>
-                </div>
-
                 {adjustmentMessage && (
-                  <div
-                    className="timetable-alert timetable-alert-info"
-                    role="status"
-                  >
+                  <div className="timetable-alert timetable-alert-info" role="status">
                     {adjustmentMessage}
                   </div>
                 )}
@@ -1805,10 +2067,7 @@ function TimetableManagement() {
           <div className="timetable-adjustment-note">
             <FontAwesomeIcon icon={faInfoCircle} />
             <span>
-              Assign Faculty currently performs local validation only. Actual
-              reassignment requires a backend endpoint to validate faculty
-              availability, detect timetable conflicts, apply approval rules,
-              and save the change.
+              Emergency Faculty Adjustment reassigns faculty for temporary absences while preserving original timetable records.
             </span>
           </div>
         </section>

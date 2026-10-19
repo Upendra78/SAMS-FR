@@ -441,7 +441,11 @@ function Attendance() {
           }
         }
       } catch (scanError) {
-        console.debug("Live auto-scan error:", scanError?.message);
+        if (scanError?.response?.status === 401 || scanError?.response?.status === 403) {
+          setScanStatusMessage("Session expired — please refresh or log in again.");
+        } else {
+          console.debug("Live auto-scan error:", scanError?.message);
+        }
       } finally {
         recognitionRequestRef.current = false;
         if (!isCancelled) {
@@ -1956,7 +1960,7 @@ function Attendance() {
                   "Monday",
                   "Tuesday",
                   "Wednesday",
-                  "Thrusday",
+                  "Thursday",
                   "Friday",
                   "Saturday",
                 ];
