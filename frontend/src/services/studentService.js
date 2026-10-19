@@ -48,7 +48,7 @@ export async function getStudentCourses() {
   return response.data;
 }
 
-export async function getStudentDashboard() {
-  const response = await api.get("/student/dashboard");
+export async function getStudentDashboard(weeks = 4) {
+  const response = await api.get(`/student/dashboard?weeks=${weeks}`);
   return response.data;
 }
