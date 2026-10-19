@@ -44,6 +44,35 @@ def create_test_excel_bytes(sheet_name="05.10.2026 Updated Time Table", rows=Non
     return bio
 
 
+def create_master_timetable_excel_bytes(sheet_name="Master Timetable", headers=None, rows=None, extra_sheets=None):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_name
+
+    col_headers = headers or [
+        "Day", "Period", "Time", "Start Time", "End Time",
+        "Course Code", "Course Name", "Faculty ID", "Faculty Name",
+        "Semester", "Section", "Classroom / Lab", "Academic Year",
+        "Break Schedule", "Assignment Status",
+    ]
+    for c_idx, h in enumerate(col_headers, start=1):
+        ws.cell(row=1, column=c_idx, value=h)
+
+    if rows:
+        for r_idx, r_data in enumerate(rows, start=2):
+            for c_idx, val in enumerate(r_data, start=1):
+                ws.cell(row=r_idx, column=c_idx, value=val)
+
+    if extra_sheets:
+        for s_name in extra_sheets:
+            wb.create_sheet(title=s_name)
+
+    bio = BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    return bio
+
+
 class TestTimetableImportWorkflow(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -361,5 +390,195 @@ class TestTimetableImportWorkflow(unittest.TestCase):
         self.assertEqual(len(data["data"]["errors"]), 1)
 
         # Verify DB is clean
+        with self.app.app_context():
+            self.assertEqual(TimetableEntry.query.count(), 0)
+
+    def test_master_timetable_sheet_discovery_prefers_master_timetable(self):
+        bio = create_master_timetable_excel_bytes(
+            sheet_name="Master Timetable",
+            extra_sheets=["Read Me", "Sem 1-A", "Sem 1-B"],
+        )
+        res = self.client.post(
+            "/api/timetable/import/sheets",
+            headers=self.admin_headers,
+            data={"file": (bio, "test_schedule.xlsx")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        self.assertIn("Master Timetable", data["sheets"])
+        self.assertEqual(data["recommended"], "Master Timetable")
+
+    def test_master_timetable_row_based_parsing_and_normalization(self):
+        rows = [
+            [
+                "Monday", "P1", "08:40 AM - 09:40 AM", "08:40 AM", "09:40 AM",
+                "BCSE-513", "Cloud Computing", 1, "Dr. Neera Batra",
+                5, "A", "Room-302", "2026-2027", "", "Assigned",
+            ],
+            [
+                "Tuesday", "P2", "09:40 AM - 10:40 AM", "09:40 AM", "10:40 AM",
+                "BHUM-004", "Economics for Engineers", 2, "Dr. Monika",
+                5, "A", "Room-105", "2026-2027", "", "Assigned",
+            ],
+        ]
+        bio = create_master_timetable_excel_bytes(rows=rows)
+        res = self.client.post(
+            "/api/timetable/import/analyze",
+            headers=self.admin_headers,
+            data={
+                "file": (bio, "master_timetable.xlsx"),
+                "academic_year": "2026-2027",
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["total_rows"], 2)
+        self.assertEqual(data["source_sheet"], "Master Timetable")
+
+        entry1 = data["entries"][0]
+        self.assertEqual(entry1["day_of_week"], "Monday")
+        self.assertEqual(entry1["start_time"], "08:40")
+        self.assertEqual(entry1["end_time"], "09:40")
+        self.assertEqual(entry1["period"], "P1")
+        self.assertEqual(entry1["course_code"], "BCSE-513")
+        self.assertEqual(entry1["course_id"], 1)
+        self.assertEqual(entry1["faculty_id"], 1)
+        self.assertEqual(entry1["faculty_name"], "Dr. Neera Batra")
+        self.assertEqual(entry1["semester"], 5)
+        self.assertEqual(entry1["section"], "A")
+        self.assertEqual(entry1["class_group"], "Sem 5-A")
+        self.assertEqual(entry1["room"], "Room-302")
+        self.assertIn(entry1["status"], {"matched", "warning"})
+        self.assertEqual(entry1["offering_action"], "create")
+
+        entry2 = data["entries"][1]
+        self.assertEqual(entry2["day_of_week"], "Tuesday")
+        self.assertEqual(entry2["course_code"], "BHUM-004")
+        self.assertEqual(entry2["faculty_id"], 2)
+        self.assertEqual(entry2["room"], "Room-105")
+
+    def test_master_timetable_skips_blank_rows_and_break_schedules(self):
+        rows = [
+            [
+                "Monday", "P1", "08:40 AM - 09:40 AM", "08:40 AM", "09:40 AM",
+                "BCSE-513", "Cloud Computing", 1, "Dr. Neera Batra",
+                5, "A", "Room-302", "2026-2027", "", "Assigned",
+            ],
+            [
+                "Monday", "Break", "10:40 AM - 11:00 AM", "10:40 AM", "11:00 AM",
+                "", "", "", "", 5, "A", "", "2026-2027", "Morning Break", "Break",
+            ],
+            ["", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+            [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None],
+            [
+                "Monday", "P3", "11:00 AM - 12:00 PM", "11:00 AM", "12:00 PM",
+                "BHUM-004", "Economics for Engineers", 2, "Dr. Monika",
+                5, "A", "Room-105", "2026-2027", "", "Assigned",
+            ],
+        ]
+        bio = create_master_timetable_excel_bytes(rows=rows)
+        res = self.client.post(
+            "/api/timetable/import/analyze",
+            headers=self.admin_headers,
+            data={
+                "file": (bio, "master_timetable.xlsx"),
+                "academic_year": "2026-2027",
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        # Exactly 2 teaching periods parsed; break and blank rows skipped
+        self.assertEqual(data["total_rows"], 2)
+
+    def test_master_timetable_unmatched_entities_and_academic_year_warning(self):
+        rows = [
+            [
+                "Wednesday", "P1", "08:40 AM - 09:40 AM", "08:40 AM", "09:40 AM",
+                "UNKNOWN-999", "Unknown Subject", 9999, "Unknown Faculty",
+                5, "A", "Room-999", "2024-2025", "", "Assigned",
+            ],
+        ]
+        bio = create_master_timetable_excel_bytes(rows=rows)
+        res = self.client.post(
+            "/api/timetable/import/analyze",
+            headers=self.admin_headers,
+            data={
+                "file": (bio, "master_timetable.xlsx"),
+                "academic_year": "2026-2027",
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["total_rows"], 1)
+
+        entry = data["entries"][0]
+        self.assertEqual(entry["status"], "unmatched")
+        self.assertIsNone(entry["course_id"])
+        self.assertIsNone(entry["faculty_id"])
+
+        # Check academic year discrepancy warning is present
+        has_ay_warning = any("differs from selected" in w for w in entry["warnings"])
+        self.assertTrue(has_ay_warning)
+
+    def test_master_timetable_database_remains_clean_before_commit(self):
+        rows = [
+            [
+                "Thursday", "P1", "08:40 AM - 09:40 AM", "08:40 AM", "09:40 AM",
+                "BCSE-513", "Cloud Computing", 1, "Dr. Neera Batra",
+                5, "A", "Room-302", "2026-2027", "", "Assigned",
+            ],
+        ]
+        bio = create_master_timetable_excel_bytes(rows=rows)
+        res = self.client.post(
+            "/api/timetable/import/analyze",
+            headers=self.admin_headers,
+            data={
+                "file": (bio, "master_timetable.xlsx"),
+                "academic_year": "2026-2027",
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(res.status_code, 200)
+
+        # Database must not contain any new entries or offerings prior to commit
+        with self.app.app_context():
+            self.assertEqual(TimetableEntry.query.count(), 0)
+            self.assertEqual(CourseOffering.query.count(), 0)
+
+    def test_master_timetable_real_workbook_if_available(self):
+        import os
+        real_path = r"C:\Users\pandi\Downloads\CSE_Weekly_Timetable_Semesters_1_3_5_7.xlsx"
+        if not os.path.exists(real_path):
+            self.skipTest(f"Real workbook not found at {real_path}")
+
+        with open(real_path, "rb") as f:
+            file_bytes = f.read()
+
+        bio = BytesIO(file_bytes)
+        res = self.client.post(
+            "/api/timetable/import/analyze",
+            headers=self.admin_headers,
+            data={
+                "file": (bio, "CSE_Weekly_Timetable_Semesters_1_3_5_7.xlsx"),
+                "academic_year": "2026-2027",
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["source_sheet"], "Master Timetable")
+        self.assertEqual(data["total_rows"], 240)
+        self.assertEqual(len(data["entries"]), 240)
+
+        # Confirm DB is still completely untouched
         with self.app.app_context():
             self.assertEqual(TimetableEntry.query.count(), 0)

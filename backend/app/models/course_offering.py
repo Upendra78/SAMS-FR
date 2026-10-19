@@ -69,5 +69,25 @@ class CourseOffering(db.Model):
         cascade = "all, delete-orphan",
     )
 
+    def __init__(
+        self,
+        course_id=None,
+        faculty_id=None,
+        academic_year=None,
+        semester=None,
+        section=None,
+        room=None,
+        **kwargs,
+    ):
+        super().__init__()
+        self.course_id = course_id
+        self.faculty_id = faculty_id
+        self.academic_year = academic_year
+        self.semester = semester
+        self.section = section
+        self.room = room
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
     def __repr__(self):
         return f"<CourseOffering {self.offering_id}>"

@@ -10,6 +10,7 @@ from app.models.attendance_session import AttendanceSession
 from app.models.attendance_record import AttendanceRecord
 
 from app.models.timetable_entry import TimetableEntry
+from app.models.faculty_adjustment import FacultyAdjustment
 
 from app.models.batch import Batch
 
@@ -24,9 +25,7 @@ __all__ = [
     "FaceProfile",
     "AttendanceSession",
     "AttendanceRecord",
-
     "TimetableEntry",
-
-    "Batch"
-
+    "FacultyAdjustment",
+    "Batch",
 ]

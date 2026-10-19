@@ -798,25 +798,36 @@ function AcademicManagement() {
   const handleSaveOffering = async (event) => {
     event.preventDefault();
 
+    const isEditing = editingOfferingId !== null;
+
     const payload = {
       course_id: Number(offeringForm.course_id),
-      faculty_id: Number(offeringForm.faculty_id),
       academic_year: offeringForm.academic_year.trim(),
       semester: Number(offeringForm.semester),
       section: offeringForm.section.trim(),
     };
 
+    // Faculty is required only when creating a new offering.
+    if (!isEditing) {
+      payload.faculty_id = Number(offeringForm.faculty_id);
+    }
+
     if (
       !Number.isInteger(payload.course_id) ||
       payload.course_id <= 0 ||
-      !Number.isInteger(payload.faculty_id) ||
-      payload.faculty_id <= 0 ||
+      (!isEditing &&
+        (!Number.isInteger(payload.faculty_id) ||
+          payload.faculty_id <= 0)) ||
       !Number.isInteger(payload.semester) ||
       payload.semester < 1 ||
       !payload.academic_year ||
       !payload.section
     ) {
-      setOfferingActionError("Complete all required offering fields.");
+      setOfferingActionError(
+        isEditing
+          ? "Please provide a valid course, academic year, semester, and section."
+          : "Please provide valid course, faculty, academic year, semester, and section details."
+      );
       return;
     }
 
@@ -825,33 +836,24 @@ function AcademicManagement() {
     setOfferingActionMessage("");
 
     try {
-      const result =
-        editingOfferingId !== null
-          ? await updateAdminCourseOffering(editingOfferingId, payload)
-          : await createAdminCourseOffering(payload);
-
-      if (!result?.success) {
-        throw new Error(result?.message || "Unable to save course offering.");
+      if (isEditing) {
+        await updateAdminCourseOffering(editingOfferingId, payload);
+      } else {
+        await createAdminCourseOffering(payload);
       }
 
-      const refreshed = await getAdminCourseOfferings();
-
-      if (!refreshed?.success || !Array.isArray(refreshed.data)) {
-        throw new Error(
-          "The offering was saved, but the list could not be refreshed."
-        );
-      }
-
-      setOfferings(refreshed.data);
       setOfferingActionMessage(
-        result.message ||
-          (editingOfferingId !== null
-            ? "Course offering updated successfully."
-            : "Course offering created successfully.")
+        isEditing
+          ? "Course offering updated successfully."
+          : "Course offering created successfully."
       );
+
       setShowOfferingModal(false);
       setEditingOfferingId(null);
       setOfferingForm({ ...EMPTY_OFFERING_FORM });
+
+      // Refresh the list using the component's existing refresh logic.
+      await loadOfferingData();
     } catch (error) {
       setOfferingActionError(
         getErrorMessage(error, "Unable to save course offering.")
@@ -1669,15 +1671,10 @@ function AcademicManagement() {
                 <FontAwesomeIcon icon={faBookOpen} />
               </div>
               <h2>No course offerings yet</h2>
-              <p>Create an offering to assign a course to faculty.</p>
-              <button
-                type="button"
-                className="academic-primary-button"
-                onClick={() => handleOpenOfferingModal()}
-              >
-                <FontAwesomeIcon icon={faPlus} />
-                Add Offering
-              </button>
+              <p>
+                Course offerings and faculty assignments are automatically generated and synchronized
+                when timetables are imported via Timetable Management.
+              </p>
             </div>
           ) : (
             <div className="academic-table-wrapper">
@@ -2691,33 +2688,35 @@ function AcademicManagement() {
                     </select>
                   </div>
 
-                  <div className="academic-form-field">
-                    <label htmlFor="offering-faculty">Faculty *</label>
-                    <select
-                      id="offering-faculty"
-                      value={offeringForm.faculty_id}
-                      onChange={(event) =>
-                        setOfferingForm((current) => ({
-                          ...current,
-                          faculty_id: event.target.value,
-                        }))
-                      }
-                      required
-                      disabled={savingOffering}
-                    >
-                      <option value="">Select faculty</option>
-                      {faculty.map((member) => (
-                        <option
-                          key={member.faculty_id}
-                          value={member.faculty_id}
-                        >
-                          {member.name ||
-                            member.employee_id ||
-                            `Faculty #${member.faculty_id}`}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {editingOfferingId === null && (
+                    <div className="academic-form-field">
+                      <label htmlFor="offering-faculty">Faculty *</label>
+                      <select
+                        id="offering-faculty"
+                        value={offeringForm.faculty_id}
+                        onChange={(event) =>
+                          setOfferingForm((current) => ({
+                            ...current,
+                            faculty_id: event.target.value,
+                          }))
+                        }
+                        required
+                        disabled={savingOffering}
+                      >
+                        <option value="">Select faculty</option>
+                        {faculty.map((member) => (
+                          <option
+                            key={member.faculty_id}
+                            value={member.faculty_id}
+                          >
+                            {member.name ||
+                              member.employee_id ||
+                              `Faculty #${member.faculty_id}`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div className="academic-form-field">
                     <label htmlFor="offering-year">Academic Year *</label>

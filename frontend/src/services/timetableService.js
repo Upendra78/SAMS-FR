@@ -1,4 +1,3 @@
-
 import api from "./api";
 
 export async function getAdminTimetable() {
@@ -49,5 +48,20 @@ export async function analyzeTimetableImport(file, academicYear, sheetName = "")
 
 export async function commitTimetableImport(payload) {
   const response = await api.post("/timetable/import/commit", payload);
+  return response.data;
+}
+
+export async function getFacultyAdjustments(params = {}) {
+  const response = await api.get("/timetable/adjustments", { params });
+  return response.data;
+}
+
+export async function createFacultyAdjustment(payload) {
+  const response = await api.post("/timetable/adjustments", payload);
+  return response.data;
+}
+
+export async function cancelFacultyAdjustment(adjustmentId) {
+  const response = await api.post(`/timetable/adjustments/${adjustmentId}/cancel`);
   return response.data;
 }

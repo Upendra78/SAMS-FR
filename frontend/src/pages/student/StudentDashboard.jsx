@@ -111,7 +111,10 @@ function StudentDashboard() {
   const student = dashboardData?.student || null;
   const stats = dashboardData?.stats || null;
   const trend = dashboardData?.attendance_trend || null;
-  const trendPoints = Array.isArray(trend?.points) ? trend.points : [];
+  const trendPoints = useMemo(
+    () => (Array.isArray(trend?.points) ? trend.points : []),
+    [trend]
+  );
   const todaySchedule = dashboardData?.today_schedule || null;
   const todayClasses = Array.isArray(todaySchedule?.classes)
     ? todaySchedule.classes
@@ -197,7 +200,7 @@ function StudentDashboard() {
       <section className="student-hero-banner" aria-label="Student Welcome">
         <div className="student-hero-left">
           <h1 className="student-hero-title">
-            Welcome back, {firstName}!
+            {greeting}, {firstName}!
           </h1>
           <p className="student-hero-subtitle">
             Stay consistent, stay ahead. Your learning journey matters!
