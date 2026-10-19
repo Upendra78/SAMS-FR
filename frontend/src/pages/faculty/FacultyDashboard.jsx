@@ -94,12 +94,24 @@ function getTodayWeekday() {
   return new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date());
 }
 
+function getGreeting() {
+  const hour = new Date().getHours();
+  if (hour >= 5 && hour < 12) {
+    return "Good Morning";
+  }
+  if (hour >= 12 && hour < 17) {
+    return "Good Afternoon";
+  }
+  return "Good Evening";
+}
+
 function FacultyDashboard() {
   const navigate = useNavigate();
   const auth = useAuth();
   const user = auth?.user;
   const displayName = getDisplayName(user);
   const initials = getInitials(displayName);
+  const greeting = getGreeting();
 
   // Status trackers
   const [backendStatus, setBackendStatus] = useState("loading"); // loading, connected, error
@@ -340,7 +352,7 @@ function FacultyDashboard() {
 
           <div className="faculty-welcome-text">
             <h1 className="faculty-welcome-title">
-              Good Morning, {displayName}
+              {greeting}, {displayName}
             </h1>
             <p className="faculty-welcome-subtitle">
               Manage your classes, monitor attendance, and access your teaching tools from one place.

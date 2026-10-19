@@ -15,6 +15,15 @@ export async function updateFacultyProfile(profileData) {
   return response.data;
 }
 
+export async function changeFacultyPassword(passwordData) {
+  const response = await api.post(
+    "/faculty/change-password",
+    passwordData
+  );
+
+  return response.data;
+}
+
 export async function getFacultyCourses() {
   const response = await api.get("/faculty/courses");
 

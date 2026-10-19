@@ -134,6 +134,15 @@ export async function updateAdminProfile(profileData) {
   return response.data;
 }
 
+export async function changeAdminPassword(passwordData) {
+  const response = await api.post(
+    "/admin/change-password",
+    passwordData,
+  );
+  return response.data;
+}
+
+
 // ==================== FACE PROFILES ====================
 
 export async function getAdminFaceProfiles() {

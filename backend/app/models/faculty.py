@@ -33,6 +33,20 @@ class Faculty(db.Model):
         nullable=False,
     )
 
+    phone = db.Column(db.String(20), nullable=True)
+    gender = db.Column(db.String(20), nullable=True)
+    date_of_birth = db.Column(db.String(50), nullable=True)
+    date_of_joining = db.Column(db.String(50), nullable=True)
+    employment_status = db.Column(db.String(50), nullable=True, default="Permanent")
+    qualification = db.Column(db.String(150), nullable=True)
+    specialization = db.Column(db.String(255), nullable=True)
+    office_cabin = db.Column(db.String(100), nullable=True)
+    address = db.Column(db.String(255), nullable=True)
+    city = db.Column(db.String(100), nullable=True)
+    state = db.Column(db.String(100), nullable=True)
+    pin_code = db.Column(db.String(20), nullable=True)
+    country = db.Column(db.String(100), nullable=True, default="India")
+
     # The user account associated with this faculty profile.
     user = db.relationship(
         "User",

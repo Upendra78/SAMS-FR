@@ -1,9 +1,9 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
-from app.extensions import db
-from app.models import Faculty, CourseOffering, Enrollment
-from app.utils.auth import faculty_required
+from app.extensions import db, bcrypt
+from app.models import Faculty, CourseOffering, Enrollment, User, Department
+from app.utils.auth import faculty_required, faculty_or_admin_required
 
 
 faculty_bp = Blueprint(
@@ -16,13 +16,58 @@ faculty_bp = Blueprint(
 def get_current_faculty():
     user_id = int(get_jwt_identity())
 
-    return Faculty.query.filter_by(
-        user_id=user_id
-    ).first()
+    faculty = Faculty.query.filter_by(user_id=user_id).first()
+    if not faculty:
+        user = db.session.get(User, user_id)
+        if user and user.role in ("FACULTY", "ADMIN"):
+            dept = Department.query.first()
+            dept_id = dept.department_id if dept else 1
+            faculty = Faculty(
+                user_id=user_id,
+                department_id=dept_id,
+                employee_id=f"FAC-{user_id:04d}",
+                designation="Faculty Member",
+                employment_status="Permanent",
+                country="India",
+            )
+            db.session.add(faculty)
+            db.session.commit()
+
+    return faculty
+
+
+def serialize_faculty_profile(faculty):
+    return {
+        "faculty_id": faculty.faculty_id,
+        "user_id": faculty.user_id,
+        "name": faculty.user.name,
+        "email": faculty.user.email,
+        "employee_id": faculty.employee_id,
+        "designation": faculty.designation,
+        "phone": faculty.phone or "",
+        "gender": faculty.gender or "",
+        "date_of_birth": faculty.date_of_birth or "",
+        "date_of_joining": faculty.date_of_joining or "",
+        "employment_status": faculty.employment_status or "Permanent",
+        "qualification": faculty.qualification or "",
+        "specialization": faculty.specialization or "",
+        "office_cabin": faculty.office_cabin or "",
+        "address": faculty.address or "",
+        "city": faculty.city or "",
+        "state": faculty.state or "",
+        "pin_code": faculty.pin_code or "",
+        "country": faculty.country or "India",
+        "account_status": "Active" if getattr(faculty.user, "is_active", True) else "Inactive",
+        "department": {
+            "department_id": faculty.department.department_id if faculty.department else None,
+            "department_name": faculty.department.department_name if faculty.department else "Department",
+            "department_code": faculty.department.department_code if faculty.department else "N/A",
+        },
+    }
 
 
 @faculty_bp.get("/dashboard")
-@faculty_required
+@faculty_or_admin_required
 def faculty_dashboard():
     return jsonify({
         "success": True,
@@ -38,7 +83,7 @@ def faculty_dashboard():
 # ============================================================
 
 @faculty_bp.get("/profile")
-@faculty_required
+@faculty_or_admin_required
 def get_faculty_profile():
     faculty = get_current_faculty()
 
@@ -50,19 +95,7 @@ def get_faculty_profile():
 
     return jsonify({
         "success": True,
-        "data": {
-            "faculty_id": faculty.faculty_id,
-            "user_id": faculty.user_id,
-            "name": faculty.user.name,
-            "email": faculty.user.email,
-            "employee_id": faculty.employee_id,
-            "designation": faculty.designation,
-            "department": {
-                "department_id": faculty.department.department_id,
-                "department_name": faculty.department.department_name,
-                "department_code": faculty.department.department_code,
-            },
-        },
+        "data": serialize_faculty_profile(faculty),
     }), 200
 
 
@@ -71,7 +104,7 @@ def get_faculty_profile():
 # ============================================================
 
 @faculty_bp.patch("/profile")
-@faculty_required
+@faculty_or_admin_required
 def update_faculty_profile():
     faculty = get_current_faculty()
 
@@ -83,24 +116,21 @@ def update_faculty_profile():
 
     data = request.get_json(silent=True) or {}
 
+    # Basic User fields
     name = data.get("name")
     email = data.get("email")
-    designation = data.get("designation")
 
     if name is not None:
         name = str(name).strip()
-
         if not name:
             return jsonify({
                 "success": False,
                 "message": "Name cannot be empty",
             }), 400
-
         faculty.user.name = name
 
     if email is not None:
         email = str(email).strip().lower()
-
         if not email:
             return jsonify({
                 "success": False,
@@ -108,14 +138,13 @@ def update_faculty_profile():
             }), 400
 
         existing_user = (
-            faculty.user.__class__.query
+            User.query
             .filter(
-                faculty.user.__class__.email == email,
-                faculty.user.__class__.user_id != faculty.user_id,
+                User.email == email,
+                User.user_id != faculty.user_id,
             )
             .first()
         )
-
         if existing_user:
             return jsonify({
                 "success": False,
@@ -124,35 +153,109 @@ def update_faculty_profile():
 
         faculty.user.email = email
 
-    if designation is not None:
-        designation = str(designation).strip()
+    # Profile & Academic fields
+    if "designation" in data and data["designation"] is not None:
+        faculty.designation = str(data["designation"]).strip()
 
-        if not designation:
-            return jsonify({
-                "success": False,
-                "message": "Designation cannot be empty",
-            }), 400
+    if "phone" in data:
+        faculty.phone = str(data["phone"]).strip() if data["phone"] is not None else None
 
-        faculty.designation = designation
+    if "gender" in data:
+        faculty.gender = str(data["gender"]).strip() if data["gender"] is not None else None
+
+    if "date_of_birth" in data:
+        faculty.date_of_birth = str(data["date_of_birth"]).strip() if data["date_of_birth"] is not None else None
+
+    if "date_of_joining" in data:
+        faculty.date_of_joining = str(data["date_of_joining"]).strip() if data["date_of_joining"] is not None else None
+
+    if "employment_status" in data:
+        faculty.employment_status = str(data["employment_status"]).strip() if data["employment_status"] is not None else "Permanent"
+
+    if "qualification" in data:
+        faculty.qualification = str(data["qualification"]).strip() if data["qualification"] is not None else None
+
+    if "specialization" in data:
+        faculty.specialization = str(data["specialization"]).strip() if data["specialization"] is not None else None
+
+    if "office_cabin" in data:
+        faculty.office_cabin = str(data["office_cabin"]).strip() if data["office_cabin"] is not None else None
+
+    # Location & Contact fields
+    if "address" in data:
+        faculty.address = str(data["address"]).strip() if data["address"] is not None else None
+
+    if "city" in data:
+        faculty.city = str(data["city"]).strip() if data["city"] is not None else None
+
+    if "state" in data:
+        faculty.state = str(data["state"]).strip() if data["state"] is not None else None
+
+    if "pin_code" in data:
+        faculty.pin_code = str(data["pin_code"]).strip() if data["pin_code"] is not None else None
+
+    if "country" in data:
+        faculty.country = str(data["country"]).strip() if data["country"] is not None else "India"
 
     db.session.commit()
 
     return jsonify({
         "success": True,
         "message": "Faculty profile updated successfully",
-        "data": {
-            "faculty_id": faculty.faculty_id,
-            "user_id": faculty.user_id,
-            "name": faculty.user.name,
-            "email": faculty.user.email,
-            "employee_id": faculty.employee_id,
-            "designation": faculty.designation,
-            "department": {
-                "department_id": faculty.department.department_id,
-                "department_name": faculty.department.department_name,
-                "department_code": faculty.department.department_code,
-            },
-        },
+        "data": serialize_faculty_profile(faculty),
+    }), 200
+
+
+# ============================================================
+# CHANGE FACULTY PASSWORD
+# ============================================================
+
+@faculty_bp.post("/change-password")
+@faculty_or_admin_required
+def change_faculty_password():
+    faculty = get_current_faculty()
+
+    if not faculty:
+        return jsonify({
+            "success": False,
+            "message": "Faculty profile not found",
+        }), 404
+
+    data = request.get_json(silent=True) or {}
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+    confirm_password = data.get("confirm_password")
+
+    if not current_password or not new_password:
+        return jsonify({
+            "success": False,
+            "message": "Current password and new password are required",
+        }), 400
+
+    if len(str(new_password)) < 6:
+        return jsonify({
+            "success": False,
+            "message": "New password must be at least 6 characters",
+        }), 400
+
+    if confirm_password and str(new_password) != str(confirm_password):
+        return jsonify({
+            "success": False,
+            "message": "New password and confirmation do not match",
+        }), 400
+
+    if not bcrypt.check_password_hash(faculty.user.password_hash, str(current_password)):
+        return jsonify({
+            "success": False,
+            "message": "Current password is incorrect",
+        }), 400
+
+    faculty.user.password_hash = bcrypt.generate_password_hash(str(new_password)).decode("utf-8")
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "message": "Password changed successfully",
     }), 200
 
 # ============================================================
