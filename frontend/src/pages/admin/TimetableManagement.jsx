@@ -1156,9 +1156,8 @@ function TimetableManagement() {
                 </span>
               </h4>
               <span
-                className={`timetable-badge-pill ${
-                  analysisResult ? "is-success" : previewLoading ? "is-loading" : "is-muted"
-                }`}
+                className={`timetable-badge-pill ${analysisResult ? "is-success" : previewLoading ? "is-loading" : "is-muted"
+                  }`}
               >
                 {analysisResult ? "Completed" : previewLoading ? "In Progress" : "Pending"}
               </span>
@@ -2572,13 +2571,12 @@ function TimetableManagement() {
                       <td>{adj.adjusted_by_name}</td>
                       <td>
                         <span
-                          className={`timetable-pill-tag ${
-                            adj.status === "APPROVED"
+                          className={`timetable-pill-tag ${adj.status === "APPROVED"
                               ? "is-active"
                               : adj.status === "CANCELLED"
-                              ? "is-cancelled"
-                              : "is-pending"
-                          }`}
+                                ? "is-cancelled"
+                                : "is-pending"
+                            }`}
                         >
                           {adj.status}
                         </span>
