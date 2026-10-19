@@ -128,6 +128,28 @@ def create_batch():
 
 # ADMIN PROFILE
 
+def serialize_admin_profile(user):
+    return {
+        "user_id": user.user_id,
+        "name": user.name,
+        "email": user.email,
+        "phone": getattr(user, "phone", "") or "",
+        "designation": getattr(user, "designation", "") or "System Administrator",
+        "department": getattr(user, "department", "") or "Administration",
+        "role": user.role,
+        "is_active": getattr(user, "is_active", True),
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        "stats": {
+            "total_users": User.query.count(),
+            "total_students": Student.query.count(),
+            "total_faculty": Faculty.query.count(),
+            "total_courses": Course.query.count(),
+            "total_sessions": AttendanceSession.query.count(),
+        },
+    }
+
+
 @admin_bp.get("/profile")
 @admin_required
 def get_admin_profile():
@@ -149,14 +171,7 @@ def get_admin_profile():
 
     return jsonify({
         "success": True,
-        "data": {
-            "user_id": user.user_id,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
-        },
+        "data": serialize_admin_profile(user),
     }), 200
 
 
@@ -187,19 +202,19 @@ def update_admin_profile():
             "message": "No fields provided for update",
         }), 400
 
-    forbidden_fields = {"role", "user_id", "password"}
+    forbidden_fields = {"role", "user_id"}
 
     if forbidden_fields.intersection(data.keys()):
         return jsonify({
             "success": False,
-            "message": "Role, user_id and password cannot be updated through admin profile",
+            "message": "Role and user_id cannot be updated through admin profile",
         }), 400
 
     # -------------------------
     # Name
     # -------------------------
 
-    if "name" in data:
+    if "name" in data and data["name"] is not None:
         name = str(data["name"]).strip()
 
         if not name:
@@ -214,7 +229,7 @@ def update_admin_profile():
     # Email
     # -------------------------
 
-    if "email" in data:
+    if "email" in data and data["email"] is not None:
         email = str(data["email"]).lower().strip()
 
         if not email:
@@ -237,10 +252,23 @@ def update_admin_profile():
         user.email = email
 
     # -------------------------
+    # Phone, Designation, Dept
+    # -------------------------
+
+    if "phone" in data:
+        user.phone = str(data["phone"]).strip() if data["phone"] is not None else None
+
+    if "designation" in data and data["designation"] is not None:
+        user.designation = str(data["designation"]).strip()
+
+    if "department" in data and data["department"] is not None:
+        user.department = str(data["department"]).strip()
+
+    # -------------------------
     # Password
     # -------------------------
 
-    if "password" in data:
+    if "password" in data and data["password"]:
         password = str(data["password"])
 
         if len(password) < 8:
@@ -249,12 +277,17 @@ def update_admin_profile():
                 "message": "Password must be at least 8 characters",
             }), 400
 
+        current_password = data.get("current_password")
+        if current_password:
+            if not bcrypt.check_password_hash(user.password_hash, str(current_password)):
+                return jsonify({
+                    "success": False,
+                    "message": "Current password is incorrect",
+                }), 400
+
         user.password_hash = bcrypt.generate_password_hash(
             password
         ).decode("utf-8")
-
-    # Role is intentionally not
-    # accepted here.
 
     try:
         db.session.commit()
@@ -283,14 +316,64 @@ def update_admin_profile():
     return jsonify({
         "success": True,
         "message": "Admin profile updated successfully",
-        "data": {
-            "user_id": user.user_id,
-            "name": user.name,
-            "email": user.email,
-            "role": user.role,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
-        },
+        "data": serialize_admin_profile(user),
+    }), 200
+
+
+@admin_bp.post("/change-password")
+@admin_required
+def change_admin_password():
+    user_id = get_jwt_identity()
+
+    user = db.session.get(User, int(user_id))
+
+    if not user:
+        return jsonify({
+            "success": False,
+            "message": "Admin user not found",
+        }), 404
+
+    if user.role != "ADMIN":
+        return jsonify({
+            "success": False,
+            "message": "Access forbidden",
+        }), 403
+
+    data = request.get_json(silent=True) or {}
+    current_password = data.get("current_password")
+    new_password = data.get("new_password")
+    confirm_password = data.get("confirm_password")
+
+    if not current_password or not new_password:
+        return jsonify({
+            "success": False,
+            "message": "Current password and new password are required",
+        }), 400
+
+    if len(str(new_password)) < 8:
+        return jsonify({
+            "success": False,
+            "message": "New password must be at least 8 characters",
+        }), 400
+
+    if confirm_password and str(new_password) != str(confirm_password):
+        return jsonify({
+            "success": False,
+            "message": "New password and confirmation do not match",
+        }), 400
+
+    if not bcrypt.check_password_hash(user.password_hash, str(current_password)):
+        return jsonify({
+            "success": False,
+            "message": "Current password is incorrect",
+        }), 400
+
+    user.password_hash = bcrypt.generate_password_hash(str(new_password)).decode("utf-8")
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "message": "Password changed successfully",
     }), 200
 
 # ============================================================

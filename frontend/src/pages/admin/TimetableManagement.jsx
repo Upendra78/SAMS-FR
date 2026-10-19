@@ -1656,6 +1656,7 @@ function TimetableManagement() {
                   <thead>
                     <tr>
                       <th>Day</th>
+                      <th>Period</th>
                       <th>Time</th>
                       <th>Subject Code</th>
                       <th>Subject Name</th>
