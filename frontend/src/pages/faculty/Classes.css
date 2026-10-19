@@ -618,6 +618,20 @@
   font-weight: 800;
 }
 
+.fc-schedule-cell,
+.fc-attendance-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 125px;
+}
+
+.fc-schedule-cell small,
+.fc-attendance-cell small {
+  color: var(--text-muted, #64748b);
+  font-size: 0.78rem;
+}
+
 .fc-view-button {
   display: inline-flex;
   align-items: center;
@@ -789,6 +803,55 @@
   color: #8792a3;
   font-size: 10px;
   line-height: 1.65;
+}
+
+.fc-today-schedule {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid #f0f2f6;
+}
+
+.fc-today-schedule > p {
+  padding: 20px 17px;
+  margin: 0;
+  color: #8792a3;
+  font-size: 10px;
+  line-height: 1.65;
+  text-align: center;
+}
+
+.fc-today-schedule-item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #f0f2f6;
+  transition: background 130ms ease;
+}
+
+.fc-today-schedule-item:last-child {
+  border-bottom: 0;
+}
+
+.fc-today-schedule-item:hover {
+  background: #f8fbff;
+}
+
+.fc-today-schedule-item strong {
+  color: #26344a;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.fc-today-schedule-item span {
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.fc-today-schedule-item small {
+  color: #8490a2;
+  font-size: 9px;
 }
 
 .fc-help-panel {

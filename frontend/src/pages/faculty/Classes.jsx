@@ -7,7 +7,10 @@ import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   getFacultyCourses,
   getFacultyCourseDetails,
+  getFacultyTimetable,
 } from "../../services/facultyService";
+
+import { getFacultyAttendanceAnalytics } from "../../services/reportService";
 
 import "./Classes.css";
 
@@ -126,6 +129,26 @@ function MetricCard({ icon, tone, label, value, description, pending = false }) 
   );
 }
 
+function formatTime(value) {
+  if (!value) return "Time unavailable";
+
+  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return String(value);
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const suffix = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+
+  return `${hour12}:${String(minutes).padStart(2, "0")} ${suffix}`;
+}
+
+function formatSchedule(entry) {
+  if (!entry) return "Not scheduled";
+
+  return `${entry.day_of_week}, ${formatTime(entry.start_time)}–${formatTime(entry.end_time)}`;
+}
+
 function Classes() {
   const navigate = useNavigate();
 
@@ -144,8 +167,11 @@ function Classes() {
   const [detailsError, setDetailsError] = useState("");
   const [retryCount, setRetryCount] = useState(0);
 
+  const [timetable, setTimetable] = useState([]);
+  const [timetableError, setTimetableError] = useState("");
 
-
+  const [analytics, setAnalytics] = useState(null);
+  const [analyticsError, setAnalyticsError] = useState("");
   useEffect(() => {
     let active = true;
 
@@ -247,6 +273,62 @@ function Classes() {
     };
   }, [retryCount]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadSupportingData() {
+      const [timetableResult, analyticsResult] = await Promise.allSettled([
+        getFacultyTimetable(),
+        getFacultyAttendanceAnalytics(),
+      ]);
+
+      if (!active) return;
+
+      if (
+        timetableResult.status === "fulfilled" &&
+        timetableResult.value?.success &&
+        Array.isArray(timetableResult.value.data)
+      ) {
+        setTimetable(timetableResult.value.data);
+        setTimetableError("");
+      } else {
+        setTimetable([]);
+        setTimetableError(
+          timetableResult.status === "rejected"
+            ? timetableResult.reason?.response?.data?.message ||
+                timetableResult.reason?.message ||
+                "Unable to load timetable."
+            : timetableResult.value?.message || "Unable to load timetable.",
+        );
+      }
+
+      if (
+        analyticsResult.status === "fulfilled" &&
+        analyticsResult.value?.success &&
+        analyticsResult.value.data
+      ) {
+        setAnalytics(analyticsResult.value.data);
+        setAnalyticsError("");
+      } else {
+        setAnalytics(null);
+        setAnalyticsError(
+          analyticsResult.status === "rejected"
+            ? analyticsResult.reason?.response?.data?.message ||
+                analyticsResult.reason?.message ||
+                "Unable to load attendance analytics."
+            : analyticsResult.value?.message ||
+                "Unable to load attendance analytics.",
+        );
+      }
+    }
+
+    loadSupportingData();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const semesters = useMemo(
     () => [
       "All",
@@ -312,6 +394,48 @@ function Classes() {
 
     return keys.reduce((total, key) => total + studentCounts[key], 0);
   }, [classes, studentCounts, countsReady]);
+
+  const timetableByOffering = useMemo(() => {
+    const grouped = {};
+
+    timetable.forEach((entry) => {
+      const key = String(entry.offering_id);
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(entry);
+    });
+
+    Object.values(grouped).forEach((entries) => {
+      entries.sort((a, b) =>
+        String(a.start_time || "").localeCompare(String(b.start_time || "")),
+      );
+    });
+
+    return grouped;
+  }, [timetable]);
+
+  const analyticsByOffering = useMemo(() => {
+    const grouped = {};
+
+    (analytics?.courses || []).forEach((course) => {
+      grouped[String(course.offering_id)] = course;
+    });
+
+    return grouped;
+  }, [analytics]);
+
+  const todaySchedule = useMemo(() => {
+    const today = new Date().toLocaleDateString("en-US", {
+      weekday: "long",
+    }).toLowerCase();
+
+    return timetable
+      .filter((entry) =>
+        String(entry.day_of_week || "").toLowerCase() === today,
+      )
+      .sort((a, b) =>
+        String(a.start_time || "").localeCompare(String(b.start_time || "")),
+      );
+  }, [timetable]);
 
   const filtersActive =
     Boolean(search.trim()) ||
@@ -388,16 +512,30 @@ function Classes() {
         <MetricCard
           icon="attendance"
           tone="fc-green"
-          label="Attendance Today"
-          pending
-          description="Today's attendance summary"
+          label="Overall Attendance"
+          value={
+            analytics
+              ? `${Number(analytics.overall_attendance_percentage || 0).toFixed(1)}%`
+              : "—"
+          }
+          description={
+            analytics
+              ? `${analytics.total_sessions} closed sessions included`
+              : analyticsError || "Attendance analytics unavailable"
+          }
+          pending={!analytics}
         />
         <MetricCard
           icon="upcoming"
           tone="fc-orange"
-          label="Upcoming Sessions"
-          pending
-          description="Based on the class timetable"
+          label="Weekly Timetable Slots"
+          value={timetable.length}
+          description={
+            timetableError
+              ? timetableError
+              : "Assigned timetable entries"
+          }
+          pending={Boolean(timetableError)}
         />
       </div>
 
@@ -541,6 +679,9 @@ function Classes() {
                         countKey in studentCounts &&
                         studentCounts[countKey] !== null;
 
+                      const schedules = timetableByOffering[String(item.offering_id)] || [];
+                      const attendance = analyticsByOffering[String(item.offering_id)];
+
                       return (
                         <tr key={item.offering_id ?? `${item.course_id}-${item.section}`}>
                           <td>
@@ -575,8 +716,43 @@ function Classes() {
                               <Pending compact />
                             )}
                           </td>
-                          <td><Pending compact /></td>
-                          <td><Pending compact /></td>
+                          <td>
+                            {timetableError ? (
+                              <span title={timetableError}>Unavailable</span>
+                            ) : schedules.length ? (
+                              <div className="fc-schedule-cell">
+                                {schedules.map((entry) => (
+                                  <div key={entry.timetable_entry_id}>
+                                    <strong>{entry.day_of_week}</strong>
+                                    <small>
+                                      {formatTime(entry.start_time)}–{formatTime(entry.end_time)}
+                                    </small>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span>Not scheduled</span>
+                            )}
+                          </td>
+
+                          <td>
+                            {analyticsError ? (
+                              <span title={analyticsError}>Unavailable</span>
+                            ) : attendance ? (
+                              <div className="fc-attendance-cell">
+                                <strong>
+                                  {Number(attendance.attendance_percentage || 0).toFixed(1)}%
+                                </strong>
+                                <small>
+                                  {attendance.total_sessions} closed sessions
+                                </small>
+                              </div>
+                            ) : analytics ? (
+                              <span>—</span>
+                            ) : (
+                              <span>Loading…</span>
+                            )}
+                          </td>
                           <td>
                             <button
                               type="button"
@@ -677,10 +853,31 @@ function Classes() {
               </div>
               <span className="fc-calendar-icon"><Icon name="upcoming" /></span>
             </div>
-            <div className="fc-schedule-pending">
-              <Icon name="upcoming" />
-              <Pending compact />
-              <p>The current faculty API does not provide class days or start/end times.</p>
+            <div className="fc-today-schedule">
+              {timetableError ? (
+                <p role="status">{timetableError}</p>
+              ) : todaySchedule.length === 0 ? (
+                <p>
+                  {timetable.length
+                    ? "No classes are scheduled for today."
+                    : "No timetable entries are available."}
+                </p>
+              ) : (
+                todaySchedule.map((entry) => (
+                  <article
+                    className="fc-today-schedule-item"
+                    key={entry.timetable_entry_id}
+                  >
+                    <strong>{entry.course_code} — {entry.course_name}</strong>
+                    <span>
+                      {formatTime(entry.start_time)}–{formatTime(entry.end_time)}
+                    </span>
+                    <small>
+                      Section {display(entry.section)} · Room {display(entry.room)}
+                    </small>
+                  </article>
+                ))
+              )}
             </div>
           </section>
 
@@ -812,10 +1009,34 @@ function Classes() {
 
             <section className="fc-modal-section">
               <h3>Schedule</h3>
-              <p className="fc-modal-empty">
-                API integration pending — class days and start/end times are not included
-                in the current course-details response.
-              </p>
+              {(selectedClass.offerings || []).map((offering) => {
+                const entries =
+                  timetableByOffering[String(offering.offering_id)] || [];
+
+                return (
+                  <article
+                    className="fc-offering-card"
+                    key={offering.offering_id}
+                  >
+                    <strong>
+                      Offering #{display(offering.offering_id)} — Section{" "}
+                      {display(offering.section)}
+                    </strong>
+
+                    {timetableError ? (
+                      <p className="fc-modal-empty">{timetableError}</p>
+                    ) : entries.length ? (
+                      entries.map((entry) => (
+                        <p key={entry.timetable_entry_id}>
+                          {formatSchedule(entry)} · Room {display(entry.room)}
+                        </p>
+                      ))
+                    ) : (
+                      <p className="fc-modal-empty">No timetable entry is assigned.</p>
+                    )}
+                  </article>
+                );
+              })}
             </section>
 
             <footer className="fc-modal-footer">

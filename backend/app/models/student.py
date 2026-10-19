@@ -35,6 +35,25 @@ class Student(db.Model):
     section = db.Column(db.String(20), nullable=False)
     academic_year = db.Column(db.String(20), nullable=False)
 
+    photo_url = db.Column(db.Text, nullable=True)
+    signature_url = db.Column(db.Text, nullable=True)
+    father_name = db.Column(db.String(100), nullable=True)
+    mother_name = db.Column(db.String(100), nullable=True)
+    phone = db.Column(db.String(20), nullable=True)
+    guardian_phone = db.Column(db.String(20), nullable=True)
+    blood_group = db.Column(db.String(10), nullable=True)
+    gender = db.Column(db.String(20), nullable=True)
+    date_of_birth = db.Column(db.String(50), nullable=True)
+    address = db.Column(db.String(255), nullable=True)
+    city = db.Column(db.String(100), nullable=True)
+    state = db.Column(db.String(100), nullable=True)
+    pin_code = db.Column(db.String(20), nullable=True)
+    country = db.Column(db.String(100), nullable=True, default="India")
+    emergency_contact_name = db.Column(db.String(100), nullable=True)
+    emergency_contact_phone = db.Column(db.String(20), nullable=True)
+    admission_date = db.Column(db.String(50), nullable=True)
+
+
     user = db.relationship(
         "User",
         back_populates="student_profile",

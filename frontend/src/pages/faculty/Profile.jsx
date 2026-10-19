@@ -18,11 +18,15 @@ import {
   Hash,
   BadgeCheck,
   FileText,
+  Eye,
+  EyeOff,
+  Phone,
 } from "lucide-react";
 
 import {
   getFacultyProfile,
   updateFacultyProfile,
+  changeFacultyPassword,
 } from "../../services/facultyService";
 import "./Profile.css";
 
@@ -49,6 +53,19 @@ function Profile() {
     name: "",
     email: "",
     designation: "",
+    phone: "",
+    gender: "",
+    date_of_birth: "",
+    date_of_joining: "",
+    employment_status: "Permanent",
+    qualification: "",
+    specialization: "",
+    office_cabin: "",
+    address: "",
+    city: "",
+    state: "",
+    pin_code: "",
+    country: "India",
   });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState("");
@@ -56,6 +73,16 @@ function Profile() {
 
   // Change Password Modal
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: "",
+    new_password: "",
+    confirm_password: "",
+  });
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [passwordLoading, setPasswordLoading] = useState(false);
+  const [passwordError, setPasswordError] = useState("");
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -75,7 +102,7 @@ function Profile() {
       setApiError(
         err?.response?.data?.message ||
         err?.message ||
-        "API integration pending: Faculty Profile API"
+        "Unable to load faculty profile. Please try again."
       );
     } finally {
       setLoading(false);
@@ -104,7 +131,7 @@ function Profile() {
         setApiError(
           err?.response?.data?.message ||
           err?.message ||
-          "API integration pending: Faculty Profile API"
+          "Unable to load faculty profile. Please try again."
         );
       } finally {
         if (!cancelled) {
@@ -127,6 +154,19 @@ function Profile() {
       name: profile.name || "",
       email: profile.email || "",
       designation: profile.designation || "",
+      phone: profile.phone || "",
+      gender: profile.gender || "",
+      date_of_birth: profile.date_of_birth || "",
+      date_of_joining: profile.date_of_joining || "",
+      employment_status: profile.employment_status || "Permanent",
+      qualification: profile.qualification || "",
+      specialization: profile.specialization || "",
+      office_cabin: profile.office_cabin || "",
+      address: profile.address || "",
+      city: profile.city || "",
+      state: profile.state || "",
+      pin_code: profile.pin_code || "",
+      country: profile.country || "India",
     });
     setEditError("");
     setShowEditModal(true);
@@ -152,17 +192,25 @@ function Profile() {
         name,
         email,
         designation,
+        phone: editForm.phone.trim(),
+        gender: editForm.gender.trim(),
+        date_of_birth: editForm.date_of_birth.trim(),
+        date_of_joining: editForm.date_of_joining.trim(),
+        employment_status: editForm.employment_status.trim(),
+        qualification: editForm.qualification.trim(),
+        specialization: editForm.specialization.trim(),
+        office_cabin: editForm.office_cabin.trim(),
+        address: editForm.address.trim(),
+        city: editForm.city.trim(),
+        state: editForm.state.trim(),
+        pin_code: editForm.pin_code.trim(),
+        country: editForm.country.trim(),
       });
 
       if (result?.success && result?.data) {
-        setProfile((prev) => ({
-          ...prev,
-          name: result.data.name || name,
-          email: result.data.email || email,
-          designation: result.data.designation || designation,
-        }));
+        setProfile(result.data);
         setShowEditModal(false);
-        setSuccessToast("Profile updated successfully on the backend!");
+        setSuccessToast("Faculty profile updated successfully!");
         setTimeout(() => setSuccessToast(""), 4000);
       } else {
         throw new Error(result?.message || "Failed to update profile.");
@@ -171,10 +219,66 @@ function Profile() {
       setEditError(
         err?.response?.data?.message ||
         err?.message ||
-        "Unable to update profile. API integration pending."
+        "Unable to update profile. Please verify your details."
       );
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  // Submit Password Change
+  const handlePasswordSubmit = async (e) => {
+    e.preventDefault();
+    setPasswordError("");
+
+    const currentPassword = passwordForm.current_password.trim();
+    const newPassword = passwordForm.new_password.trim();
+    const confirmPassword = passwordForm.confirm_password.trim();
+
+    if (!currentPassword || !newPassword) {
+      setPasswordError("Both current password and new password are required.");
+      return;
+    }
+
+    if (newPassword.length < 6) {
+      setPasswordError("New password must be at least 6 characters.");
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New password and confirm password do not match.");
+      return;
+    }
+
+    setPasswordLoading(true);
+
+    try {
+      const result = await changeFacultyPassword({
+        current_password: currentPassword,
+        new_password: newPassword,
+        confirm_password: confirmPassword,
+      });
+
+      if (result?.success) {
+        setShowPasswordModal(false);
+        setPasswordForm({
+          current_password: "",
+          new_password: "",
+          confirm_password: "",
+        });
+        setSuccessToast("Password changed successfully!");
+        setTimeout(() => setSuccessToast(""), 4000);
+      } else {
+        throw new Error(result?.message || "Failed to change password.");
+      }
+    } catch (err) {
+      setPasswordError(
+        err?.response?.data?.message ||
+        err?.message ||
+        "Failed to change password. Please check your current password."
+      );
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
@@ -194,7 +298,7 @@ function Profile() {
       <div className="faculty-profile-container">
         <div className="faculty-profile-error-box">
           <AlertCircle size={32} className="text-amber" />
-          <h2>API integration pending: Faculty Profile API</h2>
+          <h2>Unable to Load Faculty Profile</h2>
           <p>{apiError}</p>
           <button
             type="button"
@@ -222,6 +326,21 @@ function Profile() {
     typeof profile?.department === "object"
       ? profile?.department?.department_code || "N/A"
       : "N/A";
+
+  const phone = profile?.phone || "Not provided";
+  const gender = profile?.gender || "Not specified";
+  const dateOfBirth = profile?.date_of_birth || "Not provided";
+  const dateOfJoining = profile?.date_of_joining || "Not provided";
+  const employmentStatus = profile?.employment_status || "Permanent";
+  const qualification = profile?.qualification || "Not provided";
+  const specialization = profile?.specialization || "Not provided";
+  const officeCabin = profile?.office_cabin || "Not assigned";
+  const address = profile?.address || "Not provided";
+  const city = profile?.city || "Not provided";
+  const state = profile?.state || "Not provided";
+  const pinCode = profile?.pin_code || "Not provided";
+  const country = profile?.country || "India";
+  const accountStatus = profile?.account_status || "Active";
 
   const initials = getInitials(fullName);
 
@@ -273,6 +392,11 @@ function Profile() {
               <span className="faculty-meta-chip">
                 <Mail size={13} /> {email}
               </span>
+              {phone !== "Not provided" && (
+                <span className="faculty-meta-chip">
+                  <Phone size={13} /> {phone}
+                </span>
+              )}
               <span className="faculty-meta-chip">
                 <Building size={13} /> Code: {departmentCode}
               </span>
@@ -291,7 +415,10 @@ function Profile() {
             <button
               type="button"
               className="faculty-btn-secondary"
-              onClick={() => setShowPasswordModal(true)}
+              onClick={() => {
+                setPasswordError("");
+                setShowPasswordModal(true);
+              }}
             >
               <KeyRound size={15} /> Password
             </button>
@@ -372,12 +499,12 @@ function Profile() {
 
               <div className="faculty-snapshot-item">
                 <span className="snapshot-label">Employment Status</span>
-                <span className="pending-badge">API integration pending</span>
+                <strong className="snapshot-value text-emerald">{employmentStatus}</strong>
               </div>
 
               <div className="faculty-snapshot-item">
                 <span className="snapshot-label">Date of Joining</span>
-                <span className="pending-badge">API integration pending</span>
+                <strong className="snapshot-value">{dateOfJoining}</strong>
               </div>
             </div>
           </div>
@@ -395,7 +522,7 @@ function Profile() {
               <div className="faculty-bio-status-box">
                 <div className="faculty-bio-indicator">
                   <span className="pulse-green-dot" />
-                  <strong>Face Recognition Enrolled</strong>
+                  <strong>Face Recognition Active</strong>
                 </div>
                 <p className="faculty-bio-text">
                   Facial embeddings are active for automated classroom recognition and attendance session validation.
@@ -445,17 +572,22 @@ function Profile() {
 
                   <div className="faculty-field-item span-2">
                     <span className="field-label">Academic Qualification</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{qualification}</strong>
                   </div>
 
                   <div className="faculty-field-item span-2">
                     <span className="field-label">Specialization &amp; Research</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{specialization}</strong>
                   </div>
 
                   <div className="faculty-field-item">
                     <span className="field-label">Office / Cabin</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{officeCabin}</strong>
+                  </div>
+
+                  <div className="faculty-field-item">
+                    <span className="field-label">Employment Status</span>
+                    <strong className="field-value text-emerald">{employmentStatus}</strong>
                   </div>
                 </div>
               </div>
@@ -490,7 +622,7 @@ function Profile() {
 
                   <div className="faculty-field-item">
                     <span className="field-label">Account Status</span>
-                    <strong className="field-value text-emerald">Active</strong>
+                    <strong className="field-value text-emerald">{accountStatus}</strong>
                   </div>
                 </div>
               </div>
@@ -524,17 +656,22 @@ function Profile() {
 
                   <div className="faculty-field-item">
                     <span className="field-label">Phone Number</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{phone}</strong>
                   </div>
 
                   <div className="faculty-field-item">
                     <span className="field-label">Gender</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{gender}</strong>
                   </div>
 
                   <div className="faculty-field-item">
                     <span className="field-label">Date of Birth</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{dateOfBirth}</strong>
+                  </div>
+
+                  <div className="faculty-field-item">
+                    <span className="field-label">Date of Joining</span>
+                    <strong className="field-value">{dateOfJoining}</strong>
                   </div>
                 </div>
               </div>
@@ -554,27 +691,27 @@ function Profile() {
                 <div className="faculty-details-grid">
                   <div className="faculty-field-item span-2">
                     <span className="field-label">Campus Address</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{address}</strong>
                   </div>
 
                   <div className="faculty-field-item">
                     <span className="field-label">City</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{city}</strong>
                   </div>
 
                   <div className="faculty-field-item">
                     <span className="field-label">State / Region</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{state}</strong>
                   </div>
 
                   <div className="faculty-field-item">
                     <span className="field-label">PIN Code</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{pinCode}</strong>
                   </div>
 
                   <div className="faculty-field-item">
                     <span className="field-label">Country</span>
-                    <span className="pending-badge">API integration pending</span>
+                    <strong className="field-value">{country}</strong>
                   </div>
                 </div>
               </div>
@@ -603,16 +740,19 @@ function Profile() {
                         <strong>Account Password</strong>
                       </div>
                       <p>
-                        Password is encrypted and stored via secure backend hash.
+                        Password is encrypted and stored via secure bcrypt hash. You can update your password at any time.
                       </p>
                     </div>
 
                     <button
                       type="button"
                       className="faculty-btn-secondary"
-                      onClick={() => setShowPasswordModal(true)}
+                      onClick={() => {
+                        setPasswordError("");
+                        setShowPasswordModal(true);
+                      }}
                     >
-                      <KeyRound size={14} /> Password Options
+                      <KeyRound size={14} /> Change Password
                     </button>
                   </div>
 
@@ -631,10 +771,9 @@ function Profile() {
                   </div>
 
                   <div className="faculty-security-notice">
-                    <AlertCircle size={15} />
+                    <CheckCircle2 size={15} className="text-emerald" />
                     <span>
-                      API Integration Note: Only Full Name, Email, and Designation can be updated through the backend <code>PATCH /api/faculty/profile</code> API.
-                      Self-service password changes are pending backend integration and must be updated via the IT administrator.
+                      All profile details, academic records, and account credentials are fully synchronized with the university backend database.
                     </span>
                   </div>
                 </div>
@@ -659,7 +798,7 @@ function Profile() {
               <div>
                 <span className="modal-eyebrow">Profile Management</span>
                 <h3 className="modal-title">Edit Faculty Profile</h3>
-                <p className="modal-sub">Update your official name, email, and designation in the backend database.</p>
+                <p className="modal-sub">Update your official information in the backend database.</p>
               </div>
 
               <button
@@ -673,9 +812,10 @@ function Profile() {
             </div>
 
             <form onSubmit={handleEditSubmit}>
-              <div className="modal-fields-stack">
+              <div className="modal-fields-grid">
+                {/* Full Name */}
                 <div className="modal-field-group">
-                  <label htmlFor="edit-name-input">Full Name</label>
+                  <label htmlFor="edit-name-input">Full Name *</label>
                   <input
                     id="edit-name-input"
                     type="text"
@@ -683,14 +823,15 @@ function Profile() {
                     onChange={(e) =>
                       setEditForm((prev) => ({ ...prev, name: e.target.value }))
                     }
-                    placeholder="Enter your full name"
+                    placeholder="Enter full name"
                     disabled={editLoading}
                     required
                   />
                 </div>
 
+                {/* Email */}
                 <div className="modal-field-group">
-                  <label htmlFor="edit-email-input">Official Email Address</label>
+                  <label htmlFor="edit-email-input">Official Email *</label>
                   <input
                     id="edit-email-input"
                     type="email"
@@ -698,14 +839,15 @@ function Profile() {
                     onChange={(e) =>
                       setEditForm((prev) => ({ ...prev, email: e.target.value }))
                     }
-                    placeholder="Enter your official email"
+                    placeholder="Official email address"
                     disabled={editLoading}
                     required
                   />
                 </div>
 
+                {/* Designation */}
                 <div className="modal-field-group">
-                  <label htmlFor="edit-designation-input">Academic Designation</label>
+                  <label htmlFor="edit-designation-input">Academic Designation *</label>
                   <input
                     id="edit-designation-input"
                     type="text"
@@ -713,9 +855,193 @@ function Profile() {
                     onChange={(e) =>
                       setEditForm((prev) => ({ ...prev, designation: e.target.value }))
                     }
-                    placeholder="e.g. Assistant Professor, Associate Professor"
+                    placeholder="e.g. Professor, Associate Professor"
                     disabled={editLoading}
                     required
+                  />
+                </div>
+
+                {/* Phone */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-phone-input">Phone Number</label>
+                  <input
+                    id="edit-phone-input"
+                    type="tel"
+                    value={editForm.phone}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, phone: e.target.value }))
+                    }
+                    placeholder="e.g. +91 98765 43210"
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* Gender */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-gender-input">Gender</label>
+                  <select
+                    id="edit-gender-input"
+                    value={editForm.gender}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, gender: e.target.value }))
+                    }
+                    disabled={editLoading}
+                  >
+                    <option value="">Select Gender</option>
+                    <option value="Male">Male</option>
+                    <option value="Female">Female</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {/* Date of Birth */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-dob-input">Date of Birth</label>
+                  <input
+                    id="edit-dob-input"
+                    type="date"
+                    value={editForm.date_of_birth}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, date_of_birth: e.target.value }))
+                    }
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* Date of Joining */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-doj-input">Date of Joining</label>
+                  <input
+                    id="edit-doj-input"
+                    type="date"
+                    value={editForm.date_of_joining}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, date_of_joining: e.target.value }))
+                    }
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* Employment Status */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-status-input">Employment Status</label>
+                  <select
+                    id="edit-status-input"
+                    value={editForm.employment_status}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, employment_status: e.target.value }))
+                    }
+                    disabled={editLoading}
+                  >
+                    <option value="Permanent">Permanent</option>
+                    <option value="Contract">Contract</option>
+                    <option value="Visiting">Visiting</option>
+                    <option value="Probation">Probation</option>
+                  </select>
+                </div>
+
+                {/* Qualification */}
+                <div className="modal-field-group modal-field-span-2">
+                  <label htmlFor="edit-qualification-input">Academic Qualification</label>
+                  <input
+                    id="edit-qualification-input"
+                    type="text"
+                    value={editForm.qualification}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, qualification: e.target.value }))
+                    }
+                    placeholder="e.g. Ph.D. in Computer Science, M.Tech, B.Tech"
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* Specialization */}
+                <div className="modal-field-group modal-field-span-2">
+                  <label htmlFor="edit-specialization-input">Specialization &amp; Research</label>
+                  <input
+                    id="edit-specialization-input"
+                    type="text"
+                    value={editForm.specialization}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, specialization: e.target.value }))
+                    }
+                    placeholder="e.g. Machine Learning, Computer Vision, Data Science"
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* Office Cabin */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-cabin-input">Office / Cabin</label>
+                  <input
+                    id="edit-cabin-input"
+                    type="text"
+                    value={editForm.office_cabin}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, office_cabin: e.target.value }))
+                    }
+                    placeholder="e.g. Block B, Room 304"
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* City */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-city-input">City</label>
+                  <input
+                    id="edit-city-input"
+                    type="text"
+                    value={editForm.city}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, city: e.target.value }))
+                    }
+                    placeholder="City"
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* Campus Address */}
+                <div className="modal-field-group modal-field-span-2">
+                  <label htmlFor="edit-address-input">Campus Address</label>
+                  <input
+                    id="edit-address-input"
+                    type="text"
+                    value={editForm.address}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, address: e.target.value }))
+                    }
+                    placeholder="Address / Faculty Quarters"
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* State */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-state-input">State / Region</label>
+                  <input
+                    id="edit-state-input"
+                    type="text"
+                    value={editForm.state}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, state: e.target.value }))
+                    }
+                    placeholder="State"
+                    disabled={editLoading}
+                  />
+                </div>
+
+                {/* PIN Code */}
+                <div className="modal-field-group">
+                  <label htmlFor="edit-pincode-input">PIN Code</label>
+                  <input
+                    id="edit-pincode-input"
+                    type="text"
+                    value={editForm.pin_code}
+                    onChange={(e) =>
+                      setEditForm((prev) => ({ ...prev, pin_code: e.target.value }))
+                    }
+                    placeholder="e.g. 110001"
+                    disabled={editLoading}
                   />
                 </div>
               </div>
@@ -753,55 +1079,150 @@ function Profile() {
         </div>
       )}
 
-      {/* Password Options Modal Dialog */}
+      {/* Change Password Modal Dialog */}
       {showPasswordModal && (
         <div
           className="faculty-modal-backdrop"
           onClick={(e) => {
-            if (e.target === e.currentTarget) {
+            if (e.target === e.currentTarget && !passwordLoading) {
               setShowPasswordModal(false);
             }
           }}
         >
-          <div className="faculty-edit-modal-card" role="dialog" aria-modal="true">
+          <div className="faculty-edit-modal-card" style={{ maxWidth: "480px" }} role="dialog" aria-modal="true">
             <div className="faculty-edit-modal-header">
               <div>
                 <span className="modal-eyebrow">Account Security</span>
-                <h3 className="modal-title">Password Options</h3>
-                <p className="modal-sub">Faculty authentication &amp; credential management.</p>
+                <h3 className="modal-title">Change Password</h3>
+                <p className="modal-sub">Update your account login password securely.</p>
               </div>
 
               <button
                 type="button"
                 className="modal-close-btn"
                 onClick={() => setShowPasswordModal(false)}
+                disabled={passwordLoading}
               >
                 <X size={18} />
               </button>
             </div>
 
-            <div className="faculty-password-modal-body">
-              <div className="modal-api-pending-box">
-                <AlertCircle size={16} className="text-amber" />
-                <div>
-                  <strong>API Integration Pending: Self-Service Password Reset</strong>
-                  <p>
-                    The self-service faculty password reset API endpoint is pending backend implementation.
-                    Faculty passwords can currently be updated through the IT Administrator portal or by contacting university helpdesk.
-                  </p>
+            <form onSubmit={handlePasswordSubmit}>
+              <div className="modal-fields-stack">
+                <div className="modal-field-group">
+                  <label htmlFor="current-password-input">Current Password *</label>
+                  <div className="modal-input-password-wrap">
+                    <input
+                      id="current-password-input"
+                      type={showCurrentPassword ? "text" : "password"}
+                      value={passwordForm.current_password}
+                      onChange={(e) =>
+                        setPasswordForm((prev) => ({
+                          ...prev,
+                          current_password: e.target.value,
+                        }))
+                      }
+                      placeholder="Enter current password"
+                      disabled={passwordLoading}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="modal-password-toggle"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      tabIndex="-1"
+                    >
+                      {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="modal-field-group">
+                  <label htmlFor="new-password-input">New Password *</label>
+                  <div className="modal-input-password-wrap">
+                    <input
+                      id="new-password-input"
+                      type={showNewPassword ? "text" : "password"}
+                      value={passwordForm.new_password}
+                      onChange={(e) =>
+                        setPasswordForm((prev) => ({
+                          ...prev,
+                          new_password: e.target.value,
+                        }))
+                      }
+                      placeholder="Minimum 6 characters"
+                      disabled={passwordLoading}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="modal-password-toggle"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      tabIndex="-1"
+                    >
+                      {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="modal-field-group">
+                  <label htmlFor="confirm-password-input">Confirm New Password *</label>
+                  <div className="modal-input-password-wrap">
+                    <input
+                      id="confirm-password-input"
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={passwordForm.confirm_password}
+                      onChange={(e) =>
+                        setPasswordForm((prev) => ({
+                          ...prev,
+                          confirm_password: e.target.value,
+                        }))
+                      }
+                      placeholder="Re-enter new password"
+                      disabled={passwordLoading}
+                      required
+                    />
+                    <button
+                      type="button"
+                      className="modal-password-toggle"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      tabIndex="-1"
+                    >
+                      {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
                 </div>
               </div>
+
+              {passwordError && (
+                <div className="modal-error-box">
+                  <AlertCircle size={15} />
+                  <span>{passwordError}</span>
+                </div>
+              )}
+
+              <p className="modal-note-text">
+                Password will be securely encrypted with bcrypt via <code>POST /api/faculty/change-password</code>.
+              </p>
 
               <div className="modal-actions-row">
                 <button
                   type="button"
                   className="faculty-btn-secondary"
                   onClick={() => setShowPasswordModal(false)}
+                  disabled={passwordLoading}
                 >
-                  Close
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="faculty-btn-primary"
+                  disabled={passwordLoading}
+                >
+                  {passwordLoading ? "Updating..." : "Update Password"}
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}

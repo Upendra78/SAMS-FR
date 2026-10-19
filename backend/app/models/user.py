@@ -17,6 +17,9 @@ class User(db.Model):
         default=True,
         server_default=db.true(),
     )
+    phone = db.Column(db.String(20), nullable=True)
+    designation = db.Column(db.String(100), nullable=True, default="System Administrator")
+    department = db.Column(db.String(100), nullable=True, default="Administration")
 
     created_at = db.Column(
         db.DateTime,

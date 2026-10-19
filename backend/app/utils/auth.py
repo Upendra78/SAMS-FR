@@ -28,4 +28,6 @@ def role_required(*allowed_roles):
 
 admin_required = role_required("ADMIN")
 faculty_required = role_required("FACULTY")
+faculty_or_admin_required = role_required("FACULTY", "ADMIN")
 student_required = role_required("STUDENT")
+student_or_admin_required = role_required("STUDENT", "ADMIN")

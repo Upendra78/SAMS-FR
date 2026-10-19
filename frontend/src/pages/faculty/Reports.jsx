@@ -256,12 +256,8 @@ function Reports() {
 
       const matchesStatus =
         status === "All" ||
-        (status === "Present" &&
-          presentCount > 0 &&
-          absentCount === 0) ||
-        (status === "Absent" &&
-          absentCount > 0 &&
-          presentCount === 0);
+        (status === "Present" && presentCount > 0) ||
+        (status === "Absent" && absentCount > 0);
 
       return matchesSearch && matchesClass && matchesStatus;
     });
