@@ -1,5 +1,6 @@
 from app.extensions import db
 
+
 class TimetableEntry(db.Model):
     __tablename__ = "timetable_entries"
     timetable_entry_id = db.Column(
@@ -35,6 +36,24 @@ class TimetableEntry(db.Model):
         "CourseOffering",
         back_populates = "timetable_entries",
     )
+
+    def __init__(
+        self,
+        offering_id=None,
+        day_of_week=None,
+        start_time=None,
+        end_time=None,
+        room=None,
+        **kwargs,
+    ):
+        super().__init__()
+        self.offering_id = offering_id
+        self.day_of_week = day_of_week
+        self.start_time = start_time
+        self.end_time = end_time
+        self.room = room
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def __repr__(self):
         return(

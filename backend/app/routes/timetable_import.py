@@ -1,15 +1,22 @@
 
+import re
 from datetime import datetime, time
 from io import BytesIO
-import re
 
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from openpyxl import load_workbook
-from sqlalchemy import func, or_
 
 from app.extensions import db
-from app.models import Course, CourseOffering, Faculty, Student, TimetableEntry, User
+from app.models import (
+    Course,
+    CourseOffering,
+    Faculty,
+    FacultyAdjustment,
+    Student,
+    TimetableEntry,
+    User,
+)
 from app.utils.auth import admin_required
 
 timetable_import_bp = Blueprint(
@@ -73,9 +80,45 @@ def clean(value):
     return str(value).strip()
 
 
+def canonical_academic_year(val):
+    if not val:
+        return ""
+    s = str(val).strip()
+    s = re.sub(r"\s*-\s*", "-", s)
+    m = re.match(r"^(\d{4})-(\d{2})$", s)
+    if m:
+        century = m.group(1)[:2]
+        return f"{m.group(1)}-{century}{m.group(2)}"
+    return s
+
+
 def normalize_day(value):
     cleaned = clean(value).upper()
     return DAY_NORMALIZATION.get(cleaned, cleaned.capitalize() if cleaned else "")
+
+
+def normalize_time_str(val):
+    if not val:
+        return None
+    if isinstance(val, time):
+        return val.strftime("%H:%M")
+    if isinstance(val, datetime):
+        return val.time().strftime("%H:%M")
+    s = str(val).strip()
+    m12 = re.match(r"^(\d{1,2}):(\d{2})\s*([ap]m)$", s, re.IGNORECASE)
+    if m12:
+        hr = int(m12.group(1))
+        mn = int(m12.group(2))
+        ampm = m12.group(3).lower()
+        if ampm == "pm" and hr < 12:
+            hr += 12
+        elif ampm == "am" and hr == 12:
+            hr = 0
+        return f"{hr:02d}:{mn:02d}"
+    m24 = re.match(r"^(\d{1,2}):(\d{2})$", s)
+    if m24:
+        return f"{int(m24.group(1)):02d}:{int(m24.group(2)):02d}"
+    return None
 
 
 def parse_time_range(value):
@@ -112,6 +155,62 @@ def parse_time_range(value):
     return None, None
 
 
+HEADER_ALIASES = {
+    "day": ["DAY", "DAYS", "DAY OF WEEK", "DAY_OF_WEEK", "WEEKDAY"],
+    "period": ["PERIOD", "P.NO.", "P.NO", "PERIOD NO", "P. NO.", "PERIOD NUMBER", "SLOT"],
+    "time": ["TIME", "TIMING", "TIMINGS", "TIME SLOT", "TIME RANGE", "SCHEDULE"],
+    "start_time": ["START TIME", "START_TIME", "START", "FROM"],
+    "end_time": ["END TIME", "END_TIME", "END", "TO", "UNTIL"],
+    "course_code": ["COURSE CODE", "COURSE_CODE", "SUBJECT CODE", "SUB CODE", "CODE"],
+    "course_name": ["COURSE NAME", "COURSE_NAME", "SUBJECT NAME", "SUB NAME", "COURSE", "SUBJECT", "TITLE"],
+    "faculty_id": ["FACULTY ID", "FACULTY_ID", "TEACHER ID", "EMP ID", "EMPLOYEE ID", "FACULTY CODE"],
+    "faculty_name": ["FACULTY NAME", "FACULTY_NAME", "TEACHER NAME", "FACULTY", "INSTRUCTOR", "TEACHER", "PROFESSOR"],
+    "semester": ["SEMESTER", "SEM"],
+    "section": ["SECTION", "SEC", "CLASS GROUP", "GROUP"],
+    "classroom": ["CLASSROOM / LAB", "CLASSROOM/LAB", "CLASSROOM", "ROOM NO", "ROOM_NO", "ROOM", "LAB", "VENUE", "LOCATION"],
+    "academic_year": ["ACADEMIC YEAR", "ACADEMIC_YEAR", "AY", "YEAR"],
+    "break_schedule": ["BREAK SCHEDULE", "BREAK_SCHEDULE", "BREAK TIME", "BREAK"],
+    "assignment_status": ["ASSIGNMENT STATUS", "STATUS"],
+}
+
+
+def map_headers(header_row):
+    """
+    Maps column indices to known timetable fields using a two-pass alias resolver.
+    Pass 1 matches exact names to prevent substring collisions (e.g. COURSE CODE vs COURSE NAME).
+    Pass 2 matches substrings for unmapped columns.
+    """
+    col_map = {}
+    cleaned_headers = [
+        re.sub(r"[\s_]+", " ", str(h).strip()).upper() if h is not None else ""
+        for h in header_row
+    ]
+
+    # Pass 1: Exact alias matches
+    for idx, h_clean in enumerate(cleaned_headers):
+        if not h_clean:
+            continue
+        for field, aliases in HEADER_ALIASES.items():
+            if field in col_map:
+                continue
+            if any(h_clean == alias for alias in aliases):
+                col_map[field] = idx
+                break
+
+    # Pass 2: Substring matches for remaining fields
+    for idx, h_clean in enumerate(cleaned_headers):
+        if not h_clean:
+            continue
+        for field, aliases in HEADER_ALIASES.items():
+            if field in col_map:
+                continue
+            if any(alias in h_clean for alias in aliases if len(alias) > 3):
+                col_map[field] = idx
+                break
+
+    return col_map
+
+
 def string_to_time(val):
     if isinstance(val, time):
         return val
@@ -129,35 +228,61 @@ def get_workbook_sheet(workbook, requested_sheet=None):
     if requested_sheet and requested_sheet in workbook.sheetnames:
         return workbook[requested_sheet], requested_sheet
 
+    # Priority 1: Exact or case-insensitive "Master Timetable"
+    for name in workbook.sheetnames:
+        if name.strip().lower() == "master timetable":
+            return workbook[name], name
+
+    # Priority 2: Configured legacy SHEET_NAME
     if SHEET_NAME in workbook.sheetnames:
         return workbook[SHEET_NAME], SHEET_NAME
 
-    # Look for any sheet containing 'timetable' or 'time table'
+    # Priority 3: Look for any sheet containing 'timetable' or 'time table'
     for name in workbook.sheetnames:
         if "timetable" in name.lower() or "time table" in name.lower():
             return workbook[name], name
 
     # Fallback to the first sheet
-    return workbook[workbook.sheetnames[0]], workbook.sheetnames[0]
+    if workbook.sheetnames:
+        return workbook[workbook.sheetnames[0]], workbook.sheetnames[0]
+
+    return None, None
 
 
-def find_timetable_header_row(sheet, max_search_rows=10):
-    for r in range(1, min(max_search_rows + 1, sheet.max_row + 1)):
+def find_timetable_header_row(all_rows, max_search_rows=15):
+    """
+    Inspects sheet rows to determine the header row index, column mapping,
+    and whether the sheet is a row-based table or a grid/matrix table.
+    """
+    for r_idx, row in enumerate(all_rows[:max_search_rows]):
+        if not any(row):
+            continue
+        col_map = map_headers(row)
+
+        has_course = "course_code" in col_map or "course_name" in col_map
+        has_faculty = "faculty_name" in col_map or "faculty_id" in col_map
+        has_time = "time" in col_map or ("start_time" in col_map and "end_time" in col_map)
+        has_day = "day" in col_map
+        has_period = "period" in col_map
+
+        # Row-based table detection: has explicit course/faculty columns and day/period/time
+        if (has_course or has_faculty) and (has_time or has_day or has_period):
+            return r_idx, col_map, True
+
+        # Grid-based table detection: starts with DAY and has period/timings columns
         row_vals = [
-            clean(sheet.cell(row=r, column=col).value).upper()
-            for col in range(1, min(10, sheet.max_column + 1))
+            clean(val).upper()
+            for val in row[:10]
+            if val is not None
         ]
         if row_vals and row_vals[0] == "DAY":
-            # Check for timings or period in the first few columns
-            has_period = any(
-                p in row_vals for p in ["P.NO.", "P.NO", "PERIOD", "PERIOD NO", "P. NO."]
-            )
-            has_timings = any(
-                "TIMING" in val or "TIME" in val for val in row_vals
-            )
-            if has_period or has_timings:
-                return r
-    return 3
+            has_p = any(p in row_vals for p in ["P.NO.", "P.NO", "PERIOD", "PERIOD NO", "P. NO."])
+            has_t = any("TIMING" in v or "TIME" in v for v in row_vals)
+            if has_p or has_t:
+                return r_idx, col_map, False
+
+    # Fallback default: row index 0, not row-based
+    return 0, {}, False
 
 
 def extract_cell_components(raw_cell, courses, faculty_members):
@@ -253,33 +378,134 @@ def extract_cell_components(raw_cell, courses, faculty_members):
     }
 
 
-def parse_workbook_sheet(sheet, sheet_name, header_row):
-    headers = [
-        clean(sheet.cell(row=header_row, column=col).value)
-        for col in range(1, sheet.max_column + 1)
-    ]
-    if (
-        not headers
-        or headers[0].upper() != "DAY"
-        or len(headers) < 4
-    ):
-        return None, None, ["The worksheet headers do not match the expected timetable format."]
+def parse_row_based_sheet(all_rows, col_map, sheet_name, header_row_idx):
+    """
+    Parses a row-based timetable sheet where each row specifies Day, Period, Time,
+    Course, Faculty, Semester, Section, Classroom, and Academic Year.
+    """
+    entries = []
+    errors = []
+    current_day = ""
+    period_rows = 0
 
-    # Identify period column, timings column, and group columns
-    period_col = 2
-    timings_col = 3
-    for col_idx, h in enumerate(headers[:5], start=1):
-        h_up = h.upper()
-        if h_up in {"P.NO.", "P.NO", "PERIOD", "PERIOD NO", "P. NO."}:
-            period_col = col_idx
-        elif "TIMING" in h_up or "TIME" in h_up:
-            timings_col = col_idx
+    for row_idx, row in enumerate(all_rows[header_row_idx + 1:], start=header_row_idx + 2):
+        if not any(row):
+            continue
 
+        day_raw = clean(row[col_map["day"]]) if "day" in col_map and col_map["day"] < len(row) else ""
+        if day_raw:
+            norm_day = normalize_day(day_raw)
+            if norm_day:
+                current_day = norm_day
+
+        period_val = clean(row[col_map["period"]]) if "period" in col_map and col_map["period"] < len(row) else ""
+        if period_val.lower() in {"break", "lunch", "recess", "free", "library", "sports"}:
+            continue
+
+        # Extract Time
+        start_time = None
+        end_time = None
+        if "start_time" in col_map and "end_time" in col_map:
+            st_raw = row[col_map["start_time"]] if col_map["start_time"] < len(row) else None
+            et_raw = row[col_map["end_time"]] if col_map["end_time"] < len(row) else None
+            start_time = normalize_time_str(st_raw)
+            end_time = normalize_time_str(et_raw)
+
+        if (not start_time or not end_time) and "time" in col_map:
+            time_raw = row[col_map["time"]] if col_map["time"] < len(row) else None
+            start_time, end_time = parse_time_range(time_raw)
+
+        if not current_day:
+            errors.append({
+                "row": row_idx,
+                "message": "No day could be determined for this period.",
+            })
+            continue
+
+        if not start_time or not end_time:
+            errors.append({
+                "row": row_idx,
+                "message": "Invalid or unsupported time format.",
+                "value": f"{row[col_map.get('time', 0)] if 'time' in col_map else ''}",
+            })
+            continue
+
+        if start_time >= end_time:
+            errors.append({
+                "row": row_idx,
+                "message": "Period start time must precede end time.",
+                "value": f"{start_time} - {end_time}",
+            })
+            continue
+
+        course_code = clean(row[col_map["course_code"]]) if "course_code" in col_map and col_map["course_code"] < len(row) else ""
+        course_name = clean(row[col_map["course_name"]]) if "course_name" in col_map and col_map["course_name"] < len(row) else ""
+        faculty_id = row[col_map["faculty_id"]] if "faculty_id" in col_map and col_map["faculty_id"] < len(row) else None
+        faculty_name = clean(row[col_map["faculty_name"]]) if "faculty_name" in col_map and col_map["faculty_name"] < len(row) else ""
+        semester_raw = row[col_map["semester"]] if "semester" in col_map and col_map["semester"] < len(row) else None
+        section_raw = clean(row[col_map["section"]]) if "section" in col_map and col_map["section"] < len(row) else "A"
+        room = clean(row[col_map["classroom"]]) if "classroom" in col_map and col_map["classroom"] < len(row) else ""
+        ay = clean(row[col_map["academic_year"]]) if "academic_year" in col_map and col_map["academic_year"] < len(row) else ""
+
+        # Normalize semester
+        semester = None
+        if semester_raw is not None:
+            m = re.search(r"\d+", str(semester_raw))
+            if m:
+                semester = int(m.group(0))
+
+        # Derive class group
+        if semester and section_raw:
+            class_group = f"Sem {semester}-{section_raw}"
+        else:
+            class_group = section_raw or "General"
+
+        period_rows += 1
+        raw_cell_summary = f"{course_code} {course_name} {faculty_name} {room}".strip()
+
+        entries.append({
+            "source_row": row_idx,
+            "day_of_week": current_day,
+            "period": period_val or f"P{period_rows}",
+            "start_time": start_time,
+            "end_time": end_time,
+            "class_group": class_group,
+            "semester": semester,
+            "section": section_raw,
+            "course_code": course_code,
+            "course_name": course_name,
+            "faculty_id": faculty_id,
+            "faculty_name": faculty_name,
+            "room": room,
+            "academic_year": ay,
+            "raw_cell": raw_cell_summary,
+            "source_sheet": sheet_name,
+            "is_row_based": True,
+        })
+
+    return entries, period_rows, errors
+
+
+def parse_grid_based_sheet(all_rows, col_map, sheet_name, header_row_idx):
+    """
+    Parses a grid/matrix timetable sheet where columns specify sections or class groups
+    and each cell contains combined freeform text.
+    """
+    if header_row_idx >= len(all_rows):
+        return None, 0, ["Header row index out of bounds."]
+
+    headers = [clean(v) for v in all_rows[header_row_idx]]
+    if not headers or headers[0].upper() != "DAY" or len(headers) < 4:
+        return None, 0, ["The worksheet headers do not match the expected timetable format."]
+
+    period_col = col_map.get("period", 1)
+    timings_col = col_map.get("time", 2)
     group_start_col = max(period_col, timings_col) + 1
+
     groups = [
-        {"column": index + 1, "group": header}
+        {"column": index, "group": header}
         for index, header in enumerate(headers)
-        if index + 1 >= group_start_col and header and "LUNCH" not in header.upper()
+        if index >= group_start_col and header and "LUNCH" not in header.upper()
     ]
 
     entries = []
@@ -287,10 +513,13 @@ def parse_workbook_sheet(sheet, sheet_name, header_row):
     current_day = ""
     period_rows = 0
 
-    for row_number in range(header_row + 1, sheet.max_row + 1):
-        day_raw = clean(sheet.cell(row=row_number, column=1).value)
-        period_val = clean(sheet.cell(row=row_number, column=period_col).value)
-        time_val = clean(sheet.cell(row=row_number, column=timings_col).value)
+    for row_number, row in enumerate(all_rows[header_row_idx + 1:], start=header_row_idx + 2):
+        if not any(row):
+            continue
+
+        day_raw = clean(row[0]) if len(row) > 0 else ""
+        period_val = clean(row[period_col]) if len(row) > period_col else ""
+        time_val = clean(row[timings_col]) if len(row) > timings_col else ""
 
         if day_raw:
             norm = normalize_day(day_raw)
@@ -327,24 +556,45 @@ def parse_workbook_sheet(sheet, sheet_name, header_row):
             continue
 
         for group_info in groups:
-            cell_val = clean(
-                sheet.cell(row=row_number, column=group_info["column"]).value
-            )
-            if not cell_val or cell_val.upper() in {"LUNCH BREAK", "BREAK", "RECESS"}:
+            c_idx = group_info["column"]
+            cell_val = clean(row[c_idx]) if c_idx < len(row) else ""
+            if not cell_val or cell_val.upper() in {"LUNCH BREAK", "BREAK", "RECESS", "FREE", "LIBRARY", "SPORTS"}:
                 continue
 
             entries.append({
                 "source_row": row_number,
                 "day_of_week": current_day,
-                "period": period_val,
+                "period": period_val or f"P{period_rows}",
                 "start_time": start_time,
                 "end_time": end_time,
                 "class_group": group_info["group"],
                 "raw_cell": cell_val,
                 "source_sheet": sheet_name,
+                "is_row_based": False,
             })
 
     return entries, period_rows, errors
+
+
+def parse_workbook_sheet(sheet, sheet_name, header_row=None):
+    """
+    Universal workbook sheet parser supporting both:
+    1. Row-based tables (Master Timetable layout with columns for course, faculty, etc.)
+    2. Grid/matrix tables (columns for groups with multi-line cell content).
+    """
+    all_rows = list(sheet.iter_rows(values_only=True))
+    if not all_rows:
+        return [], 0, ["Worksheet is empty."]
+
+    header_idx, col_map, is_row_based = find_timetable_header_row(all_rows)
+
+    if is_row_based:
+        return parse_row_based_sheet(all_rows, col_map, sheet_name, header_idx)
+    else:
+        if header_row is not None and header_row > 0:
+            header_idx = header_row - 1
+            col_map = map_headers(all_rows[header_idx]) if header_idx < len(all_rows) else {}
+        return parse_grid_based_sheet(all_rows, col_map, sheet_name, header_idx)
 
 
 @timetable_import_bp.get("/academic-years")
@@ -352,27 +602,40 @@ def parse_workbook_sheet(sheet, sheet_name, header_row):
 def get_available_academic_years():
     """
     Returns available academic years from course_offerings, students, and system calendar.
+    Normalizes formatting and avoids cohort spans (e.g. 2026-2030).
     """
     db_offering_years = [
         r[0] for r in db.session.query(CourseOffering.academic_year).distinct().all() if r[0]
     ]
-    db_student_years = [
-        r[0] for r in db.session.query(Student.academic_year).distinct().all() if r[0]
-    ]
+
+    cleaned_years = set()
+    for y in db_offering_years:
+        cleaned = re.sub(r"\s*-\s*", "-", str(y).strip())
+        m = re.match(r"^(\d{4})-(\d{4})$", cleaned)
+        if m:
+            start_y, end_y = int(m.group(1)), int(m.group(2))
+            if end_y - start_y == 1:
+                cleaned_years.add(cleaned)
+        elif re.match(r"^\d{4}-\d{2}$", cleaned):
+            century = cleaned[:2]
+            cleaned_years.add(f"{cleaned[:4]}-{century}{cleaned[5:]}")
 
     current_year = datetime.now().year
     generated_years = [
-        f"{current_year}-{str(current_year + 1)[-2:]}",
-        f"{current_year - 1}-{str(current_year)[-2:]}",
-        f"{current_year}-{current_year + 4}",
+        f"{current_year}-{current_year + 1}",
+        f"{current_year - 1}-{current_year}",
+        f"{current_year + 1}-{current_year + 2}",
+        f"{current_year - 2}-{current_year - 1}",
+        f"{current_year - 3}-{current_year - 2}",
     ]
 
     all_years = sorted(
-        list(set(db_offering_years + db_student_years + generated_years)),
+        list(cleaned_years.union(generated_years)),
         reverse=True,
     )
 
-    default_year = db_offering_years[0] if db_offering_years else generated_years[0]
+    current_ay = f"{current_year}-{current_year + 1}"
+    default_year = current_ay if current_ay in all_years else all_years[0]
 
     return jsonify({
         "success": True,
@@ -440,11 +703,7 @@ def preview_timetable_import():
             "message": "The workbook must be 10MB or smaller.",
         }), 413
     try:
-        workbook = load_workbook(
-            BytesIO(file_bytes),
-            read_only=True,
-            data_only=True,
-        )
+        workbook = load_workbook(BytesIO(file_bytes), data_only=True)
     except Exception as exc:
         return jsonify({
             "success": False,
@@ -463,8 +722,7 @@ def preview_timetable_import():
                 "available_sheets": workbook.sheetnames,
             }), 422
 
-        header_row = find_timetable_header_row(sheet)
-        entries, period_rows, errors = parse_workbook_sheet(sheet, sheet_name, header_row)
+        entries, period_rows, errors = parse_workbook_sheet(sheet, sheet_name)
 
         if entries is None:
             return jsonify({
@@ -501,10 +759,21 @@ def analyze_timetable_import():
     """
     uploaded = request.files.get("file")
     if not uploaded or not uploaded.filename:
-        return jsonify({"success": False, "message": "Upload an Excel workbook using the 'file' field"}), 400
+        return jsonify({"success": False, "message": "Upload a timetable workbook using the 'file' field."}), 400
 
-    if not uploaded.filename.lower().endswith(".xlsx"):
-        return jsonify({"success": False, "message": "Only .xlsx files are supported."}), 400
+    filename_lower = uploaded.filename.lower()
+    if not filename_lower.endswith(".xlsx"):
+        if filename_lower.endswith(".xls"):
+            return jsonify({
+                "success": False,
+                "message": "Older Excel (.xls) format detected. Please save your file as modern Excel (.xlsx) workbook before importing.",
+            }), 400
+        elif filename_lower.endswith(".pdf"):
+            return jsonify({
+                "success": False,
+                "message": "Direct PDF extraction requires structured tabular text. Please export or convert your timetable PDF into Excel (.xlsx) format for accurate period and entity mapping.",
+            }), 400
+        return jsonify({"success": False, "message": "Unsupported file format. Please upload an Excel (.xlsx) workbook."}), 400
 
     academic_year = clean(request.form.get("academic_year"))
     if not academic_year:
@@ -513,15 +782,17 @@ def analyze_timetable_import():
     requested_sheet = clean(request.form.get("sheet_name"))
 
     file_bytes = uploaded.read(MAX_FILE_SIZE + 1)
+    if len(file_bytes) == 0:
+        return jsonify({"success": False, "message": "The uploaded file is empty. Please select a valid timetable file."}), 400
     if len(file_bytes) > MAX_FILE_SIZE:
         return jsonify({"success": False, "message": "The workbook must be 10MB or smaller."}), 413
 
     try:
-        workbook = load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+        workbook = load_workbook(BytesIO(file_bytes), data_only=True)
     except Exception as exc:
         return jsonify({
             "success": False,
-            "message": "The uploaded file is not a readable Excel workbook.",
+            "message": "The uploaded file is not a valid or readable Excel workbook. It may be corrupt or encrypted.",
             "error_type": type(exc).__name__,
         }), 400
 
@@ -534,33 +805,52 @@ def analyze_timetable_import():
                 "available_sheets": workbook.sheetnames,
             }), 422
 
-        header_row = find_timetable_header_row(sheet)
-        raw_entries, period_rows, parse_errors = parse_workbook_sheet(sheet, sheet_name, header_row)
+        raw_entries, _period_rows, parse_errors = parse_workbook_sheet(sheet, sheet_name)
         if raw_entries is None:
             return jsonify({
                 "success": False,
                 "message": "The worksheet headers do not match the expected timetable format.",
                 "available_sheets": workbook.sheetnames,
             }), 422
+        if len(raw_entries) == 0:
+            diag_message = f"No valid timetable entries could be extracted from sheet '{sheet_name}'."
+            if parse_errors:
+                diag_message += f" ({'; '.join(str(e.get('message', e)) for e in parse_errors[:2])})"
+            return jsonify({
+                "success": False,
+                "message": diag_message,
+                "source_sheet": sheet_name,
+                "available_sheets": workbook.sheetnames,
+                "parse_errors": parse_errors,
+            }), 422
     finally:
         workbook.close()
 
     # Pre-fetch existing database entities for high-performance matching
     courses = Course.query.all()
-    faculty_members = Faculty.query.join(User).all()
+    courses_by_code = {c.course_code.upper(): c for c in courses}
+    courses_by_name = {c.course_name.lower(): c for c in courses}
 
-    existing_offerings = CourseOffering.query.filter_by(academic_year=academic_year).all()
-    offering_map = {
-        (o.course_id, o.semester, o.section): o
-        for o in existing_offerings
+    faculty_members = Faculty.query.join(User).all()
+    faculty_by_id = {f.faculty_id: f for f in faculty_members}
+    faculty_by_emp = {f.employee_id.upper(): f for f in faculty_members}
+    faculty_by_clean_name = {
+        re.sub(r"^(?:Dr\.|Mr\.|Ms\.|Mrs\.|Prof\.)\s*", "", f.user.name, flags=re.I).strip().lower(): f
+        for f in faculty_members
     }
 
-    existing_entries = (
-        TimetableEntry.query
-        .join(CourseOffering)
-        .filter(CourseOffering.academic_year == academic_year)
-        .all()
-    )
+    canonical_selected_ay = canonical_academic_year(academic_year)
+    all_offerings = CourseOffering.query.all()
+    offering_map = {
+        (o.course_id, o.semester, o.section, canonical_academic_year(o.academic_year)): o
+        for o in all_offerings
+    }
+
+    all_db_entries = TimetableEntry.query.join(CourseOffering).all()
+    db_entries_by_ay = {}
+    for te in all_db_entries:
+        ay_canon = canonical_academic_year(te.offering.academic_year)
+        db_entries_by_ay.setdefault(ay_canon, []).append(te)
 
     analyzed_rows = []
     status_counts = {
@@ -579,31 +869,72 @@ def analyze_timetable_import():
     batch_section_schedule = []
 
     for idx, raw_item in enumerate(raw_entries):
-        cell_components = extract_cell_components(
-            raw_item["raw_cell"],
-            courses,
-            faculty_members,
-        )
+        is_row_based = raw_item.get("is_row_based", False)
 
-        matched_course = cell_components["course"] if cell_components else None
-        course_candidates = cell_components["course_candidates"] if cell_components else []
-        matched_faculty = cell_components["faculty"] if cell_components else None
-        faculty_candidates = cell_components["faculty_candidates"] if cell_components else []
-        detected_room = cell_components["room"] if cell_components else None
+        if is_row_based:
+            # Row-based resolution: values are extracted from distinct columns
+            c_code = raw_item.get("course_code", "").upper()
+            c_name = raw_item.get("course_name", "").lower()
+            matched_course = courses_by_code.get(c_code) or courses_by_name.get(c_name)
+            course_candidates = [matched_course] if matched_course else []
 
-        class_group = raw_item["class_group"]
-        day_of_week = raw_item["day_of_week"]
-        start_time = raw_item["start_time"]
-        end_time = raw_item["end_time"]
+            f_id = raw_item.get("faculty_id")
+            f_name = raw_item.get("faculty_name", "")
+            matched_faculty = None
+            if f_id is not None:
+                try:
+                    matched_faculty = faculty_by_id.get(int(f_id))
+                except (ValueError, TypeError):
+                    matched_faculty = faculty_by_emp.get(str(f_id).upper())
+            if not matched_faculty and f_name:
+                f_clean = re.sub(r"^(?:Dr\.|Mr\.|Ms\.|Mrs\.|Prof\.)\s*", "", f_name, flags=re.I).strip().lower()
+                matched_faculty = faculty_by_clean_name.get(f_clean)
+            faculty_candidates = [matched_faculty] if matched_faculty else []
 
-        semester = matched_course.semester if matched_course else None
-        section = class_group
+            detected_room = raw_item.get("room") or None
+            class_group = raw_item.get("class_group") or "General"
+            day_of_week = raw_item["day_of_week"]
+            start_time = raw_item["start_time"]
+            end_time = raw_item["end_time"]
+            semester = raw_item.get("semester") or (matched_course.semester if matched_course else 1)
+            section = raw_item.get("section") or "A"
+            row_ay = raw_item.get("academic_year") or academic_year
+        else:
+            # Grid-based resolution: parse freeform cell text
+            cell_components = extract_cell_components(
+                raw_item["raw_cell"],
+                courses,
+                faculty_members,
+            )
+            matched_course = cell_components["course"] if cell_components else None
+            course_candidates = cell_components["course_candidates"] if cell_components else []
+            matched_faculty = cell_components["faculty"] if cell_components else None
+            faculty_candidates = cell_components["faculty_candidates"] if cell_components else []
+            detected_room = cell_components["room"] if cell_components else None
+
+            class_group = raw_item["class_group"]
+            day_of_week = raw_item["day_of_week"]
+            start_time = raw_item["start_time"]
+            end_time = raw_item["end_time"]
+            semester = matched_course.semester if matched_course else None
+            section = class_group
+            row_ay = academic_year
 
         status = "matched"
         warnings = []
         conflicts = []
         offering_id = None
         offering_action = "reuse"
+
+        # Academic Year check: report discrepancies between workbook row and selected academic year
+        eff_ay_canon = canonical_academic_year(row_ay) if row_ay else canonical_selected_ay
+        if row_ay and academic_year:
+            canon_row_ay = canonical_academic_year(row_ay)
+            canon_sel_ay = canonical_academic_year(academic_year)
+            if canon_row_ay and canon_sel_ay and canon_row_ay != canon_sel_ay:
+                warnings.append(
+                    f"Workbook academic year ({row_ay}) differs from selected ({academic_year})."
+                )
 
         # Check Course Resolution
         if not matched_course:
@@ -615,8 +946,10 @@ def analyze_timetable_import():
                 warnings.append("Could not identify course from cell text.")
         else:
             # Check Course Offering
-            lookup_key = (matched_course.course_id, semester, section)
+            lookup_key = (matched_course.course_id, semester, section, eff_ay_canon)
             existing_off = offering_map.get(lookup_key)
+            if not existing_off and eff_ay_canon != canonical_selected_ay:
+                existing_off = offering_map.get((matched_course.course_id, semester, section, canonical_selected_ay))
             if existing_off:
                 offering_id = existing_off.offering_id
                 offering_action = "reuse"
@@ -624,7 +957,7 @@ def analyze_timetable_import():
                     matched_faculty = existing_off.faculty
             else:
                 offering_action = "create"
-                warnings.append("Will create a new course offering for this section.")
+                warnings.append(f"Will create a new course offering for this section ({row_ay or academic_year}).")
 
         # Check Faculty Resolution
         if not matched_faculty and faculty_candidates:
@@ -637,10 +970,15 @@ def analyze_timetable_import():
         if not detected_room:
             warnings.append("No classroom or laboratory specified.")
 
+        # Determine target existing entries for this academic year
+        target_existing_entries = db_entries_by_ay.get(eff_ay_canon, [])
+        if not target_existing_entries and eff_ay_canon != canonical_selected_ay:
+            target_existing_entries = db_entries_by_ay.get(canonical_selected_ay, [])
+
         # Duplicate Check: Check against DB entries
         is_duplicate = False
         if offering_id:
-            for te in existing_entries:
+            for te in target_existing_entries:
                 if (
                     te.offering_id == offering_id
                     and te.day_of_week.lower() == day_of_week.lower()
@@ -650,13 +988,21 @@ def analyze_timetable_import():
                     is_duplicate = True
                     status = "duplicate"
                     warnings.append("Identical timetable entry already exists in the database.")
+                    adj = FacultyAdjustment.query.filter_by(
+                        timetable_entry_id=te.timetable_entry_id,
+                        status="APPROVED",
+                    ).first()
+                    if adj:
+                        warnings.append(
+                            f"Entry has an active approved faculty adjustment to {adj.substitute_faculty.user.name}. It will be preserved."
+                        )
                     break
 
         # Conflict Check 1: Faculty overlap against DB and intra-batch
         fac_id = matched_faculty.faculty_id if matched_faculty else None
         if fac_id and not is_duplicate:
             # DB check
-            for te in existing_entries:
+            for te in target_existing_entries:
                 if (
                     te.offering.faculty_id == fac_id
                     and te.day_of_week.lower() == day_of_week.lower()
@@ -681,7 +1027,7 @@ def analyze_timetable_import():
 
         # Conflict Check 2: Room overlap against DB and intra-batch
         if detected_room and not is_duplicate:
-            for te in existing_entries:
+            for te in target_existing_entries:
                 te_room = te.room or te.offering.room
                 if (
                     te_room
@@ -709,13 +1055,13 @@ def analyze_timetable_import():
         if not is_duplicate:
             for item in batch_section_schedule:
                 if (
-                    item["section"].lower() == section.lower()
+                    item["class_group"].lower() == class_group.lower()
                     and item["day_of_week"].lower() == day_of_week.lower()
                     and time_ranges_overlap(start_time, end_time, item["start_time"], item["end_time"])
                 ):
                     status = "conflict"
                     conflicts.append(
-                        f"Class group {section} has multiple classes scheduled at the same time in this workbook."
+                        f"Class group {class_group} has multiple classes scheduled at the same time in this workbook."
                     )
 
         # Register in batch schedule
@@ -734,7 +1080,9 @@ def analyze_timetable_import():
                 "end_time": end_time,
             })
         batch_section_schedule.append({
+            "class_group": class_group,
             "section": section,
+            "semester": semester,
             "day_of_week": day_of_week,
             "start_time": start_time,
             "end_time": end_time,
@@ -761,6 +1109,7 @@ def analyze_timetable_import():
             "course_name": matched_course.course_name if matched_course else "",
             "semester": semester,
             "section": section,
+            "academic_year": row_ay or academic_year,
             "faculty_id": matched_faculty.faculty_id if matched_faculty else None,
             "faculty_name": matched_faculty.user.name if matched_faculty else "",
             "room": detected_room or "",
@@ -854,10 +1203,11 @@ def commit_timetable_import():
 
     # Begin atomic transaction
     try:
-        # Step 1: Pre-load offerings for this academic year
-        existing_offerings = CourseOffering.query.filter_by(academic_year=academic_year).all()
+        # Step 1: Pre-load offerings
+        canonical_target_ay = canonical_academic_year(academic_year)
+        existing_offerings = CourseOffering.query.all()
         offering_lookup = {
-            (o.course_id, o.semester, o.section): o
+            (o.course_id, o.semester, o.section, canonical_academic_year(o.academic_year)): o
             for o in existing_offerings
         }
 
@@ -867,10 +1217,18 @@ def commit_timetable_import():
                 e.get("course_id") for e in entries_to_import if e.get("course_id")
             }
             scoped_offerings = [
-                o for o in existing_offerings if o.course_id in target_course_ids
+                o for o in existing_offerings
+                if o.course_id in target_course_ids
+                and canonical_academic_year(o.academic_year) == canonical_target_ay
             ]
             for off in scoped_offerings:
-                TimetableEntry.query.filter_by(offering_id=off.offering_id).delete()
+                for te_item in off.timetable_entries:
+                    has_adj = FacultyAdjustment.query.filter_by(
+                        timetable_entry_id=te_item.timetable_entry_id,
+                        status="APPROVED",
+                    ).first()
+                    if not has_adj:
+                        db.session.delete(te_item)
 
         # Step 3: Process entries
         for row_idx, item in enumerate(entries_to_import):
@@ -902,15 +1260,21 @@ def commit_timetable_import():
                 errors.append(f"Row {row_idx + 1}: Start time must precede end time.")
                 continue
 
+            row_ay = clean(item.get("academic_year"))
+            raw_ay = row_ay or academic_year
+            canon_entry_ay = canonical_academic_year(raw_ay)
+
             # Resolve or create CourseOffering
-            offering_key = (course_id, semester, section)
+            offering_key = (course_id, semester, section, canon_entry_ay)
             offering = offering_lookup.get(offering_key)
+            if not offering and canon_entry_ay != canonical_target_ay:
+                offering = offering_lookup.get((course_id, semester, section, canonical_target_ay))
 
             if not offering:
                 offering = CourseOffering(
                     course_id=course_id,
                     faculty_id=faculty_id,
-                    academic_year=academic_year,
+                    academic_year=raw_ay,
                     semester=semester,
                     section=section,
                     room=room,
@@ -982,7 +1346,7 @@ def commit_timetable_import():
 
     except Exception as exc:
         db.session.rollback()
-        current_app.logger.exception(f"Timetable import failed for {academic_year}: {str(exc)}")
+        current_app.logger.exception(f"Timetable import failed for {academic_year}: {exc}")
         return jsonify({
             "success": False,
             "message": "The timetable import could not be completed. All changes have been rolled back.",

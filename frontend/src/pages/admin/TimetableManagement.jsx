@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faCalendarDays,
@@ -15,17 +16,18 @@ import {
   faDownload,
   faFileExcel,
   faFileLines,
-  faFilter,
+  faGraduationCap,
   faInfoCircle,
   faLayerGroup,
-  faListCheck,
   faRotateRight,
   faSave,
   faSearch,
   faShieldHalved,
+  faSpinner,
   faTriangleExclamation,
   faUserClock,
   faUsers,
+  faXmark,
 } from "@fortawesome/free-solid-svg-icons";
 
 import {
@@ -34,13 +36,18 @@ import {
   getImportWorkbookSheets,
   analyzeTimetableImport,
   commitTimetableImport,
+  getFacultyAdjustments,
+  createFacultyAdjustment,
+  cancelFacultyAdjustment,
 } from "../../services/timetableService";
+import { getAdminFaculty } from "../../services/adminService";
 
+import campusBannerImage from "../../../image/admin_campus_banner.jpg";
 import "./TimetableManagement.css";
 
 const steps = [
-  "Upload & Year",
-  "Extract & Preview",
+  "Upload & Extract",
+  "Preview & Validate",
   "Map & Resolve",
   "Review & Commit",
   "Import Summary",
@@ -59,25 +66,20 @@ const dayOrder = [
 ];
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_PREVIEW_ROWS = 100;
+const PAGE_SIZE = 10;
 
 function titleCase(value) {
   return String(value || "")
     .toLowerCase()
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
 function displayTime(value) {
   if (!value) return "—";
-
   const [hourText, minuteText] = String(value).split(":");
   const hour = Number(hourText);
-
   if (Number.isNaN(hour)) return String(value);
-
-  return `${String(hour).padStart(2, "0")}:${String(
-    minuteText || "00"
-  ).padStart(2, "0")}`;
+  return `${String(hour).padStart(2, "0")}:${String(minuteText || "00").padStart(2, "0")}`;
 }
 
 function mapTimetableEntry(item) {
@@ -90,12 +92,15 @@ function mapTimetableEntry(item) {
     endTime: item.end_time || "",
     room: item.room || "Not assigned",
     faculty: item.faculty_name || "Not assigned",
+    facultyId: item.faculty_id || null,
     department: item.department_name || "",
     courseCode: item.course_code || "",
     courseName: item.course_name || "",
     section: item.section || "",
     semester: item.semester ?? "",
     academicYear: item.academic_year || "",
+    activeAdjustment: item.active_adjustment || null,
+    effectiveFaculty: item.effective_faculty_name || item.faculty_name || "Not assigned",
   };
 }
 
@@ -107,32 +112,35 @@ function getMappingStatusLabel(status) {
   const labels = {
     pending: "Awaiting match",
     matched: "Auto-matched",
-    warning: "Matched with warning",
+    warning: "With warning",
     unmatched: "Unmatched",
-    ambiguous: "Multiple matches",
+    ambiguous: "Ambiguous",
     conflict: "Conflict",
     duplicate: "Duplicate",
     selected: "Selected",
   };
-
   return labels[status] || "Needs review";
 }
 
 function TimetableManagement() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
+  const adjustmentSectionRef = useRef(null);
 
-  // Import workflow state
+  // Workflow steps: 1: Upload, 2: Preview, 3: Map, 4: Review, 5: Summary
   const [activeStep, setActiveStep] = useState(1);
   const [file, setFile] = useState(null);
-  const [academicYears, setAcademicYears] = useState(["2026-27", "2024-28"]);
-  const [academicYear, setAcademicYear] = useState("2026-27");
+  const [academicYears, setAcademicYears] = useState(["2026-2027", "2025-2026", "2024-2025"]);
+  const [academicYear, setAcademicYear] = useState("2026-2027");
   const [customAcademicYear, setCustomAcademicYear] = useState("");
   const [availableSheets, setAvailableSheets] = useState([]);
   const [selectedSheet, setSelectedSheet] = useState("");
+  const [isDragging, setIsDragging] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
 
-  // Analysis result from backend
+  // Extraction results
   const [analysisResult, setAnalysisResult] = useState(null);
   const [entryOverrides, setEntryOverrides] = useState({});
   const [selectedRows, setSelectedRows] = useState({});
@@ -143,84 +151,119 @@ function TimetableManagement() {
   const [commitError, setCommitError] = useState("");
   const [notice, setNotice] = useState("");
 
-  // Saved timetable state
+  // Persisted Database Timetable
   const [activeTab, setActiveTab] = useState("Timetable");
   const [entries, setEntries] = useState([]);
   const [timetableLoading, setTimetableLoading] = useState(true);
   const [timetableError, setTimetableError] = useState("");
+  const [semesterFilter, setSemesterFilter] = useState("All");
+  const [sectionFilter, setSectionFilter] = useState("All");
+  const [dayFilter, setDayFilter] = useState("All");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
 
-  const [semester, setSemester] = useState("All");
-  const [section, setSection] = useState("All");
-  const [search, setSearch] = useState("");
-
-  // Step 3 mapping filters
+  // Step 3 Map & Resolve filters
   const [mappingSearch, setMappingSearch] = useState("");
   const [mappingStatusFilter, setMappingStatusFilter] = useState("All");
   const [mappingSemesterFilter, setMappingSemesterFilter] = useState("All");
   const [mappingSectionFilter, setMappingSectionFilter] = useState("All");
 
-  // Emergency faculty replacement
+  // Faculty list for adjustment
+  const [allFaculty, setAllFaculty] = useState([]);
+  const [adjustmentsList, setAdjustmentsList] = useState([]);
   const [adjustmentOpen, setAdjustmentOpen] = useState(false);
-  const [currentFacultySearch, setCurrentFacultySearch] = useState("");
-  const [currentFacultyId, setCurrentFacultyId] = useState("");
   const [selectedCurrentFaculty, setSelectedCurrentFaculty] = useState("");
   const [adjustmentTargetId, setAdjustmentTargetId] = useState("");
   const [substituteSearch, setSubstituteSearch] = useState("");
-  const [selectedSubstitute, setSelectedSubstitute] = useState("");
-  const [adjustmentFacultyId, setAdjustmentFacultyId] = useState("");
+  const [selectedSubstituteId, setSelectedSubstituteId] = useState("");
   const [adjustmentReason, setAdjustmentReason] = useState("Faculty unavailable");
   const [customAdjustmentReason, setCustomAdjustmentReason] = useState("");
-  const [effectiveDate, setEffectiveDate] = useState("");
-  const [requestApproval, setRequestApproval] = useState(true);
+  const [effectiveDate, setEffectiveDate] = useState(() => new Date().toLocaleDateString("en-CA"));
+  const [requestApproval, setRequestApproval] = useState(false);
+  const [adjustmentLoading, setAdjustmentLoading] = useState(false);
   const [adjustmentMessage, setAdjustmentMessage] = useState("");
+  const [adjustmentError, setAdjustmentError] = useState("");
 
   const effectiveAcademicYear =
     academicYear === "CUSTOM" ? customAcademicYear.trim() : academicYear;
 
+  // Auto-scroll or open faculty adjustment if navigated via /admin/timetable/faculty-adjustment
+  useEffect(() => {
+    if (location.pathname.includes("faculty-adjustment")) {
+      const timer = setTimeout(() => {
+        setAdjustmentOpen(true);
+        adjustmentSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [location.pathname]);
+
   const loadTimetable = useCallback(async () => {
     setTimetableLoading(true);
     setTimetableError("");
-
     try {
       const response = await getAdminTimetable();
-
       if (!response?.success || !Array.isArray(response.data)) {
         throw new Error("Unexpected timetable response from the server.");
       }
-
       setEntries(response.data.map(mapTimetableEntry));
     } catch (error) {
-      setTimetableError(
-        getErrorMessage(error, "Could not load the saved timetable.")
-      );
+      setTimetableError(getErrorMessage(error, "Could not load the saved timetable."));
     } finally {
       setTimetableLoading(false);
+    }
+  }, []);
+
+  const loadAdjustments = useCallback(async () => {
+    try {
+      const res = await getFacultyAdjustments();
+      if (res?.success && Array.isArray(res.data)) {
+        setAdjustmentsList(res.data);
+      }
+    } catch (err) {
+      console.debug("Could not load faculty adjustments:", err?.message);
+    }
+  }, []);
+
+  const loadFaculty = useCallback(async () => {
+    try {
+      const res = await getAdminFaculty();
+      if (res?.success && Array.isArray(res.data)) {
+        setAllFaculty(res.data);
+      }
+    } catch (err) {
+      console.debug("Could not load faculty list:", err?.message);
     }
   }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       void loadTimetable();
+      void loadAdjustments();
+      void loadFaculty();
     }, 0);
-
     return () => clearTimeout(timer);
-  }, [loadTimetable]);
+  }, [loadTimetable, loadAdjustments, loadFaculty]);
 
   useEffect(() => {
-    async function loadYears() {
-      try {
-        const res = await getImportAcademicYears();
-        if (res?.success && Array.isArray(res.academic_years)) {
-          setAcademicYears(res.academic_years);
-          if (res.default) setAcademicYear(res.default);
+    const timer = setTimeout(() => {
+      async function loadYears() {
+        try {
+          const res = await getImportAcademicYears();
+          if (res?.success && Array.isArray(res.academic_years) && res.academic_years.length > 0) {
+            setAcademicYears(res.academic_years);
+            if (res.default) setAcademicYear(res.default);
+          }
+        } catch (err) {
+          console.debug("Could not load academic years:", err?.message);
         }
-      } catch (err) {
-        console.debug("Could not load academic years:", err?.message);
       }
-    }
-    void loadYears();
+      void loadYears();
+    }, 0);
+    return () => clearTimeout(timer);
   }, []);
 
+  // Filter options
   const semesters = useMemo(
     () =>
       [
@@ -240,25 +283,42 @@ function TimetableManagement() {
           entries
             .filter(
               (entry) =>
-                semester === "All" || String(entry.semester) === semester
+                semesterFilter === "All" || String(entry.semester) === semesterFilter
             )
             .map((entry) => String(entry.section))
             .filter((value) => value && value !== "undefined")
         ),
       ].sort(),
-    [entries, semester]
+    [entries, semesterFilter]
+  );
+
+  const days = useMemo(
+    () =>
+      [
+        ...new Set(
+          entries
+            .map((entry) => entry.day)
+            .filter(Boolean)
+        ),
+      ].sort((a, b) => dayOrder.indexOf(a.toUpperCase()) - dayOrder.indexOf(b.toUpperCase())),
+    [entries]
   );
 
   const filteredEntries = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = searchQuery.trim().toLowerCase();
 
     return entries
       .filter(
         (entry) =>
-          semester === "All" || String(entry.semester) === semester
+          semesterFilter === "All" || String(entry.semester) === semesterFilter
       )
       .filter(
-        (entry) => section === "All" || String(entry.section) === section
+        (entry) =>
+          sectionFilter === "All" || String(entry.section) === sectionFilter
+      )
+      .filter(
+        (entry) =>
+          dayFilter === "All" || entry.day.toLowerCase() === dayFilter.toLowerCase()
       )
       .filter((entry) =>
         [
@@ -266,30 +326,34 @@ function TimetableManagement() {
           entry.courseCode,
           entry.courseName,
           entry.faculty,
+          entry.effectiveFaculty,
           entry.room,
           entry.section,
           entry.academicYear,
-        ].some((value) => String(value).toLowerCase().includes(query))
+        ].some((value) => String(value || "").toLowerCase().includes(query))
       )
       .sort((a, b) => {
         const aDay = dayOrder.indexOf(a.dayKey);
         const bDay = dayOrder.indexOf(b.dayKey);
-
         return (
           (aDay === -1 ? 99 : aDay) - (bDay === -1 ? 99 : bDay) ||
           a.startTime.localeCompare(b.startTime)
         );
       });
-  }, [entries, semester, section, search]);
+  }, [entries, semesterFilter, sectionFilter, dayFilter, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredEntries.length / PAGE_SIZE));
+  const paginatedEntries = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    return filteredEntries.slice(start, start + PAGE_SIZE);
+  }, [filteredEntries, currentPage]);
 
   const distinctCourses = useMemo(() => {
     const courses = new Map();
-
     entries.forEach((entry) => {
       const key = entry.courseCode || entry.courseName;
       if (key && !courses.has(key)) courses.set(key, entry);
     });
-
     return [...courses.values()];
   }, [entries]);
 
@@ -317,32 +381,7 @@ function TimetableManagement() {
     [entries]
   );
 
-  const currentFacultyOptions = useMemo(() => {
-    const query = currentFacultySearch.trim().toLowerCase();
-
-    return distinctFaculty.filter((name) =>
-      name.toLowerCase().includes(query)
-    );
-  }, [distinctFaculty, currentFacultySearch]);
-
-  const selectedAdjustmentEntry = useMemo(
-    () =>
-      entries.find(
-        (entry) => String(entry.id) === String(adjustmentTargetId)
-      ) || null,
-    [entries, adjustmentTargetId]
-  );
-
-  const substituteFacultyOptions = useMemo(() => {
-    const query = substituteSearch.trim().toLowerCase();
-
-    return distinctFaculty.filter(
-      (name) =>
-        name !== selectedCurrentFaculty && name.toLowerCase().includes(query)
-    );
-  }, [distinctFaculty, selectedCurrentFaculty, substituteSearch]);
-
-  // Merge analysis entries with admin overrides and selections
+  // Merge analysis entries with admin overrides
   const processedRows = useMemo(() => {
     if (!analysisResult?.entries) return [];
 
@@ -451,8 +490,8 @@ function TimetableManagement() {
     mappingSectionFilter,
   ]);
 
-  async function handleFileChange(event) {
-    const selectedFile = event.target.files?.[0];
+  // File validation and handling
+  function processFileSelection(selectedFile) {
     if (!selectedFile) return;
 
     setPreviewError("");
@@ -465,41 +504,100 @@ function TimetableManagement() {
     setAvailableSheets([]);
     setSelectedSheet("");
 
-    if (!selectedFile.name.toLowerCase().endsWith(".xlsx")) {
+    const name = selectedFile.name.toLowerCase();
+
+    if (selectedFile.size === 0) {
       setFile(null);
-      setPreviewError("Only .xlsx Excel files are currently supported.");
-      event.target.value = "";
+      setPreviewError("The selected file is empty. Please choose a valid timetable file.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     if (selectedFile.size > MAX_FILE_SIZE) {
       setFile(null);
       setPreviewError("The workbook must be 10 MB or smaller.");
-      event.target.value = "";
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (name.endsWith(".xls")) {
+      setFile(null);
+      setPreviewError("Older Excel (.xls) format detected. Please save your file as modern Excel (.xlsx) workbook before importing.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (name.endsWith(".pdf")) {
+      setFile(null);
+      setPreviewError("Timetable extraction requires structured tabular columns. Please convert or export your timetable into Excel (.xlsx) format before importing.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (!name.endsWith(".xlsx")) {
+      setFile(null);
+      setPreviewError("Unsupported file type. Please upload an Excel (.xlsx) workbook.");
+      if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
 
     setFile(selectedFile);
     setActiveStep(1);
 
-    try {
-      const sheetsRes = await getImportWorkbookSheets(selectedFile);
-      if (sheetsRes?.success && Array.isArray(sheetsRes.sheets)) {
-        setAvailableSheets(sheetsRes.sheets);
-        if (sheetsRes.recommended) {
-          setSelectedSheet(sheetsRes.recommended);
-        } else if (sheetsRes.sheets.length > 0) {
-          setSelectedSheet(sheetsRes.sheets[0]);
+    // Auto-discover worksheets
+    getImportWorkbookSheets(selectedFile)
+      .then((sheetsRes) => {
+        if (sheetsRes?.success && Array.isArray(sheetsRes.sheets)) {
+          setAvailableSheets(sheetsRes.sheets);
+          if (sheetsRes.recommended) {
+            setSelectedSheet(sheetsRes.recommended);
+          } else if (sheetsRes.sheets.length > 0) {
+            setSelectedSheet(sheetsRes.sheets[0]);
+          }
         }
-      }
-    } catch {
-      // Sheet auto-discovery will handle fallback gracefully
-    }
+      })
+      .catch(() => {
+        // Worksheet auto-discovery handles fallback gracefully
+      });
+  }
+
+  function handleFileChange(event) {
+    const selectedFile = event.target.files?.[0];
+    processFileSelection(selectedFile);
+  }
+
+  function handleDrop(event) {
+    event.preventDefault();
+    setIsDragging(false);
+    const droppedFile = event.dataTransfer.files?.[0];
+    processFileSelection(droppedFile);
+  }
+
+  function handleDragOver(event) {
+    event.preventDefault();
+    setIsDragging(true);
+  }
+
+  function handleDragLeave(event) {
+    event.preventDefault();
+    setIsDragging(false);
+  }
+
+  function handleClearFile() {
+    setFile(null);
+    setAnalysisResult(null);
+    setEntryOverrides({});
+    setSelectedRows({});
+    setAvailableSheets([]);
+    setSelectedSheet("");
+    setPreviewError("");
+    setNotice("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
   async function handleAnalyze() {
     if (!file) {
-      setPreviewError("Choose an Excel workbook first.");
+      setPreviewError("Please choose a timetable file first.");
       return;
     }
 
@@ -520,6 +618,7 @@ function TimetableManagement() {
         effectiveAcademicYear,
         selectedSheet
       );
+
       if (!res?.success || !Array.isArray(res.entries)) {
         throw new Error(res?.message || "Could not analyze this timetable workbook.");
       }
@@ -527,7 +626,7 @@ function TimetableManagement() {
       setAnalysisResult(res);
       setEntryOverrides({});
 
-      // Pre-select rows that are matched or have warnings
+      // Pre-select rows that do not have critical conflicts
       const initialSelection = {};
       res.entries.forEach((item) => {
         initialSelection[item.index] =
@@ -536,11 +635,18 @@ function TimetableManagement() {
       setSelectedRows(initialSelection);
 
       setActiveStep(2);
-      setNotice(
-        `Parsed ${res.total_rows} entries from sheet "${res.source_sheet}". Review the extracted data and mappings below.`
-      );
+      if (res.total_rows === 0) {
+        const errorDetail = res.parse_errors?.length ? ` (${res.parse_errors[0]})` : "";
+        setPreviewError(
+          `Parsed 0 entries from sheet "${res.source_sheet}". Please verify the worksheet contains scheduled teaching periods and standard headers.${errorDetail}`
+        );
+      } else {
+        setNotice(
+          `Parsed ${res.total_rows} entries from sheet "${res.source_sheet}". Review the extracted records below.`
+        );
+      }
     } catch (error) {
-      setPreviewError(getErrorMessage(error, "Timetable analysis failed."));
+      setPreviewError(getErrorMessage(error, "Timetable extraction and analysis failed."));
     } finally {
       setPreviewLoading(false);
     }
@@ -580,7 +686,6 @@ function TimetableManagement() {
 
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-
     link.href = url;
     link.download = `timetable-preview-${effectiveAcademicYear}.csv`;
     document.body.appendChild(link);
@@ -652,8 +757,9 @@ function TimetableManagement() {
       setActiveStep(5);
       setNotice(res.message);
       void loadTimetable();
+      void loadAdjustments();
     } catch (err) {
-      setCommitError(getErrorMessage(err, "Failed to commit timetable import."));
+      setCommitError(getErrorMessage(err, "Failed to commit timetable import. All changes rolled back."));
     } finally {
       setCommitLoading(false);
     }
@@ -677,12 +783,10 @@ function TimetableManagement() {
       setActiveStep(1);
       return;
     }
-
     if (!analysisResult) {
       setPreviewError("Upload a workbook and run analysis first.");
       return;
     }
-
     if (targetStep <= 4 || (targetStep === 5 && commitResult)) {
       setActiveStep(targetStep);
     }
@@ -691,64 +795,68 @@ function TimetableManagement() {
   // Emergency Faculty Replacement handlers
   function openAdjustment(entry = null) {
     setAdjustmentOpen(true);
-    setCurrentFacultySearch(entry?.faculty || "");
-    setCurrentFacultyId("");
-    setSelectedCurrentFaculty(entry?.faculty || "");
-    setAdjustmentTargetId(entry ? String(entry.id) : "");
+    setAdjustmentMessage("");
+    setAdjustmentError("");
+
+    if (entry) {
+      setSelectedCurrentFaculty(entry.faculty || "");
+      setAdjustmentTargetId(String(entry.id));
+    } else {
+      setSelectedCurrentFaculty("");
+      setAdjustmentTargetId("");
+    }
+
     setSubstituteSearch("");
-    setSelectedSubstitute("");
-    setAdjustmentFacultyId("");
+    setSelectedSubstituteId("");
     setAdjustmentReason("Faculty unavailable");
     setCustomAdjustmentReason("");
     setEffectiveDate(new Date().toLocaleDateString("en-CA"));
-    setRequestApproval(true);
-    setAdjustmentMessage("");
+    setRequestApproval(false);
+
+    setTimeout(() => {
+      adjustmentSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
   }
 
-  function cancelAdjustment() {
+  function cancelAdjustmentForm() {
     setAdjustmentOpen(false);
     setAdjustmentMessage("");
+    setAdjustmentError("");
   }
 
-  function submitAdjustment(event) {
+  async function submitAdjustment(event) {
     event.preventDefault();
+    setAdjustmentMessage("");
+    setAdjustmentError("");
 
     if (!selectedCurrentFaculty) {
-      setAdjustmentMessage("Search for and select the current faculty.");
+      setAdjustmentError("Select the current assigned faculty member.");
       return;
     }
 
-    if (!selectedAdjustmentEntry) {
-      setAdjustmentMessage("Select the affected class to reassign.");
+    if (!adjustmentTargetId) {
+      setAdjustmentError("Select the affected class to reassign.");
       return;
     }
 
-    if (selectedAdjustmentEntry.faculty !== selectedCurrentFaculty) {
-      setAdjustmentMessage(
-        "The selected class does not belong to the selected current faculty."
-      );
+    const selectedEntry = entries.find((e) => String(e.id) === String(adjustmentTargetId));
+    if (!selectedEntry) {
+      setAdjustmentError("Selected timetable entry was not found.");
       return;
     }
 
-    if (!selectedSubstitute) {
-      setAdjustmentMessage("Search for and select a substitute faculty member.");
+    if (!selectedSubstituteId) {
+      setAdjustmentError("Select a substitute faculty member from the list.");
       return;
     }
 
-    if (selectedSubstitute === selectedCurrentFaculty) {
-      setAdjustmentMessage(
-        "The substitute must be different from the current faculty."
-      );
+    if (String(selectedSubstituteId) === String(selectedEntry.facultyId)) {
+      setAdjustmentError("The substitute faculty member must be different from the currently assigned faculty.");
       return;
     }
 
     if (!effectiveDate) {
-      setAdjustmentMessage("Select the effective date.");
-      return;
-    }
-
-    if (adjustmentReason === "Other" && !customAdjustmentReason.trim()) {
-      setAdjustmentMessage("Enter a custom reason for the adjustment.");
+      setAdjustmentError("Specify an effective date for the adjustment.");
       return;
     }
 
@@ -757,134 +865,210 @@ function TimetableManagement() {
         ? customAdjustmentReason.trim()
         : adjustmentReason;
 
-    setAdjustmentMessage(
-      `Validation passed. Reassignment proposed: ${selectedCurrentFaculty} → ${selectedSubstitute} for ` +
-        `${selectedAdjustmentEntry.courseCode || selectedAdjustmentEntry.courseName}; ` +
-        `effective ${effectiveDate}; reason: ${reason}.`
-    );
+    if (!reason) {
+      setAdjustmentError("Enter a reason for the faculty replacement.");
+      return;
+    }
+
+    setAdjustmentLoading(true);
+
+    try {
+      const payload = {
+        timetable_entry_id: Number(adjustmentTargetId),
+        substitute_faculty_id: Number(selectedSubstituteId),
+        effective_date: effectiveDate,
+        reason: reason,
+        request_approval: requestApproval,
+      };
+
+      const res = await createFacultyAdjustment(payload);
+      if (!res?.success) {
+        throw new Error(res?.message || "Failed to create faculty adjustment.");
+      }
+
+      setAdjustmentMessage(res.message);
+      void loadTimetable();
+      void loadAdjustments();
+      setAdjustmentTargetId("");
+      setSubstituteSearch("");
+      setSelectedSubstituteId("");
+    } catch (err) {
+      setAdjustmentError(getErrorMessage(err, "Faculty adjustment failed."));
+    } finally {
+      setAdjustmentLoading(false);
+    }
   }
 
-  const tabIcons = {
-    Timetable: faCalendarDays,
-    Courses: faFileLines,
-    Faculty: faUsers,
-    Classrooms: faListCheck,
+  async function handleCancelExistingAdjustment(adjId) {
+    if (!window.confirm("Cancel this faculty adjustment and revert to the original assignment?")) return;
+    try {
+      const res = await cancelFacultyAdjustment(adjId);
+      if (res?.success) {
+        void loadTimetable();
+        void loadAdjustments();
+      }
+    } catch (err) {
+      alert(getErrorMessage(err, "Could not cancel adjustment."));
+    }
+  }
+
+  // Filtered substitute faculty options (excluding current)
+  const substituteFacultyOptions = useMemo(() => {
+    const query = substituteSearch.trim().toLowerCase();
+    return allFaculty.filter((f) => {
+      const name = f.name || f.user?.name || "";
+      return (
+        name !== selectedCurrentFaculty &&
+        name.toLowerCase().includes(query)
+      );
+    });
+  }, [allFaculty, selectedCurrentFaculty, substituteSearch]);
+
+  const resetFilters = () => {
+    setSemesterFilter("All");
+    setSectionFilter("All");
+    setDayFilter("All");
+    setSearchQuery("");
+    setCurrentPage(1);
   };
 
   return (
     <section className="timetable-page">
-      <div className="timetable-workspace">
-        {/* SECTION 1: Upload and Import Workflow */}
-        <header className="timetable-import-heading">
-          <div className="timetable-heading-icon">
-            <FontAwesomeIcon icon={faFileLines} />
+      {/* 1. Header Banner matching reference design */}
+      <header
+        className="timetable-banner-card"
+        style={{ backgroundImage: `url(${campusBannerImage})` }}
+      >
+        <div className="timetable-banner-overlay" />
+        <div className="timetable-banner-content">
+          <div className="timetable-banner-left">
+            <div className="timetable-banner-icon">
+              <FontAwesomeIcon icon={faCalendarDays} />
+            </div>
+            <div>
+              <h2>Timetable Management</h2>
+              <p>Upload timetable, extract data, validate and manage academic schedule.</p>
+              <small>Automate faculty assignments and keep your academic data up to date.</small>
+            </div>
           </div>
-          <div>
-            <h2>Timetable Management & Excel Import</h2>
-            <p>
-              Upload, parse, match database entities, review conflicts, and commit academic timetables.
-            </p>
+          <div className="timetable-banner-quote">
+            <span>Better Timetable</span>
+            <span>Better Learning</span>
           </div>
-        </header>
+        </div>
+      </header>
 
-        <nav
-          className="timetable-stepper"
-          style={{ gridTemplateColumns: `repeat(${steps.length}, minmax(0, 1fr))` }}
-          aria-label="Timetable import steps"
-        >
-          {steps.map((label, index) => {
-            const step = index + 1;
-            const completed = step < activeStep;
+      {/* 2. Five-Step Import Pipeline */}
+      <nav
+        className="timetable-stepper-row"
+        aria-label="Timetable import pipeline"
+      >
+        {steps.map((label, index) => {
+          const stepNumber = index + 1;
+          const isComplete = stepNumber < activeStep;
+          const isActive = stepNumber === activeStep;
 
-            return (
-              <button
-                type="button"
-                key={label}
-                className={[
-                  "timetable-step",
-                  activeStep === step ? "is-active" : "",
-                  completed ? "is-complete" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                onClick={() => goToStep(step)}
-                aria-current={activeStep === step ? "step" : undefined}
-              >
-                <span className="timetable-step-circle">
-                  {completed ? <FontAwesomeIcon icon={faCheck} /> : step}
-                </span>
-                <span>{label}</span>
-              </button>
-            );
-          })}
-        </nav>
+          return (
+            <button
+              type="button"
+              key={label}
+              className={`timetable-step-item ${isActive ? "is-active" : ""} ${isComplete ? "is-complete" : ""}`}
+              onClick={() => goToStep(stepNumber)}
+            >
+              <span className="timetable-step-badge">
+                {isComplete ? <FontAwesomeIcon icon={faCheck} /> : stepNumber}
+              </span>
+              <span className="timetable-step-name">{label}</span>
+            </button>
+          );
+        })}
+      </nav>
 
-        {/* STEP 1: Upload & Academic Year */}
-        {activeStep === 1 && (
-          <section className="timetable-upload-card">
-            <div className="timetable-file-summary">
-              <div className="timetable-excel-icon">
-                <FontAwesomeIcon icon={faFileExcel} />
-              </div>
-
-              <div className="timetable-file-copy">
-                <strong>{file?.name || "No timetable file selected"}</strong>
-                <span>
-                  {file
-                    ? `Excel (.xlsx) · ${(file.size / (1024 * 1024)).toFixed(2)} MB`
-                    : "Supported format: .xlsx · Maximum size: 10 MB"}
-                </span>
-                <span>
-                  {file
-                    ? "File ready for analysis."
-                    : "Choose the master timetable workbook to import."}
-                </span>
-                {file && (
-                  <span className="timetable-success-label">
-                    <FontAwesomeIcon icon={faCheck} /> File selected
-                  </span>
-                )}
-              </div>
-
-              <div className="timetable-upload-actions">
-                <input
-                  ref={fileInputRef}
-                  className="timetable-hidden-input"
-                  type="file"
-                  accept=".xlsx"
-                  onChange={handleFileChange}
-                />
-                <button
-                  type="button"
-                  className="timetable-outline-button"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <FontAwesomeIcon icon={faCloudArrowUp} />
-                  {file ? "Change File" : "Choose File"}
-                </button>
-                <button
-                  type="button"
-                  className="timetable-primary-button"
-                  onClick={handleAnalyze}
-                  disabled={!file || previewLoading || !effectiveAcademicYear}
-                >
-                  <FontAwesomeIcon icon={faFileLines} />
-                  {previewLoading ? "Analyzing Workbook..." : "Extract & Analyze"}
-                </button>
+      {/* 3. STEP 1: 4-Cards Grid Header */}
+      {activeStep === 1 && (
+        <section className="timetable-cards-grid">
+          {/* Card 1: Upload Timetable File */}
+          <div className="timetable-card-box">
+            <div className="timetable-card-header">
+              <span className="timetable-card-badge-icon">
+                <FontAwesomeIcon icon={faCloudArrowUp} />
+              </span>
+              <div>
+                <h4>Upload Timetable File</h4>
+                <p>Supports Excel (.xlsx, .xls) and PDF files</p>
               </div>
             </div>
 
-            <div className="timetable-file-information">
-              <div className="timetable-information-heading">
-                <FontAwesomeIcon icon={faInfoCircle} />
-                <strong>Import Settings & Metadata</strong>
-              </div>
+            <div
+              className={`timetable-dropzone ${isDragging ? "is-dragging" : ""}`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
+              }}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="timetable-hidden-input"
+                accept=".xlsx,.xls,.pdf"
+                onChange={handleFileChange}
+              />
+              <button
+                type="button"
+                className="timetable-primary-button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  fileInputRef.current?.click();
+                }}
+              >
+                <FontAwesomeIcon icon={faCloudArrowUp} />
+                Upload File
+              </button>
+              <span className="timetable-dropzone-caption">
+                Drag & drop your file here or click to browse
+              </span>
+            </div>
+          </div>
 
-              <div className="timetable-import-controls-row">
-                <div className="timetable-control-group">
-                  <label htmlFor="academic-year-select">Academic Year</label>
+          {/* Card 2: File Details & Extract & Analyse */}
+          <div className="timetable-card-box">
+            {file ? (
+              <div className="timetable-selected-file-details">
+                <div className="timetable-file-meta-top">
+                  <div className="timetable-file-badge-green">
+                    <FontAwesomeIcon icon={faFileExcel} />
+                  </div>
+                  <div className="timetable-file-meta-text">
+                    <strong>{file.name}</strong>
+                    <span>
+                      {(file.size / (1024 * 1024)).toFixed(1)} MB • Excel File
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="timetable-file-remove-btn"
+                    onClick={handleClearFile}
+                    title="Remove selected file"
+                    aria-label="Remove file"
+                  >
+                    <FontAwesomeIcon icon={faXmark} />
+                  </button>
+                </div>
+
+                <div className="timetable-uploaded-success-tag">
+                  <FontAwesomeIcon icon={faCheckCircle} />
+                  <span>File uploaded successfully</span>
+                </div>
+
+                <div className="timetable-sheet-select-row">
+                  <label htmlFor="academic-year-input">Year:</label>
                   <select
-                    id="academic-year-select"
+                    id="academic-year-input"
                     value={academicYear}
                     onChange={(e) => setAcademicYear(e.target.value)}
                   >
@@ -893,1185 +1077,1537 @@ function TimetableManagement() {
                         {yr}
                       </option>
                     ))}
-                    <option value="CUSTOM">+ Custom Academic Year</option>
+                    <option value="CUSTOM">+ Custom Year</option>
                   </select>
+
+                  {availableSheets.length > 0 && (
+                    <>
+                      <label htmlFor="sheet-input">Sheet:</label>
+                      <select
+                        id="sheet-input"
+                        value={selectedSheet}
+                        onChange={(e) => setSelectedSheet(e.target.value)}
+                      >
+                        {availableSheets.map((s) => (
+                          <option key={s} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </select>
+                    </>
+                  )}
                 </div>
 
                 {academicYear === "CUSTOM" && (
-                  <div className="timetable-control-group">
-                    <label htmlFor="custom-year-input">Enter Year (e.g. 2027-28)</label>
-                    <input
-                      id="custom-year-input"
-                      type="text"
-                      placeholder="e.g. 2027-28"
-                      value={customAcademicYear}
-                      onChange={(e) => setCustomAcademicYear(e.target.value)}
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    className="timetable-custom-year-input"
+                    placeholder="e.g. 2027-28"
+                    value={customAcademicYear}
+                    onChange={(e) => setCustomAcademicYear(e.target.value)}
+                  />
                 )}
 
-                {availableSheets.length > 0 && (
-                  <div className="timetable-control-group">
-                    <label htmlFor="sheet-select">Worksheet</label>
-                    <select
-                      id="sheet-select"
-                      value={selectedSheet}
-                      onChange={(e) => setSelectedSheet(e.target.value)}
-                    >
-                      {availableSheets.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  className="timetable-extract-action-btn"
+                  onClick={handleAnalyze}
+                  disabled={previewLoading || !file || !effectiveAcademicYear}
+                >
+                  <FontAwesomeIcon
+                    icon={previewLoading ? faSpinner : faFileLines}
+                    spin={previewLoading}
+                  />
+                  <span>
+                    {previewLoading ? "Extracting & Analysing..." : "Extract & Analyse"}
+                  </span>
+                </button>
               </div>
+            ) : (
+              <div className="timetable-empty-file-slot">
+                <FontAwesomeIcon icon={faFileExcel} className="faint-excel-icon" />
+                <strong>No file selected</strong>
+                <span>Upload a timetable workbook to unlock extraction & analysis.</span>
+                <div className="timetable-sheet-select-row" style={{ marginTop: 8 }}>
+                  <label htmlFor="academic-year-slot">Academic Year:</label>
+                  <select
+                    id="academic-year-slot"
+                    value={academicYear}
+                    onChange={(e) => setAcademicYear(e.target.value)}
+                  >
+                    {academicYears.map((yr) => (
+                      <option key={yr} value={yr}>
+                        {yr}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
 
-              <div className="timetable-file-metadata" style={{ marginTop: 14 }}>
-                <div>
-                  <span>File Name</span>
-                  <strong>{file?.name || "—"}</strong>
-                </div>
-                <div>
-                  <span>Academic Year</span>
-                  <strong>{effectiveAcademicYear || "—"}</strong>
-                </div>
-                <div>
-                  <span>Target Sheet</span>
-                  <strong>{selectedSheet || "Auto-detect"}</strong>
-                </div>
-                <div>
-                  <span>Analysis Status</span>
-                  <strong>
-                    {previewLoading
-                      ? "Processing..."
-                      : analysisResult
-                        ? "Ready for review"
-                        : "Not analyzed"}
-                  </strong>
-                </div>
+          {/* Card 3: Data Extraction Checklist */}
+          <div className="timetable-card-box">
+            <div className="timetable-card-header">
+              <h4>
+                Data Extraction{" "}
+                <span className="timetable-card-subtitle">
+                  ({analysisResult ? "Completed" : previewLoading ? "Processing" : "Pending"})
+                </span>
+              </h4>
+              <span
+                className={`timetable-badge-pill ${analysisResult ? "is-success" : previewLoading ? "is-loading" : "is-muted"
+                  }`}
+              >
+                {analysisResult ? "Completed" : previewLoading ? "In Progress" : "Pending"}
+              </span>
+            </div>
+
+            <ul className="timetable-checklist">
+              <li className={analysisResult || previewLoading ? "is-done" : ""}>
+                <FontAwesomeIcon icon={faCheckCircle} />
+                <span>Reading file...</span>
+              </li>
+              <li className={analysisResult || previewLoading ? "is-done" : ""}>
+                <FontAwesomeIcon icon={faCheckCircle} />
+                <span>Extracting timetable data...</span>
+              </li>
+              <li className={analysisResult ? "is-done" : ""}>
+                <FontAwesomeIcon icon={faCheckCircle} />
+                <span>Validating entries...</span>
+              </li>
+              <li className={analysisResult ? "is-done" : ""}>
+                <FontAwesomeIcon icon={faCheckCircle} />
+                <span>Processing faculty & course mapping...</span>
+              </li>
+              <li className={analysisResult ? "is-done" : ""}>
+                <FontAwesomeIcon icon={faCheckCircle} />
+                <span>Preparing preview...</span>
+              </li>
+            </ul>
+          </div>
+
+          {/* Card 4: Extracted Data Summary */}
+          <div className="timetable-card-box">
+            <div className="timetable-card-header">
+              <h4>Extracted Data Summary</h4>
+            </div>
+
+            <div className="timetable-extracted-summary-stats">
+              <div className="timetable-ext-stat-row">
+                <span>
+                  <FontAwesomeIcon icon={faLayerGroup} style={{ color: "#005fb8", marginRight: 6 }} />
+                  Total Entries
+                </span>
+                <strong>{analysisResult ? mappingCounts.total : "—"}</strong>
+              </div>
+              <div className="timetable-ext-stat-row">
+                <span>
+                  <FontAwesomeIcon icon={faCheckCircle} style={{ color: "#16a34a", marginRight: 6 }} />
+                  Valid Entries
+                </span>
+                <strong style={{ color: "#16a34a" }}>
+                  {analysisResult ? mappingCounts.matched + mappingCounts.warning : "—"}
+                </strong>
+              </div>
+              <div className="timetable-ext-stat-row">
+                <span>
+                  <FontAwesomeIcon icon={faTriangleExclamation} style={{ color: "#d97706", marginRight: 6 }} />
+                  Warnings
+                </span>
+                <strong style={{ color: "#d97706" }}>
+                  {analysisResult ? mappingCounts.warning : "—"}
+                </strong>
+              </div>
+              <div className="timetable-ext-stat-row">
+                <span>
+                  <FontAwesomeIcon icon={faTriangleExclamation} style={{ color: "#dc2626", marginRight: 6 }} />
+                  Errors / Conflicts
+                </span>
+                <strong style={{ color: "#dc2626" }}>
+                  {analysisResult ? mappingCounts.conflict : "—"}
+                </strong>
               </div>
             </div>
-          </section>
-        )}
-
-        {previewError && (
-          <div className="timetable-alert timetable-alert-error" role="alert">
-            <FontAwesomeIcon icon={faTriangleExclamation} />
-            <span>{previewError}</span>
           </div>
-        )}
+        </section>
+      )}
 
-        {notice && (
-          <div className="timetable-alert timetable-alert-info" role="status">
-            <FontAwesomeIcon icon={faInfoCircle} />
-            <span>{notice}</span>
+      {/* Global Alerts */}
+      {previewError && (
+        <div className="timetable-alert timetable-alert-error" role="alert">
+          <FontAwesomeIcon icon={faTriangleExclamation} />
+          <span>{previewError}</span>
+        </div>
+      )}
+
+      {notice && (
+        <div className="timetable-alert timetable-alert-info" role="status">
+          <FontAwesomeIcon icon={faInfoCircle} />
+          <span>{notice}</span>
+        </div>
+      )}
+
+      {/* STEP 2: Extract & Preview */}
+      {activeStep === 2 && analysisResult && (
+        <section className="timetable-stage-card">
+          <div className="timetable-preview-toolbar">
+            <div>
+              <h3>Extracted Timetable Preview</h3>
+              <p>
+                Found {analysisResult.total_rows} periods in sheet &quot;{analysisResult.source_sheet}&quot; for academic year <strong>{effectiveAcademicYear}</strong>. No database records written yet.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="timetable-outline-button"
+              onClick={downloadPreviewCsv}
+              disabled={!processedRows.length}
+            >
+              <FontAwesomeIcon icon={faDownload} />
+              Download Preview CSV
+            </button>
           </div>
-        )}
 
-        {/* STEP 2: Extract & Preview */}
-        {activeStep === 2 && analysisResult && (
-          <section className="timetable-stage-card timetable-preview-card">
-            <div className="timetable-preview-toolbar">
-              <div>
-                <h3>Extracted Timetable Preview</h3>
-                <p>
-                  Found {analysisResult.total_rows} periods in sheet &quot;
-                  {analysisResult.source_sheet}&quot; for academic year{" "}
-                  <strong>{effectiveAcademicYear}</strong>. No database records have been written yet.
-                </p>
-              </div>
+          <div className="timetable-review-stats">
+            <div className="timetable-review-stat-box">
+              <span>Total Periods</span>
+              <strong>{mappingCounts.total}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Auto-Matched</span>
+              <strong style={{ color: "#0b7d3b" }}>{mappingCounts.matched}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Warnings</span>
+              <strong style={{ color: "#a46c03" }}>{mappingCounts.warning}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Ambiguous</span>
+              <strong style={{ color: "#6929c4" }}>{mappingCounts.ambiguous}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Conflicts</span>
+              <strong style={{ color: "#b81414" }}>{mappingCounts.conflict}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Existing Duplicates</span>
+              <strong style={{ color: "#52637a" }}>{mappingCounts.duplicate}</strong>
+            </div>
+          </div>
+
+          <div className="timetable-table-wrapper" style={{ marginTop: 14 }}>
+            <table className="timetable-table">
+              <thead>
+                <tr>
+                  <th>Day</th>
+                  <th>Period</th>
+                  <th>Time</th>
+                  <th>Class Group</th>
+                  <th>Course</th>
+                  <th>Faculty</th>
+                  <th>Room</th>
+                  <th>Extracted Raw Cell</th>
+                </tr>
+              </thead>
+              <tbody>
+                {processedRows.slice(0, 100).map((row) => (
+                  <tr key={`${row.source_row}-${row.index}`}>
+                    <td>{titleCase(row.day_of_week)}</td>
+                    <td>{row.period || "—"}</td>
+                    <td>
+                      {displayTime(row.start_time)} – {displayTime(row.end_time)}
+                    </td>
+                    <td>{row.class_group}</td>
+                    <td>
+                      <strong>{row.course_code || "—"}</strong>
+                      {row.course_name ? ` · ${row.course_name}` : ""}
+                    </td>
+                    <td>{row.faculty_name || "—"}</td>
+                    <td>{row.room || "—"}</td>
+                    <td>
+                      <small>{row.raw_cell}</small>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* STEP 3: Map & Resolve */}
+      {activeStep === 3 && analysisResult && (
+        <section className="timetable-stage-card">
+          <div className="timetable-preview-toolbar">
+            <div>
+              <h3>Map & Resolve Timetable Entities</h3>
+              <p>
+                Review matched courses, assign ambiguous faculty or courses, and verify section assignments.
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
               <button
                 type="button"
                 className="timetable-outline-button"
-                onClick={downloadPreviewCsv}
-                disabled={!processedRows.length}
+                onClick={() => toggleSelectAll(true)}
               >
-                <FontAwesomeIcon icon={faDownload} />
-                Download Preview CSV
+                Select All
               </button>
+              <button
+                type="button"
+                className="timetable-outline-button"
+                onClick={() => toggleSelectAll(false)}
+              >
+                Deselect All
+              </button>
+            </div>
+          </div>
+
+          <div className="timetable-filter-bar">
+            <label>
+              <span>Mapping Status</span>
+              <select
+                value={mappingStatusFilter}
+                onChange={(e) => setMappingStatusFilter(e.target.value)}
+              >
+                <option value="All">All statuses ({processedRows.length})</option>
+                <option value="matched">Auto-matched ({mappingCounts.matched})</option>
+                <option value="warning">With warnings ({mappingCounts.warning})</option>
+                <option value="ambiguous">Ambiguous ({mappingCounts.ambiguous})</option>
+                <option value="conflict">Conflicts ({mappingCounts.conflict})</option>
+                <option value="duplicate">Duplicates ({mappingCounts.duplicate})</option>
+                <option value="unmatched">Unmatched ({mappingCounts.unmatched})</option>
+              </select>
+            </label>
+
+            <label>
+              <span>Semester</span>
+              <select
+                value={mappingSemesterFilter}
+                onChange={(e) => setMappingSemesterFilter(e.target.value)}
+              >
+                <option value="All">All semesters</option>
+                {mappingFilterOptions.semesters.map((s) => (
+                  <option key={s} value={s}>
+                    Semester {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>Section / Group</span>
+              <select
+                value={mappingSectionFilter}
+                onChange={(e) => setMappingSectionFilter(e.target.value)}
+              >
+                <option value="All">All sections</option>
+                {mappingFilterOptions.sections.map((sec) => (
+                  <option key={sec} value={sec}>
+                    {sec}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="timetable-filter-search">
+              <span>Search entries</span>
+              <div className="timetable-search-input">
+                <FontAwesomeIcon icon={faSearch} />
+                <input
+                  value={mappingSearch}
+                  onChange={(e) => setMappingSearch(e.target.value)}
+                  placeholder="Search by course, faculty, room..."
+                />
+              </div>
+            </label>
+          </div>
+
+          <div className="timetable-result-summary" style={{ marginTop: 10 }}>
+            <span>
+              {filteredProcessedRows.length} entries shown · {mappingCounts.selected} selected for import
+            </span>
+          </div>
+
+          <div className="timetable-table-wrapper" style={{ marginTop: 10 }}>
+            <table className="timetable-table">
+              <thead>
+                <tr>
+                  <th style={{ width: 36 }}>Import</th>
+                  <th>Day / Time</th>
+                  <th>Section</th>
+                  <th>Course Assignment</th>
+                  <th>Faculty Assignment</th>
+                  <th>Room</th>
+                  <th>Offering Action</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredProcessedRows.map((row) => (
+                  <tr key={`${row.source_row}-${row.index}`}>
+                    <td style={{ textAlign: "center" }}>
+                      <input
+                        type="checkbox"
+                        checked={row.isSelected}
+                        onChange={() => toggleRowSelection(row.index)}
+                        aria-label={`Select row ${row.index + 1}`}
+                      />
+                    </td>
+                    <td>
+                      <strong>{titleCase(row.day_of_week)}</strong>
+                      <div>
+                        {displayTime(row.start_time)} – {displayTime(row.end_time)}
+                      </div>
+                      <small>{row.period ? `Period ${row.period}` : ""}</small>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={row.section}
+                        onChange={(e) =>
+                          updateEntryOverride(row.index, { section: e.target.value })
+                        }
+                        style={{ width: 80, padding: "4px 6px" }}
+                      />
+                    </td>
+                    <td>
+                      <select
+                        value={row.course_id || ""}
+                        onChange={(e) =>
+                          updateEntryOverride(row.index, {
+                            course_id: Number(e.target.value) || null,
+                          })
+                        }
+                      >
+                        <option value="">Select course...</option>
+                        {(analysisResult.available_courses || []).map((c) => (
+                          <option key={c.course_id} value={c.course_id}>
+                            {c.course_code} - {c.course_name} (Sem {c.semester})
+                          </option>
+                        ))}
+                      </select>
+                      <div style={{ marginTop: 2 }}>
+                        <small style={{ color: "#6681a6" }}>
+                          Raw: {row.raw_cell}
+                        </small>
+                      </div>
+                    </td>
+                    <td>
+                      <select
+                        value={row.faculty_id || ""}
+                        onChange={(e) =>
+                          updateEntryOverride(row.index, {
+                            faculty_id: Number(e.target.value) || null,
+                          })
+                        }
+                      >
+                        <option value="">Not assigned</option>
+                        {(analysisResult.available_faculty || []).map((f) => (
+                          <option key={f.faculty_id} value={f.faculty_id}>
+                            {f.name} ({f.employee_id})
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="text"
+                        value={row.room}
+                        onChange={(e) =>
+                          updateEntryOverride(row.index, { room: e.target.value })
+                        }
+                        placeholder="e.g. Room-302"
+                        style={{ width: 90, padding: "4px 6px" }}
+                      />
+                    </td>
+                    <td>
+                      {row.offering_id ? (
+                        <span className="timetable-offering-badge is-reuse">
+                          Reuses Offering #{row.offering_id}
+                        </span>
+                      ) : (
+                        <span className="timetable-offering-badge is-create">
+                          Will Create Offering
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <span
+                        className="timetable-status-tag"
+                        data-status={row.status}
+                      >
+                        {getMappingStatusLabel(row.status)}
+                      </span>
+                      {row.conflicts?.map((msg, i) => (
+                        <div key={i} className="timetable-row-message is-conflict">
+                          <FontAwesomeIcon icon={faTriangleExclamation} /> {msg}
+                        </div>
+                      ))}
+                      {row.warnings?.map((msg, i) => (
+                        <div key={i} className="timetable-row-message is-warning">
+                          {msg}
+                        </div>
+                      ))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* STEP 4: Review & Commit */}
+      {activeStep === 4 && analysisResult && (
+        <section className="timetable-stage-card">
+          <div className="timetable-review-card">
+            <div className="timetable-preview-toolbar">
+              <div>
+                <h3>Import Review & Commit Plan</h3>
+                <p>
+                  Target Academic Year: <strong>{effectiveAcademicYear}</strong>. Review planned changes before committing to MySQL database.
+                </p>
+              </div>
             </div>
 
             <div className="timetable-review-stats">
               <div className="timetable-review-stat-box">
-                <span>Total Periods</span>
-                <strong>{mappingCounts.total}</strong>
+                <span>Selected for Import</span>
+                <strong style={{ color: "#005fb8" }}>{mappingCounts.selected}</strong>
               </div>
               <div className="timetable-review-stat-box">
-                <span>Auto-Matched</span>
-                <strong style={{ color: "#0b7d3b" }}>{mappingCounts.matched}</strong>
+                <span>Entries to Create</span>
+                <strong style={{ color: "#0b7d3b" }}>
+                  {processedRows.filter((r) => r.isSelected && r.course_id && r.status !== "duplicate").length}
+                </strong>
               </div>
               <div className="timetable-review-stat-box">
-                <span>Warnings</span>
-                <strong style={{ color: "#a46c03" }}>{mappingCounts.warning}</strong>
-              </div>
-              <div className="timetable-review-stat-box">
-                <span>Ambiguous</span>
-                <strong style={{ color: "#6929c4" }}>{mappingCounts.ambiguous}</strong>
-              </div>
-              <div className="timetable-review-stat-box">
-                <span>Conflicts</span>
-                <strong style={{ color: "#b81414" }}>{mappingCounts.conflict}</strong>
-              </div>
-              <div className="timetable-review-stat-box">
-                <span>Existing Duplicates</span>
+                <span>Duplicates to Skip</span>
                 <strong style={{ color: "#52637a" }}>{mappingCounts.duplicate}</strong>
               </div>
-            </div>
-
-            <div className="timetable-table-wrapper" style={{ marginTop: 14 }}>
-              <table className="timetable-table">
-                <thead>
-                  <tr>
-                    <th>Day</th>
-                    <th>Period</th>
-                    <th>Time</th>
-                    <th>Class Group</th>
-                    <th>Course</th>
-                    <th>Faculty</th>
-                    <th>Room</th>
-                    <th>Extracted Raw Cell</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {processedRows.slice(0, MAX_PREVIEW_ROWS).map((row) => (
-                    <tr key={`${row.source_row}-${row.index}`}>
-                      <td>{titleCase(row.day_of_week)}</td>
-                      <td>{row.period || "—"}</td>
-                      <td>
-                        {displayTime(row.start_time)} – {displayTime(row.end_time)}
-                      </td>
-                      <td>{row.class_group}</td>
-                      <td>
-                        <strong>{row.course_code || "—"}</strong>
-                        {row.course_name ? ` · ${row.course_name}` : ""}
-                      </td>
-                      <td>{row.faculty_name || "—"}</td>
-                      <td>{row.room || "—"}</td>
-                      <td>
-                        <small>{row.raw_cell}</small>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {processedRows.length > MAX_PREVIEW_ROWS && (
-              <p className="timetable-table-footnote">
-                Showing first {MAX_PREVIEW_ROWS} of {processedRows.length} extracted entries. Download the CSV for the full export.
-              </p>
-            )}
-          </section>
-        )}
-
-        {/* STEP 3: Map & Resolve */}
-        {activeStep === 3 && analysisResult && (
-          <section className="timetable-stage-card">
-            <div className="timetable-preview-toolbar">
-              <div>
-                <h3>Map & Resolve Timetable Entities</h3>
-                <p>
-                  Review matched courses, assign ambiguous faculty or courses, and verify section assignments.
-                </p>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button
-                  type="button"
-                  className="timetable-outline-button"
-                  onClick={() => toggleSelectAll(true)}
-                >
-                  Select All
-                </button>
-                <button
-                  type="button"
-                  className="timetable-outline-button"
-                  onClick={() => toggleSelectAll(false)}
-                >
-                  Deselect All
-                </button>
+              <div className="timetable-review-stat-box">
+                <span>Detected Conflicts</span>
+                <strong style={{ color: "#b81414" }}>{mappingCounts.conflict}</strong>
               </div>
             </div>
 
-            <div className="timetable-filter-bar">
-              <label>
-                <span>Mapping Status</span>
-                <select
-                  value={mappingStatusFilter}
-                  onChange={(e) => setMappingStatusFilter(e.target.value)}
-                >
-                  <option value="All">All statuses ({processedRows.length})</option>
-                  <option value="matched">Auto-matched ({mappingCounts.matched})</option>
-                  <option value="warning">With warnings ({mappingCounts.warning})</option>
-                  <option value="ambiguous">Ambiguous ({mappingCounts.ambiguous})</option>
-                  <option value="conflict">Conflicts ({mappingCounts.conflict})</option>
-                  <option value="duplicate">Duplicates ({mappingCounts.duplicate})</option>
-                  <option value="unmatched">Unmatched ({mappingCounts.unmatched})</option>
-                </select>
-              </label>
+            <div className="timetable-mode-section">
+              <strong>Select Import Mode</strong>
 
-              <label>
-                <span>Semester</span>
-                <select
-                  value={mappingSemesterFilter}
-                  onChange={(e) => setMappingSemesterFilter(e.target.value)}
-                >
-                  <option value="All">All semesters</option>
-                  {mappingFilterOptions.semesters.map((s) => (
-                    <option key={s} value={s}>
-                      Semester {s}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <span>Section / Group</span>
-                <select
-                  value={mappingSectionFilter}
-                  onChange={(e) => setMappingSectionFilter(e.target.value)}
-                >
-                  <option value="All">All sections</option>
-                  {mappingFilterOptions.sections.map((sec) => (
-                    <option key={sec} value={sec}>
-                      {sec}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="timetable-filter-search">
-                <span>Search entries</span>
-                <div className="timetable-search-input">
-                  <FontAwesomeIcon icon={faSearch} />
-                  <input
-                    value={mappingSearch}
-                    onChange={(e) => setMappingSearch(e.target.value)}
-                    placeholder="Search by course, faculty, room..."
-                  />
-                </div>
-              </label>
-            </div>
-
-            <div className="timetable-result-summary" style={{ marginTop: 10 }}>
-              <span>
-                {filteredProcessedRows.length} entries shown · {mappingCounts.selected} selected for import
-              </span>
-            </div>
-
-            <div className="timetable-table-wrapper" style={{ marginTop: 10 }}>
-              <table className="timetable-table">
-                <thead>
-                  <tr>
-                    <th style={{ width: 36 }}>Import</th>
-                    <th>Day / Time</th>
-                    <th>Section</th>
-                    <th>Course Assignment</th>
-                    <th>Faculty Assignment</th>
-                    <th>Room</th>
-                    <th>Offering Action</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredProcessedRows.map((row) => (
-                    <tr key={`${row.source_row}-${row.index}`}>
-                      <td style={{ textAlign: "center" }}>
-                        <input
-                          type="checkbox"
-                          checked={row.isSelected}
-                          onChange={() => toggleRowSelection(row.index)}
-                          aria-label={`Select row ${row.index + 1}`}
-                        />
-                      </td>
-                      <td>
-                        <strong>{titleCase(row.day_of_week)}</strong>
-                        <div>
-                          {displayTime(row.start_time)} – {displayTime(row.end_time)}
-                        </div>
-                        <small>{row.period ? `Period ${row.period}` : ""}</small>
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          value={row.section}
-                          onChange={(e) =>
-                            updateEntryOverride(row.index, { section: e.target.value })
-                          }
-                          style={{ width: 80, padding: "4px 6px" }}
-                        />
-                      </td>
-                      <td>
-                        {row.course_candidates?.length > 1 ? (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <select
-                              value={row.course_id || ""}
-                              onChange={(e) =>
-                                updateEntryOverride(row.index, {
-                                  course_id: Number(e.target.value) || null,
-                                })
-                              }
-                              style={{ borderColor: "#6929c4" }}
-                            >
-                              <option value="">Select matching course...</option>
-                              {row.course_candidates.map((c) => (
-                                <option key={c.course_id} value={c.course_id}>
-                                  {c.course_code} - {c.course_name}
-                                </option>
-                              ))}
-                            </select>
-                            <small style={{ color: "#6929c4" }}>
-                              Multiple potential matches detected
-                            </small>
-                          </div>
-                        ) : (
-                          <select
-                            value={row.course_id || ""}
-                            onChange={(e) =>
-                              updateEntryOverride(row.index, {
-                                course_id: Number(e.target.value) || null,
-                              })
-                            }
-                          >
-                            <option value="">Select course...</option>
-                            {(analysisResult.available_courses || []).map((c) => (
-                              <option key={c.course_id} value={c.course_id}>
-                                {c.course_code} - {c.course_name} (Sem {c.semester})
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                        <div style={{ marginTop: 2 }}>
-                          <small style={{ color: "#6681a6" }}>
-                            Raw: {row.raw_cell}
-                          </small>
-                        </div>
-                      </td>
-                      <td>
-                        {row.faculty_candidates?.length > 1 ? (
-                          <select
-                            value={row.faculty_id || ""}
-                            onChange={(e) =>
-                              updateEntryOverride(row.index, {
-                                faculty_id: Number(e.target.value) || null,
-                              })
-                            }
-                            style={{ borderColor: "#6929c4" }}
-                          >
-                            <option value="">Select faculty member...</option>
-                            {row.faculty_candidates.map((f) => (
-                              <option key={f.faculty_id} value={f.faculty_id}>
-                                {f.name} ({f.employee_id})
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <select
-                            value={row.faculty_id || ""}
-                            onChange={(e) =>
-                              updateEntryOverride(row.index, {
-                                faculty_id: Number(e.target.value) || null,
-                              })
-                            }
-                          >
-                            <option value="">Not assigned</option>
-                            {(analysisResult.available_faculty || []).map((f) => (
-                              <option key={f.faculty_id} value={f.faculty_id}>
-                                {f.name} ({f.employee_id})
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          value={row.room}
-                          onChange={(e) =>
-                            updateEntryOverride(row.index, { room: e.target.value })
-                          }
-                          placeholder="e.g. Room-302"
-                          style={{ width: 90, padding: "4px 6px" }}
-                        />
-                      </td>
-                      <td>
-                        {row.offering_id ? (
-                          <span className="timetable-offering-badge is-reuse">
-                            Reuses Offering #{row.offering_id}
-                          </span>
-                        ) : (
-                          <span className="timetable-offering-badge is-create">
-                            Will Create Offering
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span
-                          className="timetable-status-tag"
-                          data-status={row.status}
-                        >
-                          {getMappingStatusLabel(row.status)}
-                        </span>
-                        {row.conflicts?.map((msg, i) => (
-                          <div key={i} className="timetable-row-message is-conflict">
-                            <FontAwesomeIcon icon={faTriangleExclamation} /> {msg}
-                          </div>
-                        ))}
-                        {row.warnings?.map((msg, i) => (
-                          <div key={i} className="timetable-row-message is-warning">
-                            {msg}
-                          </div>
-                        ))}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
-        )}
-
-        {/* STEP 4: Review & Commit */}
-        {activeStep === 4 && analysisResult && (
-          <section className="timetable-stage-card">
-            <div className="timetable-review-card">
-              <div className="timetable-preview-toolbar">
-                <div>
-                  <h3>Import Review & Commit Plan</h3>
-                  <p>
-                    Target Academic Year: <strong>{effectiveAcademicYear}</strong>.
-                    Review the planned changes before writing to the database.
-                  </p>
-                </div>
-              </div>
-
-              <div className="timetable-review-stats">
-                <div className="timetable-review-stat-box">
-                  <span>Selected for Import</span>
-                  <strong style={{ color: "#005fb8" }}>{mappingCounts.selected}</strong>
-                </div>
-                <div className="timetable-review-stat-box">
-                  <span>Entries to Create</span>
-                  <strong style={{ color: "#0b7d3b" }}>
-                    {processedRows.filter((r) => r.isSelected && r.course_id && r.status !== "duplicate").length}
-                  </strong>
-                </div>
-                <div className="timetable-review-stat-box">
-                  <span>Duplicates to Skip</span>
-                  <strong style={{ color: "#52637a" }}>{mappingCounts.duplicate}</strong>
-                </div>
-                <div className="timetable-review-stat-box">
-                  <span>Detected Conflicts</span>
-                  <strong style={{ color: "#b81414" }}>{mappingCounts.conflict}</strong>
-                </div>
-              </div>
-
-              <div className="timetable-mode-section">
-                <strong>Select Import Mode</strong>
-
-                <label
-                  className={`timetable-mode-option ${importMode === "add_missing" ? "is-selected" : ""}`}
-                >
-                  <input
-                    type="radio"
-                    name="importMode"
-                    value="add_missing"
-                    checked={importMode === "add_missing"}
-                    onChange={(e) => setImportMode(e.target.value)}
-                  />
-                  <div className="timetable-mode-option-text">
-                    <strong>Add Missing Entries Only (Recommended)</strong>
-                    <span>
-                      Safely creates new timetable entries and offerings. Any entry that already exists is skipped without creating duplicate records.
-                    </span>
-                  </div>
-                </label>
-
-                <label
-                  className={`timetable-mode-option ${importMode === "update_matched" ? "is-selected" : ""}`}
-                >
-                  <input
-                    type="radio"
-                    name="importMode"
-                    value="update_matched"
-                    checked={importMode === "update_matched"}
-                    onChange={(e) => setImportMode(e.target.value)}
-                  />
-                  <div className="timetable-mode-option-text">
-                    <strong>Update Matched Entries</strong>
-                    <span>
-                      Updates classroom and timings for existing entries that match the same course offering and day.
-                    </span>
-                  </div>
-                </label>
-
-                <label
-                  className={`timetable-mode-option ${importMode === "review_conflicts" ? "is-selected" : ""}`}
-                >
-                  <input
-                    type="radio"
-                    name="importMode"
-                    value="review_conflicts"
-                    checked={importMode === "review_conflicts"}
-                    onChange={(e) => setImportMode(e.target.value)}
-                  />
-                  <div className="timetable-mode-option-text">
-                    <strong>Strict Validation</strong>
-                    <span>
-                      Skips any entries with unresolved warnings or scheduling conflicts.
-                    </span>
-                  </div>
-                </label>
-              </div>
-
-              {commitError && (
-                <div className="timetable-alert timetable-alert-error" role="alert">
-                  <FontAwesomeIcon icon={faTriangleExclamation} />
-                  <span>{commitError}</span>
-                </div>
-              )}
-
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+              <label
+                className={`timetable-mode-option ${importMode === "add_missing" ? "is-selected" : ""}`}
+              >
                 <input
-                  type="checkbox"
-                  id="confirm-import-check"
-                  checked={confirmCommit}
-                  onChange={(e) => setConfirmCommit(e.target.checked)}
+                  type="radio"
+                  name="importMode"
+                  value="add_missing"
+                  checked={importMode === "add_missing"}
+                  onChange={(e) => setImportMode(e.target.value)}
                 />
-                <label htmlFor="confirm-import-check" style={{ fontSize: 12, color: "#16345f", cursor: "pointer" }}>
-                  I have reviewed the entity mappings and confirm importing{" "}
-                  <strong>{mappingCounts.selected}</strong> entries into academic year{" "}
-                  <strong>{effectiveAcademicYear}</strong>.
-                </label>
-              </div>
-            </div>
-          </section>
-        )}
+                <div className="timetable-mode-option-text">
+                  <strong>Add Missing Entries Only (Recommended)</strong>
+                  <span>
+                    Safely creates new timetable entries and offerings. Existing identical entries are skipped without creating duplicate records.
+                  </span>
+                </div>
+              </label>
 
-        {/* STEP 5: Import Results Summary */}
-        {activeStep === 5 && commitResult && (
-          <section className="timetable-stage-card">
-            <div className="timetable-result-banner">
-              <div className="timetable-result-icon">
-                <FontAwesomeIcon icon={faCheckCircle} />
-              </div>
-              <div className="timetable-result-copy">
-                <h3>Timetable Import Successfully Committed!</h3>
-                <p>
-                  Database transaction committed for Academic Year{" "}
-                  <strong>{commitResult.academic_year}</strong>.
-                </p>
-              </div>
-            </div>
-
-            <div className="timetable-review-stats" style={{ marginTop: 14 }}>
-              <div className="timetable-review-stat-box">
-                <span>Timetable Entries Created</span>
-                <strong style={{ color: "#0b7d3b" }}>{commitResult.created_entries}</strong>
-              </div>
-              <div className="timetable-review-stat-box">
-                <span>Offerings Created</span>
-                <strong style={{ color: "#005fb8" }}>{commitResult.created_offerings}</strong>
-              </div>
-              <div className="timetable-review-stat-box">
-                <span>Entries Updated</span>
-                <strong style={{ color: "#a46c03" }}>{commitResult.updated_entries}</strong>
-              </div>
-              <div className="timetable-review-stat-box">
-                <span>Duplicates Skipped</span>
-                <strong style={{ color: "#52637a" }}>{commitResult.skipped_entries}</strong>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
-              <button
-                type="button"
-                className="timetable-primary-button"
-                onClick={() => {
-                  setActiveTab("Timetable");
-                  void loadTimetable();
-                }}
+              <label
+                className={`timetable-mode-option ${importMode === "update_matched" ? "is-selected" : ""}`}
               >
-                <FontAwesomeIcon icon={faCalendarDays} />
-                View Saved Timetable
-              </button>
-              <button
-                type="button"
-                className="timetable-outline-button"
-                onClick={resetWizard}
-              >
-                <FontAwesomeIcon icon={faRotateRight} />
-                Import Another Timetable
-              </button>
-            </div>
-          </section>
-        )}
+                <input
+                  type="radio"
+                  name="importMode"
+                  value="update_matched"
+                  checked={importMode === "update_matched"}
+                  onChange={(e) => setImportMode(e.target.value)}
+                />
+                <div className="timetable-mode-option-text">
+                  <strong>Update Matched Entries</strong>
+                  <span>
+                    Updates classroom and timings for existing entries that match the same course offering and day.
+                  </span>
+                </div>
+              </label>
 
-        {/* Wizard Navigation Footer */}
-        {activeStep > 1 && activeStep < 5 && (
-          <footer className="timetable-wizard-footer">
+              <label
+                className={`timetable-mode-option ${importMode === "review_conflicts" ? "is-selected" : ""}`}
+              >
+                <input
+                  type="radio"
+                  name="importMode"
+                  value="review_conflicts"
+                  checked={importMode === "review_conflicts"}
+                  onChange={(e) => setImportMode(e.target.value)}
+                />
+                <div className="timetable-mode-option-text">
+                  <strong>Strict Validation</strong>
+                  <span>
+                    Skips any entries with unresolved warnings or scheduling conflicts.
+                  </span>
+                </div>
+              </label>
+            </div>
+
+            {commitError && (
+              <div className="timetable-alert timetable-alert-error" role="alert">
+                <FontAwesomeIcon icon={faTriangleExclamation} />
+                <span>{commitError}</span>
+              </div>
+            )}
+
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
+              <input
+                type="checkbox"
+                id="confirm-import-check"
+                checked={confirmCommit}
+                onChange={(e) => setConfirmCommit(e.target.checked)}
+              />
+              <label htmlFor="confirm-import-check" style={{ fontSize: 13, color: "#16345f", cursor: "pointer" }}>
+                I have reviewed the entity mappings and confirm importing{" "}
+                <strong>{mappingCounts.selected}</strong> entries into academic year{" "}
+                <strong>{effectiveAcademicYear}</strong>.
+              </label>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* STEP 5: Import Results Summary */}
+      {activeStep === 5 && commitResult && (
+        <section className="timetable-stage-card">
+          <div className="timetable-result-banner">
+            <div className="timetable-result-icon">
+              <FontAwesomeIcon icon={faCheckCircle} />
+            </div>
+            <div className="timetable-result-copy">
+              <h3>Timetable Import Successfully Committed!</h3>
+              <p>
+                Database transaction committed for Academic Year <strong>{commitResult.academic_year}</strong>.
+              </p>
+            </div>
+          </div>
+
+          <div className="timetable-review-stats" style={{ marginTop: 14 }}>
+            <div className="timetable-review-stat-box">
+              <span>Timetable Entries Created</span>
+              <strong style={{ color: "#0b7d3b" }}>{commitResult.created_entries}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Offerings Created</span>
+              <strong style={{ color: "#005fb8" }}>{commitResult.created_offerings}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Entries Updated</span>
+              <strong style={{ color: "#a46c03" }}>{commitResult.updated_entries}</strong>
+            </div>
+            <div className="timetable-review-stat-box">
+              <span>Duplicates Skipped</span>
+              <strong style={{ color: "#52637a" }}>{commitResult.skipped_entries}</strong>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
             <button
               type="button"
-              className="timetable-outline-button"
-              onClick={() => setActiveStep((curr) => Math.max(1, curr - 1))}
+              className="timetable-primary-button"
+              onClick={() => {
+                setActiveTab("Timetable");
+                void loadTimetable();
+              }}
             >
-              Back
+              <FontAwesomeIcon icon={faCalendarDays} />
+              View Saved Timetable
             </button>
-
-            {activeStep === 2 && (
-              <button
-                type="button"
-                className="timetable-primary-button"
-                onClick={() => setActiveStep(3)}
-              >
-                Next: Map & Resolve
-                <FontAwesomeIcon icon={faChevronRight} />
-              </button>
-            )}
-
-            {activeStep === 3 && (
-              <button
-                type="button"
-                className="timetable-primary-button"
-                onClick={() => setActiveStep(4)}
-              >
-                Next: Review & Commit
-                <FontAwesomeIcon icon={faChevronRight} />
-              </button>
-            )}
-
-            {activeStep === 4 && (
-              <button
-                type="button"
-                className="timetable-primary-button"
-                disabled={!confirmCommit || commitLoading || mappingCounts.selected === 0}
-                onClick={handleCommitImport}
-              >
-                <FontAwesomeIcon icon={faSave} />
-                {commitLoading ? "Committing Transaction..." : "Confirm & Commit Timetable"}
-              </button>
-            )}
-          </footer>
-        )}
-
-        {/* SECTION 2: Saved Timetable Management */}
-        <section className="timetable-management-section">
-          <div className="timetable-preview-toolbar">
-            <div>
-              <h3>Saved Timetable Database Records</h3>
-              <p>View active timetable entries, courses, faculty, and classrooms.</p>
-            </div>
             <button
               type="button"
               className="timetable-outline-button"
-              onClick={loadTimetable}
-              disabled={timetableLoading}
+              onClick={resetWizard}
             >
               <FontAwesomeIcon icon={faRotateRight} />
-              {timetableLoading ? "Loading..." : "Refresh Data"}
+              Import Another Timetable
+            </button>
+          </div>
+        </section>
+      )}
+
+      {/* Wizard Step Footer */}
+      {activeStep > 1 && activeStep < 5 && (
+        <footer className="timetable-wizard-footer">
+          <button
+            type="button"
+            className="timetable-outline-button"
+            onClick={() => setActiveStep((curr) => Math.max(1, curr - 1))}
+          >
+            Back
+          </button>
+
+          {activeStep === 2 && (
+            <button
+              type="button"
+              className="timetable-primary-button"
+              onClick={() => setActiveStep(3)}
+            >
+              Next: Map & Resolve
+              <FontAwesomeIcon icon={faChevronRight} />
+            </button>
+          )}
+
+          {activeStep === 3 && (
+            <button
+              type="button"
+              className="timetable-primary-button"
+              onClick={() => setActiveStep(4)}
+            >
+              Next: Review & Commit
+              <FontAwesomeIcon icon={faChevronRight} />
+            </button>
+          )}
+
+          {activeStep === 4 && (
+            <button
+              type="button"
+              className="timetable-primary-button"
+              disabled={!confirmCommit || commitLoading || mappingCounts.selected === 0}
+              onClick={handleCommitImport}
+            >
+              <FontAwesomeIcon icon={commitLoading ? faSpinner : faSave} spin={commitLoading} />
+              {commitLoading ? "Committing Transaction..." : "Confirm & Commit Timetable"}
+            </button>
+          )}
+        </footer>
+      )}
+
+      {/* 4. MAIN SPLIT LAYOUT: Filter + Table + Right Sidebar */}
+      <div className="timetable-layout-container">
+        {/* Left Column: Filter Bar & Saved Records */}
+        <div className="timetable-main-column">
+          {/* Filter Bar */}
+          <div className="timetable-toolbar-filter-card">
+            <div className="timetable-filter-select-group">
+              <label htmlFor="filter-semester">Semester</label>
+              <select
+                id="filter-semester"
+                value={semesterFilter}
+                onChange={(e) => {
+                  setSemesterFilter(e.target.value);
+                  setSectionFilter("All");
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="All">All Semesters</option>
+                {semesters.map((s) => (
+                  <option key={s} value={s}>
+                    Semester {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="timetable-filter-select-group">
+              <label htmlFor="filter-section">Section</label>
+              <select
+                id="filter-section"
+                value={sectionFilter}
+                onChange={(e) => {
+                  setSectionFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="All">All Sections</option>
+                {sections.map((sec) => (
+                  <option key={sec} value={sec}>
+                    {sec}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="timetable-filter-select-group">
+              <label htmlFor="filter-day">Day</label>
+              <select
+                id="filter-day"
+                value={dayFilter}
+                onChange={(e) => {
+                  setDayFilter(e.target.value);
+                  setCurrentPage(1);
+                }}
+              >
+                <option value="All">All Days</option>
+                {days.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="timetable-filter-search-box">
+              <FontAwesomeIcon icon={faSearch} />
+              <input
+                type="text"
+                placeholder="Search by course code, course name, faculty or room..."
+                value={searchQuery}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
+              />
+            </div>
+
+            <button
+              type="button"
+              className="timetable-filter-reset-btn"
+              onClick={resetFilters}
+            >
+              <FontAwesomeIcon icon={faRotateRight} />
+              Reset
             </button>
           </div>
 
-          <nav
-            className="timetable-tabs"
-            aria-label="Timetable management sections"
-          >
-            {tabs.map((tab) => (
-              <button
-                type="button"
-                key={tab}
-                className={activeTab === tab ? "is-active" : ""}
-                onClick={() => setActiveTab(tab)}
-              >
-                <FontAwesomeIcon icon={tabIcons[tab]} />
-                {tab}
-              </button>
-            ))}
-          </nav>
+          {/* Database Records Card */}
+          <div className="timetable-records-card">
+            <div className="timetable-records-header">
+              <div className="timetable-records-title">
+                <span className="timetable-header-blue-icon">
+                  <FontAwesomeIcon icon={faCalendarDays} />
+                </span>
+                <h3>Timetable Entries</h3>
+                <span className="timetable-count-badge">
+                  Total Entries: {filteredEntries.length}
+                </span>
+              </div>
 
-          {timetableError && (
-            <div className="timetable-alert timetable-alert-error" role="alert">
-              <span>{timetableError}</span>
-              <button type="button" onClick={loadTimetable}>
-                Retry
-              </button>
+              <div className="timetable-header-right">
+                <nav className="timetable-record-tabs">
+                  {tabs.map((tab) => (
+                    <button
+                      type="button"
+                      key={tab}
+                      className={`timetable-tab-btn ${activeTab === tab ? "is-active" : ""}`}
+                      onClick={() => setActiveTab(tab)}
+                    >
+                      {tab}
+                    </button>
+                  ))}
+                </nav>
+
+                <button
+                  type="button"
+                  className="timetable-refresh-icon-btn"
+                  onClick={loadTimetable}
+                  disabled={timetableLoading}
+                  title="Refresh persisted timetable records"
+                >
+                  <FontAwesomeIcon
+                    icon={faRotateRight}
+                    spin={timetableLoading}
+                  />
+                </button>
+              </div>
             </div>
-          )}
 
-          {activeTab === "Timetable" && (
-            <>
-              <div className="timetable-filter-bar">
-                <label>
-                  <span>Semester</span>
-                  <select
-                    value={semester}
-                    onChange={(event) => {
-                      setSemester(event.target.value);
-                      setSection("All");
-                    }}
-                  >
-                    <option value="All">All semesters</option>
-                    {semesters.map((value) => (
-                      <option key={value} value={value}>
-                        Semester {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>Section</span>
-                  <select
-                    value={section}
-                    onChange={(event) => setSection(event.target.value)}
-                  >
-                    <option value="All">All sections</option>
-                    {sections.map((value) => (
-                      <option key={value} value={value}>
-                        {value}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="timetable-filter-search">
-                  <span>Search timetable</span>
-                  <div className="timetable-search-input">
-                    <FontAwesomeIcon icon={faSearch} />
-                    <input
-                      value={search}
-                      onChange={(event) => setSearch(event.target.value)}
-                      placeholder="Course, faculty, room..."
-                    />
-                  </div>
-                </label>
+            {timetableError && (
+              <div className="timetable-alert timetable-alert-error" role="alert">
+                <span>{timetableError}</span>
+                <button type="button" onClick={loadTimetable}>
+                  Retry
+                </button>
               </div>
+            )}
 
-              <div className="timetable-result-summary">
-                <span>{filteredEntries.length} matching entries</span>
-                <span>{entries.length} total saved entries in database</span>
-              </div>
-
-              <div className="timetable-table-wrapper">
-                <table className="timetable-table">
+            {/* TAB: Timetable */}
+            {activeTab === "Timetable" && (
+              <div className="timetable-table-container">
+                <table className="timetable-records-table">
                   <thead>
                     <tr>
                       <th>Day</th>
                       <th>Period</th>
                       <th>Time</th>
-                      <th>Subject Code</th>
-                      <th>Subject Name</th>
-                      <th>Faculty</th>
-                      <th>Classroom</th>
+                      <th>Course Code</th>
+                      <th>Course Name</th>
+                      <th>Semester</th>
                       <th>Section</th>
-                      <th>Academic Year</th>
+                      <th>Faculty</th>
+                      <th>Room</th>
+                      <th>Status</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {timetableLoading ? (
                       <tr>
-                        <td colSpan={8} className="timetable-table-message">
-                          Loading saved timetable...
+                        <td colSpan={11} className="timetable-table-center">
+                          <FontAwesomeIcon icon={faSpinner} spin /> Loading saved timetable...
                         </td>
                       </tr>
-                    ) : filteredEntries.length ? (
-                      filteredEntries.map((entry) => (
+                    ) : paginatedEntries.length ? (
+                      paginatedEntries.map((entry) => (
                         <tr key={entry.id}>
-                          <td>{entry.day}</td>
+                          <td><strong>{entry.day}</strong></td>
+                          <td>—</td>
                           <td>
-                            {displayTime(entry.startTime)} –{" "}
-                            {displayTime(entry.endTime)}
+                            {displayTime(entry.startTime)} – {displayTime(entry.endTime)}
                           </td>
-                          <td>{entry.courseCode || "—"}</td>
+                          <td><strong>{entry.courseCode || "—"}</strong></td>
                           <td>{entry.courseName || "—"}</td>
-                          <td>{entry.faculty}</td>
-                          <td>{entry.room}</td>
+                          <td>{entry.semester || "—"}</td>
                           <td>{entry.section || "—"}</td>
-                          <td>{entry.academicYear || "—"}</td>
+                          <td>
+                            {entry.activeAdjustment ? (
+                              <div>
+                                <span style={{ textDecoration: "line-through", color: "#8a9eb8", fontSize: 11 }}>
+                                  {entry.faculty}
+                                </span>
+                                <div style={{ color: "#005fb8", fontWeight: 600 }}>
+                                  {entry.effectiveFaculty}
+                                </div>
+                              </div>
+                            ) : (
+                              entry.faculty
+                            )}
+                          </td>
+                          <td>{entry.room}</td>
+                          <td>
+                            {entry.activeAdjustment ? (
+                              <span className="timetable-pill-tag is-adjusted">
+                                Substituted
+                              </span>
+                            ) : (
+                              <span className="timetable-pill-tag is-active">
+                                Active
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              className="timetable-row-adjust-btn"
+                              onClick={() => openAdjustment(entry)}
+                              title="Replace faculty for this class"
+                            >
+                              Adjust
+                            </button>
+                          </td>
                         </tr>
                       ))
                     ) : (
                       <tr>
-                        <td colSpan={8} className="timetable-table-message">
-                          No saved timetable records found.
+                        <td colSpan={11} className="timetable-table-center">
+                          No timetable entries match the selected filters.
                         </td>
                       </tr>
                     )}
                   </tbody>
                 </table>
-              </div>
-            </>
-          )}
 
-          {activeTab === "Courses" && (
-            <div className="timetable-table-wrapper">
-              <table className="timetable-table">
-                <thead>
-                  <tr>
-                    <th>Subject Code</th>
-                    <th>Subject Name</th>
-                    <th>Department</th>
-                    <th>Semester</th>
-                    <th>Section</th>
-                    <th>Academic Year</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {timetableLoading ? (
-                    <tr>
-                      <td colSpan={6} className="timetable-table-message">
-                        Loading saved courses...
-                      </td>
-                    </tr>
-                  ) : distinctCourses.length ? (
-                    distinctCourses.map((entry) => (
-                      <tr key={entry.courseCode || entry.courseName}>
-                        <td>{entry.courseCode || "—"}</td>
-                        <td>{entry.courseName || "—"}</td>
-                        <td>{entry.department || "—"}</td>
-                        <td>{entry.semester || "—"}</td>
-                        <td>{entry.section || "—"}</td>
-                        <td>{entry.academicYear || "—"}</td>
-                      </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={6} className="timetable-table-message">
-                        No saved course assignments found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
+                {/* Pagination */}
+                {filteredEntries.length > 0 && (
+                  <div className="timetable-pagination-bar">
+                    <span className="timetable-pagination-info">
+                      Showing {(currentPage - 1) * PAGE_SIZE + 1} to{" "}
+                      {Math.min(currentPage * PAGE_SIZE, filteredEntries.length)} of{" "}
+                      {filteredEntries.length} entries
+                    </span>
 
-          {activeTab === "Faculty" && (
-            <div className="timetable-table-wrapper">
-              <table className="timetable-table">
-                <thead>
-                  <tr>
-                    <th>Faculty Name</th>
-                    <th>Assigned Courses</th>
-                    <th>Timetable Entries</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {timetableLoading ? (
-                    <tr>
-                      <td colSpan={3} className="timetable-table-message">
-                        Loading faculty...
-                      </td>
-                    </tr>
-                  ) : distinctFaculty.length ? (
-                    distinctFaculty.map((name) => {
-                      const facultyEntries = entries.filter(
-                        (entry) => entry.faculty === name
-                      );
-                      const assignedCourses = new Set(
-                        facultyEntries
-                          .map((entry) => entry.courseCode || entry.courseName)
-                          .filter(Boolean)
-                      );
-
-                      return (
-                        <tr key={name}>
-                          <td>{name}</td>
-                          <td>{assignedCourses.size}</td>
-                          <td>{facultyEntries.length}</td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={3} className="timetable-table-message">
-                        No saved faculty assignments found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {activeTab === "Classrooms" && (
-            <div className="timetable-table-wrapper">
-              <table className="timetable-table">
-                <thead>
-                  <tr>
-                    <th>Classroom</th>
-                    <th>Scheduled Classes</th>
-                    <th>Days Used</th>
-                    <th>Courses</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {timetableLoading ? (
-                    <tr>
-                      <td colSpan={4} className="timetable-table-message">
-                        Loading classrooms...
-                      </td>
-                    </tr>
-                  ) : distinctRooms.length ? (
-                    distinctRooms.map((room) => {
-                      const roomEntries = entries.filter(
-                        (entry) => entry.room === room
-                      );
-                      const days = new Set(
-                        roomEntries.map((entry) => entry.dayKey)
-                      );
-                      const coursesSet = new Set(
-                        roomEntries
-                          .map((entry) => entry.courseCode || entry.courseName)
-                          .filter(Boolean)
-                      );
-
-                      return (
-                        <tr key={room}>
-                          <td>{room}</td>
-                          <td>{roomEntries.length}</td>
-                          <td>{days.size}</td>
-                          <td>{coursesSet.size}</td>
-                        </tr>
-                      );
-                    })
-                  ) : (
-                    <tr>
-                      <td colSpan={4} className="timetable-table-message">
-                        No saved classroom assignments found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        {/* SECTION 3: Emergency Faculty Adjustment */}
-        <section className="timetable-adjustment-section">
-          <div className="timetable-adjustment-heading">
-            <div className="timetable-heading-icon timetable-heading-icon-small">
-              <FontAwesomeIcon icon={faUserClock} />
-            </div>
-
-            <div className="timetable-adjustment-heading-copy">
-              <h3>Faculty Adjustment</h3>
-              <p>
-                Search for an absent faculty member, select the affected class,
-                and choose a substitute.
-              </p>
-            </div>
-
-            <button
-              type="button"
-              className="timetable-primary-button"
-              onClick={() => openAdjustment()}
-            >
-              <FontAwesomeIcon icon={faUsers} />
-              Add Faculty Adjustment
-            </button>
-          </div>
-
-          {adjustmentOpen && (
-            <form
-              className="timetable-adjustment-form"
-              onSubmit={submitAdjustment}
-            >
-              <h4>Emergency Faculty Replacement</h4>
-
-              <div className="timetable-adjustment-faculty-grid">
-                <div className="timetable-adjustment-box">
-                  <h4>Current Assigned Faculty</h4>
-
-                  <label>
-                    Search faculty by name
-                    <input
-                      list="current-faculty-options"
-                      value={currentFacultySearch}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        const exactMatch = distinctFaculty.includes(value);
-
-                        setCurrentFacultySearch(value);
-                        setSelectedCurrentFaculty(exactMatch ? value : "");
-                        setAdjustmentTargetId("");
-                        setAdjustmentMessage("");
-                      }}
-                      placeholder="Type a faculty name"
-                      autoComplete="off"
-                      required
-                    />
-                    <datalist id="current-faculty-options">
-                      {currentFacultyOptions.map((name) => (
-                        <option key={name} value={name} />
-                      ))}
-                    </datalist>
-                  </label>
-
-                  <label>
-                    Faculty ID (if known)
-                    <input
-                      value={currentFacultyId}
-                      onChange={(event) => setCurrentFacultyId(event.target.value)}
-                      placeholder="Enter faculty ID"
-                    />
-                  </label>
-
-                  <label>
-                    Select affected class
-                    <select
-                      value={adjustmentTargetId}
-                      onChange={(event) => {
-                        setAdjustmentTargetId(event.target.value);
-                        setAdjustmentMessage("");
-                      }}
-                      disabled={!selectedCurrentFaculty}
-                      required
-                    >
-                      <option value="">
-                        {selectedCurrentFaculty
-                          ? "Select an affected class"
-                          : "Choose current faculty first"}
-                      </option>
-                      {entries
-                        .filter((e) => e.faculty === selectedCurrentFaculty)
-                        .map((entry) => (
-                          <option key={entry.id} value={entry.id}>
-                            {entry.day} · {displayTime(entry.startTime)}–{displayTime(entry.endTime)} ·{" "}
-                            {entry.courseCode} ({entry.section || "No section"}) · {entry.room}
-                          </option>
+                    <div className="timetable-pagination-pages">
+                      <button
+                        type="button"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        className="timetable-page-nav-btn"
+                      >
+                        &lt;
+                      </button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .slice(
+                          Math.max(0, currentPage - 3),
+                          Math.min(totalPages, currentPage + 2)
+                        )
+                        .map((p) => (
+                          <button
+                            type="button"
+                            key={p}
+                            className={`timetable-page-num-btn ${currentPage === p ? "is-current" : ""}`}
+                            onClick={() => setCurrentPage(p)}
+                          >
+                            {p}
+                          </button>
                         ))}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="timetable-adjustment-box">
-                  <h4>Substitute Faculty</h4>
-
-                  <label>
-                    Search substitute faculty
-                    <input
-                      list="substitute-faculty-options"
-                      value={substituteSearch}
-                      onChange={(event) => {
-                        const value = event.target.value;
-                        const exactMatch = distinctFaculty.includes(value);
-
-                        setSubstituteSearch(value);
-                        setSelectedSubstitute(exactMatch ? value : "");
-                        setAdjustmentMessage("");
-                      }}
-                      placeholder="Type substitute faculty name"
-                      autoComplete="off"
-                      required
-                    />
-                    <datalist id="substitute-faculty-options">
-                      {substituteFacultyOptions.map((name) => (
-                        <option key={name} value={name} />
-                      ))}
-                    </datalist>
-                  </label>
-
-                  <label>
-                    Substitute Faculty ID (if known)
-                    <input
-                      value={adjustmentFacultyId}
-                      onChange={(event) => setAdjustmentFacultyId(event.target.value)}
-                      placeholder="Enter faculty ID"
-                    />
-                  </label>
-                </div>
-              </div>
-
-              <div className="timetable-adjustment-box timetable-adjustment-request-box">
-                <h4>Adjustment Details</h4>
-
-                <div className="timetable-adjustment-request-grid">
-                  <label>
-                    Reason for adjustment
-                    <select
-                      value={adjustmentReason}
-                      onChange={(event) => {
-                        setAdjustmentReason(event.target.value);
-                        setAdjustmentMessage("");
-                      }}
-                    >
-                      <option value="Faculty unavailable">Faculty unavailable</option>
-                      <option value="Schedule conflict">Schedule conflict</option>
-                      <option value="Approved leave">Approved leave</option>
-                      <option value="Other">Other</option>
-                    </select>
-                  </label>
-
-                  <label>
-                    Effective date
-                    <input
-                      type="date"
-                      value={effectiveDate}
-                      onChange={(event) => {
-                        setEffectiveDate(event.target.value);
-                        setAdjustmentMessage("");
-                      }}
-                      required
-                    />
-                  </label>
-                </div>
-
-                {adjustmentReason === "Other" && (
-                  <label>
-                    Custom reason
-                    <textarea
-                      value={customAdjustmentReason}
-                      onChange={(event) => {
-                        setCustomAdjustmentReason(event.target.value);
-                        setAdjustmentMessage("");
-                      }}
-                      placeholder="Explain why this replacement is required"
-                      required
-                    />
-                  </label>
-                )}
-
-                <label className="timetable-checkbox-field">
-                  <input
-                    type="checkbox"
-                    checked={requestApproval}
-                    onChange={(event) => setRequestApproval(event.target.checked)}
-                  />
-                  Request approval before changing the assignment
-                </label>
-
-                {adjustmentMessage && (
-                  <div className="timetable-alert timetable-alert-info" role="status">
-                    {adjustmentMessage}
+                      <button
+                        type="button"
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        className="timetable-page-nav-btn"
+                      >
+                        &gt;
+                      </button>
+                    </div>
                   </div>
                 )}
+              </div>
+            )}
 
-                <div className="timetable-form-actions">
-                  <button
-                    type="button"
-                    className="timetable-outline-button"
-                    onClick={cancelAdjustment}
-                  >
-                    Cancel
-                  </button>
-                  <button type="submit" className="timetable-primary-button">
-                    <FontAwesomeIcon icon={faCheck} />
-                    Assign Faculty
-                  </button>
+            {/* TAB: Courses */}
+            {activeTab === "Courses" && (
+              <div className="timetable-table-container">
+                <table className="timetable-records-table">
+                  <thead>
+                    <tr>
+                      <th>Course Code</th>
+                      <th>Course Name</th>
+                      <th>Department</th>
+                      <th>Semester</th>
+                      <th>Section</th>
+                      <th>Academic Year</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {distinctCourses.map((c) => (
+                      <tr key={c.courseCode || c.courseName}>
+                        <td><strong>{c.courseCode || "—"}</strong></td>
+                        <td>{c.courseName || "—"}</td>
+                        <td>{c.department || "—"}</td>
+                        <td>{c.semester || "—"}</td>
+                        <td>{c.section || "—"}</td>
+                        <td>{c.academicYear || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* TAB: Faculty */}
+            {activeTab === "Faculty" && (
+              <div className="timetable-table-container">
+                <table className="timetable-records-table">
+                  <thead>
+                    <tr>
+                      <th>Faculty Name</th>
+                      <th>Assigned Courses</th>
+                      <th>Total Periods / Classes</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {distinctFaculty.map((name) => {
+                      const facultyEntries = entries.filter((e) => e.faculty === name);
+                      const assignedCourses = new Set(
+                        facultyEntries.map((e) => e.courseCode || e.courseName).filter(Boolean)
+                      );
+                      return (
+                        <tr key={name}>
+                          <td><strong>{name}</strong></td>
+                          <td>{assignedCourses.size}</td>
+                          <td>{facultyEntries.length}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="timetable-row-adjust-btn"
+                              onClick={() => {
+                                setSelectedCurrentFaculty(name);
+                                setAdjustmentOpen(true);
+                                setTimeout(() => {
+                                  adjustmentSectionRef.current?.scrollIntoView({ behavior: "smooth" });
+                                }, 100);
+                              }}
+                            >
+                              Emergency Replace
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* TAB: Classrooms */}
+            {activeTab === "Classrooms" && (
+              <div className="timetable-table-container">
+                <table className="timetable-records-table">
+                  <thead>
+                    <tr>
+                      <th>Classroom</th>
+                      <th>Scheduled Classes</th>
+                      <th>Days Used</th>
+                      <th>Courses</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {distinctRooms.map((room) => {
+                      const roomEntries = entries.filter((e) => e.room === room);
+                      const daysCount = new Set(roomEntries.map((e) => e.dayKey)).size;
+                      const coursesCount = new Set(
+                        roomEntries.map((e) => e.courseCode || e.courseName).filter(Boolean)
+                      ).size;
+                      return (
+                        <tr key={room}>
+                          <td><strong>{room}</strong></td>
+                          <td>{roomEntries.length}</td>
+                          <td>{daysCount}</td>
+                          <td>{coursesCount}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Sidebar: Quick Actions + Statistics + Efficient Card */}
+        <aside className="timetable-sidebar-column">
+          {/* Quick Actions Card */}
+          <div className="timetable-quick-actions-card">
+            <div className="timetable-sidebar-title">
+              <span className="timetable-sidebar-icon">
+                <FontAwesomeIcon icon={faLayerGroup} />
+              </span>
+              <h4>Quick Actions</h4>
+            </div>
+
+            <div className="timetable-quick-actions-list">
+              <button
+                type="button"
+                className="timetable-quick-action-item"
+                onClick={() => {
+                  setActiveTab("Timetable");
+                  window.scrollTo({ top: 380, behavior: "smooth" });
+                }}
+              >
+                <div className="timetable-action-icon-circle is-blue">
+                  <FontAwesomeIcon icon={faCalendarDays} />
+                </div>
+                <div className="timetable-action-copy">
+                  <strong>View Timetable</strong>
+                  <span>Check your class schedule</span>
+                </div>
+                <FontAwesomeIcon icon={faChevronRight} className="timetable-action-chevron" />
+              </button>
+
+              <button
+                type="button"
+                className="timetable-quick-action-item"
+                onClick={() => {
+                  setActiveTab("Faculty");
+                  window.scrollTo({ top: 380, behavior: "smooth" });
+                }}
+              >
+                <div className="timetable-action-icon-circle is-purple">
+                  <FontAwesomeIcon icon={faUsers} />
+                </div>
+                <div className="timetable-action-copy">
+                  <strong>Faculty Assignment</strong>
+                  <span>View assigned faculty</span>
+                </div>
+                <FontAwesomeIcon icon={faChevronRight} className="timetable-action-chevron" />
+              </button>
+
+              <button
+                type="button"
+                className="timetable-quick-action-item"
+                onClick={() => navigate("/admin/academic-management/course-offerings")}
+              >
+                <div className="timetable-action-icon-circle is-green">
+                  <FontAwesomeIcon icon={faGraduationCap} />
+                </div>
+                <div className="timetable-action-copy">
+                  <strong>Course Offerings</strong>
+                  <span>View course offerings</span>
+                </div>
+                <FontAwesomeIcon icon={faChevronRight} className="timetable-action-chevron" />
+              </button>
+
+              <button
+                type="button"
+                className="timetable-quick-action-item"
+                onClick={() => openAdjustment()}
+              >
+                <div className="timetable-action-icon-circle is-orange">
+                  <FontAwesomeIcon icon={faUserClock} />
+                </div>
+                <div className="timetable-action-copy">
+                  <strong>Adjustment</strong>
+                  <span>Modify faculty / room / time</span>
+                </div>
+                <FontAwesomeIcon icon={faChevronRight} className="timetable-action-chevron" />
+              </button>
+            </div>
+          </div>
+
+          {/* Timetable Statistics Card */}
+          <div className="timetable-statistics-card">
+            <div className="timetable-sidebar-title">
+              <h4>Timetable Statistics</h4>
+              <small>Based on latest import</small>
+            </div>
+
+            <div className="timetable-stat-quad-grid">
+              <div className="timetable-stat-tile">
+                <div className="timetable-tile-icon is-blue">
+                  <FontAwesomeIcon icon={faCalendarDays} />
+                </div>
+                <div className="timetable-tile-text">
+                  <span>Total Entries</span>
+                  <strong>{entries.length}</strong>
                 </div>
               </div>
-            </form>
-          )}
 
-          <div className="timetable-adjustment-note">
-            <FontAwesomeIcon icon={faInfoCircle} />
-            <span>
-              Emergency Faculty Adjustment reassigns faculty for temporary absences while preserving original timetable records.
-            </span>
+              <div className="timetable-stat-tile">
+                <div className="timetable-tile-icon is-purple">
+                  <FontAwesomeIcon icon={faUsers} />
+                </div>
+                <div className="timetable-tile-text">
+                  <span>Active Faculty</span>
+                  <strong>{distinctFaculty.length}</strong>
+                </div>
+              </div>
+
+              <div className="timetable-stat-tile">
+                <div className="timetable-tile-icon is-green">
+                  <FontAwesomeIcon icon={faFileLines} />
+                </div>
+                <div className="timetable-tile-text">
+                  <span>Total Courses</span>
+                  <strong>{distinctCourses.length}</strong>
+                </div>
+              </div>
+
+              <div className="timetable-stat-tile">
+                <div className="timetable-tile-icon is-orange">
+                  <FontAwesomeIcon icon={faLayerGroup} />
+                </div>
+                <div className="timetable-tile-text">
+                  <span>Sections</span>
+                  <strong>{sections.length}</strong>
+                </div>
+              </div>
+            </div>
           </div>
-        </section>
+
+          {/* Manage Timetable Efficiently Banner */}
+          <div
+            className="timetable-efficiently-card"
+            style={{ backgroundImage: `url(${campusBannerImage})` }}
+          >
+            <div className="timetable-efficient-overlay" />
+            <div className="timetable-efficient-content">
+              <span className="timetable-efficient-icon">
+                <FontAwesomeIcon icon={faGraduationCap} />
+              </span>
+              <h4>Manage Timetable Efficiently</h4>
+              <p>Upload, validate and keep your academic schedule updated with ease.</p>
+            </div>
+          </div>
+        </aside>
       </div>
+
+      {/* 5. FACULTY ADJUSTMENT SECTION & AUDIT TRAIL */}
+      <section
+        ref={adjustmentSectionRef}
+        className="timetable-adjustment-section"
+      >
+        <div className="timetable-adjustment-heading">
+          <div className="timetable-heading-icon">
+            <FontAwesomeIcon icon={faUserClock} />
+          </div>
+          <div className="timetable-adjustment-heading-copy">
+            <h3>Faculty Adjustment & Substitution</h3>
+            <p>
+              Temporarily replace assigned faculty for an affected class with full conflict validation and permanent audit trail.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="timetable-primary-button"
+            onClick={() => setAdjustmentOpen((prev) => !prev)}
+          >
+            <FontAwesomeIcon icon={faUsers} />
+            {adjustmentOpen ? "Hide Adjustment Form" : "New Faculty Adjustment"}
+          </button>
+        </div>
+
+        {adjustmentOpen && (
+          <form
+            className="timetable-adjustment-form"
+            onSubmit={submitAdjustment}
+          >
+            <h4>Emergency Faculty Replacement</h4>
+
+            {adjustmentError && (
+              <div className="timetable-alert timetable-alert-error" role="alert">
+                <FontAwesomeIcon icon={faTriangleExclamation} />
+                <span>{adjustmentError}</span>
+              </div>
+            )}
+
+            {adjustmentMessage && (
+              <div className="timetable-alert timetable-alert-info" role="status">
+                <FontAwesomeIcon icon={faCheckCircle} />
+                <span>{adjustmentMessage}</span>
+              </div>
+            )}
+
+            <div className="timetable-adjustment-faculty-grid">
+              {/* Box 1: Current Assigned Faculty */}
+              <div className="timetable-adjustment-box">
+                <h4>1. Current Assigned Faculty & Class</h4>
+
+                <label>
+                  <span>Faculty Name</span>
+                  <select
+                    value={selectedCurrentFaculty}
+                    onChange={(event) => {
+                      const val = event.target.value;
+                      setSelectedCurrentFaculty(val);
+                      setAdjustmentTargetId("");
+                      setAdjustmentError("");
+                      setAdjustmentMessage("");
+                    }}
+                    required
+                  >
+                    <option value="">Select current faculty...</option>
+                    {distinctFaculty.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label>
+                  <span>Select Affected Class / Period</span>
+                  <select
+                    value={adjustmentTargetId}
+                    onChange={(event) => {
+                      setAdjustmentTargetId(event.target.value);
+                      setAdjustmentError("");
+                      setAdjustmentMessage("");
+                    }}
+                    disabled={!selectedCurrentFaculty}
+                    required
+                  >
+                    <option value="">
+                      {selectedCurrentFaculty
+                        ? "Select an affected class"
+                        : "Choose current faculty first"}
+                    </option>
+                    {entries
+                      .filter((e) => e.faculty === selectedCurrentFaculty)
+                      .map((entry) => (
+                        <option key={entry.id} value={entry.id}>
+                          {entry.day} · {displayTime(entry.startTime)}–{displayTime(entry.endTime)} ·{" "}
+                          {entry.courseCode} ({entry.section || "Sec A"}) · {entry.room}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+              </div>
+
+              {/* Box 2: Substitute Faculty */}
+              <div className="timetable-adjustment-box">
+                <h4>2. Substitute Faculty Member</h4>
+
+                <label>
+                  <span>Search Registered Faculty</span>
+                  <input
+                    type="text"
+                    value={substituteSearch}
+                    onChange={(e) => setSubstituteSearch(e.target.value)}
+                    placeholder="Type to filter substitute faculty..."
+                  />
+                </label>
+
+                <label>
+                  <span>Select Substitute Faculty</span>
+                  <select
+                    value={selectedSubstituteId}
+                    onChange={(event) => {
+                      const facId = event.target.value;
+                      setSelectedSubstituteId(facId);
+                      setAdjustmentError("");
+                      setAdjustmentMessage("");
+                    }}
+                    required
+                  >
+                    <option value="">Select substitute faculty...</option>
+                    {substituteFacultyOptions.map((f) => (
+                      <option key={f.faculty_id} value={f.faculty_id}>
+                        {f.name || f.user?.name} ({f.employee_id || f.designation || `ID: ${f.faculty_id}`})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            {/* Box 3: Reason & Effective Date */}
+            <div className="timetable-adjustment-box" style={{ marginTop: 12 }}>
+              <h4>3. Adjustment Reason & Effective Date</h4>
+
+              <div className="timetable-adjustment-request-grid">
+                <label>
+                  <span>Reason for Adjustment</span>
+                  <select
+                    value={adjustmentReason}
+                    onChange={(event) => {
+                      setAdjustmentReason(event.target.value);
+                      setAdjustmentError("");
+                    }}
+                  >
+                    <option value="Faculty unavailable">Faculty unavailable</option>
+                    <option value="Schedule conflict">Schedule conflict</option>
+                    <option value="Approved leave">Approved leave</option>
+                    <option value="Official duty / Conference">Official duty / Conference</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Effective Date</span>
+                  <input
+                    type="date"
+                    value={effectiveDate}
+                    onChange={(event) => {
+                      setEffectiveDate(event.target.value);
+                      setAdjustmentError("");
+                    }}
+                    required
+                  />
+                </label>
+              </div>
+
+              {adjustmentReason === "Other" && (
+                <label style={{ marginTop: 8 }}>
+                  <span>Custom Reason</span>
+                  <textarea
+                    value={customAdjustmentReason}
+                    onChange={(event) => {
+                      setCustomAdjustmentReason(event.target.value);
+                      setAdjustmentError("");
+                    }}
+                    placeholder="Provide detailed explanation for this emergency faculty substitution..."
+                    required
+                  />
+                </label>
+              )}
+
+              <div className="timetable-form-actions" style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="timetable-outline-button"
+                  onClick={cancelAdjustmentForm}
+                  disabled={adjustmentLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="timetable-primary-button"
+                  disabled={adjustmentLoading}
+                >
+                  <FontAwesomeIcon icon={adjustmentLoading ? faSpinner : faCheck} spin={adjustmentLoading} />
+                  <span>{adjustmentLoading ? "Saving Adjustment..." : "Assign Faculty Substitute"}</span>
+                </button>
+              </div>
+            </div>
+          </form>
+        )}
+
+        {/* Audit Trail Table */}
+        <div className="timetable-audit-card" style={{ marginTop: 16 }}>
+          <div className="timetable-audit-header">
+            <span className="timetable-header-blue-icon">
+              <FontAwesomeIcon icon={faShieldHalved} />
+            </span>
+            <div>
+              <h4>Faculty Adjustments & Substitution Audit History</h4>
+              <p>Permanent record of all emergency substitutions and historical adjustments.</p>
+            </div>
+          </div>
+
+          <div className="timetable-table-wrapper" style={{ marginTop: 10 }}>
+            <table className="timetable-table">
+              <thead>
+                <tr>
+                  <th>Effective Date</th>
+                  <th>Affected Class</th>
+                  <th>Day & Time</th>
+                  <th>Original Faculty</th>
+                  <th>Substitute Faculty</th>
+                  <th>Reason</th>
+                  <th>Adjusted By</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {adjustmentsList.length ? (
+                  adjustmentsList.map((adj) => (
+                    <tr key={adj.adjustment_id}>
+                      <td><strong>{adj.effective_date}</strong></td>
+                      <td>
+                        <strong>{adj.course_code || "Class"}</strong>
+                        <div>{adj.course_name} ({adj.section || "Sec A"})</div>
+                      </td>
+                      <td>
+                        {adj.day_of_week}
+                        <div>{displayTime(adj.start_time)} – {displayTime(adj.end_time)}</div>
+                      </td>
+                      <td>{adj.original_faculty_name}</td>
+                      <td>
+                        <strong style={{ color: "#005fb8" }}>
+                          {adj.substitute_faculty_name}
+                        </strong>
+                      </td>
+                      <td>{adj.reason}</td>
+                      <td>{adj.adjusted_by_name}</td>
+                      <td>
+                        <span
+                          className={`timetable-pill-tag ${adj.status === "APPROVED"
+                              ? "is-active"
+                              : adj.status === "CANCELLED"
+                                ? "is-cancelled"
+                                : "is-pending"
+                            }`}
+                        >
+                          {adj.status}
+                        </span>
+                      </td>
+                      <td>
+                        {adj.status !== "CANCELLED" ? (
+                          <button
+                            type="button"
+                            className="timetable-action-cancel-btn"
+                            onClick={() => handleCancelExistingAdjustment(adj.adjustment_id)}
+                          >
+                            Cancel
+                          </button>
+                        ) : (
+                          <span style={{ color: "#8a9eb8", fontSize: 11 }}>Reverted</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={9} className="timetable-table-center">
+                      No faculty adjustments recorded yet.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
     </section>
   );
 }

@@ -159,6 +159,10 @@ function AppRoutes() {
           path="timetable"
           element={<TimetableManagement />}
         />
+        <Route
+          path="timetable/faculty-adjustment"
+          element={<TimetableManagement />}
+        />
 
         {/* Attendance reports */}
         <Route

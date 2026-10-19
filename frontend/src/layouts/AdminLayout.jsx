@@ -75,6 +75,20 @@ const academicItems = [
   },
 ];
 
+const timetableItems = [
+  {
+    label: "Timetable",
+    path: "/admin/timetable",
+    icon: faCalendarDays,
+    end: true,
+  },
+  {
+    label: "Faculty Adjustment",
+    path: "/admin/timetable/faculty-adjustment",
+    icon: faUsers,
+  },
+];
+
 const systemItems = [
   {
     label: "Profile",
@@ -131,6 +145,9 @@ function AdminLayout() {
   const isAttendanceRoute =
     pathname.startsWith("/admin/attendance-reports");
 
+  const isTimetableRoute =
+    pathname.startsWith("/admin/timetable");
+
   // null means follow the current route automatically.
   // true/false means the user has manually toggled the group.
   const [managementManualOpen, setManagementManualOpen] =
@@ -142,6 +159,9 @@ function AdminLayout() {
   const [attendanceManualOpen, setAttendanceManualOpen] =
     useState(null);
 
+  const [timetableManualOpen, setTimetableManualOpen] =
+    useState(null);
+
   const managementOpen =
     managementManualOpen ?? isManagementRoute;
 
@@ -150,6 +170,9 @@ function AdminLayout() {
 
   const attendanceOpen =
     attendanceManualOpen ?? isAttendanceRoute;
+
+  const timetableOpen =
+    timetableManualOpen ?? isTimetableRoute;
 
   async function handleLogout() {
     try {
@@ -174,6 +197,12 @@ function AdminLayout() {
   function handleAttendanceToggle() {
     setAttendanceManualOpen((current) =>
       !(current ?? isAttendanceRoute)
+    );
+  }
+
+  function handleTimetableToggle() {
+    setTimetableManualOpen((current) =>
+      !(current ?? isTimetableRoute)
     );
   }
 
@@ -341,18 +370,51 @@ function AdminLayout() {
             </div>
 
             {/* Timetable Management */}
-            <NavLink
-              to="/admin/timetable"
-              className={getNavClass}
-            >
-              <span className="admin-nav-icon">
-                <FontAwesomeIcon icon={faCalendarDays} />
-              </span>
+            <div className="admin-nav-group">
+              <button
+                type="button"
+                className={getGroupClass(isTimetableRoute)}
+                onClick={handleTimetableToggle}
+                aria-expanded={timetableOpen}
+              >
+                <span className="admin-nav-icon">
+                  <FontAwesomeIcon icon={faCalendarDays} />
+                </span>
 
-              <span className="admin-nav-label">
-                Timetable Management
-              </span>
-            </NavLink>
+                <span className="admin-nav-label">
+                  Timetable Management
+                </span>
+
+                <span className="admin-nav-chevron">
+                  <FontAwesomeIcon
+                    icon={
+                      timetableOpen
+                        ? faChevronDown
+                        : faChevronRight
+                    }
+                  />
+                </span>
+              </button>
+
+              {timetableOpen && (
+                <div className="admin-subnav">
+                  {timetableItems.map((item) => (
+                    <NavLink
+                      key={item.path}
+                      to={item.path}
+                      end={item.end}
+                      className={getSubNavClass}
+                    >
+                      <span className="admin-subnav-icon">
+                        <FontAwesomeIcon icon={item.icon} />
+                      </span>
+
+                      <span>{item.label}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {/* Attendance Reports */}
             <div className="admin-nav-group">
