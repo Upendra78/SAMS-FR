@@ -6,6 +6,11 @@ export async function getAdminTimetable() {
   return response.data;
 }
 
+export async function getStudentTimetable() {
+  const response = await api.get("/timetable/student");
+  return response.data;
+}
+
 export async function getImportAcademicYears() {
   const response = await api.get("/timetable/import/academic-years");
   return response.data;

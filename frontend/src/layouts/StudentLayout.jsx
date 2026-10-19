@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
@@ -11,8 +12,10 @@ import {
   faRightFromBracket,
   faBars,
   faGraduationCap,
+  faChevronDown,
 } from "@fortawesome/free-solid-svg-icons";
-import { useState } from "react";
+import useAuth from "../hooks/useAuth";
+import { getStudentProfile } from "../services/studentService";
 import "./StudentLayout.css";
 
 const navigationItems = [
@@ -57,13 +60,44 @@ const systemItems = [
   },
 ];
 
+function getInitials(name) {
+  if (!name) return "ST";
+  const clean = name
+    .replace(/^(dr\.|dr|mr\.|mr|ms\.|ms|mrs\.|mrs|prof\.|prof)\s+/i, "")
+    .trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "ST";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function StudentLayout() {
   const navigate = useNavigate();
+  const auth = useAuth();
+  const loggedInUser = auth?.user;
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    getStudentProfile()
+      .then((res) => {
+        if (active && res?.success && res.data) {
+          setProfile(res.data);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const displayName = profile?.name || loggedInUser?.name || "Student";
+  const enrollmentNo = profile?.enrollment_no || loggedInUser?.enrollment_no || "CS2023001";
+  const initials = getInitials(displayName);
 
   const handleLogout = () => {
-    // Authentication/logout integration will be connected
-    // when the backend authentication contract is finalized.
     navigate("/login");
   };
 
@@ -168,29 +202,27 @@ function StudentLayout() {
             >
               <FontAwesomeIcon icon={faBars} />
             </button>
-
-            <div className="student-page-context">
-              <span className="student-context-label">
-                STUDENT PORTAL
-              </span>
-              <span className="student-context-title">
-                Academic Dashboard
-              </span>
-            </div>
           </div>
 
-          <button
-            type="button"
-            className="student-profile-summary"
-            onClick={() => navigate("/student/profile")}
-          >
-            <span className="student-avatar">ST</span>
+          <div className="student-topbar-right">
 
-            <span className="student-profile-text">
-              <strong>Student</strong>
-              <small>Student Account</small>
-            </span>
-          </button>
+            {/* Student Profile Pill */}
+            <button
+              type="button"
+              className="student-profile-summary"
+              onClick={() => navigate("/student/profile")}
+              aria-label={`View profile for ${displayName}`}
+            >
+              <span className="student-avatar">{initials}</span>
+
+              <span className="student-profile-text">
+                <strong>{displayName}</strong>
+                <small>Student • {enrollmentNo}</small>
+              </span>
+
+              <FontAwesomeIcon icon={faChevronDown} className="student-profile-chevron" />
+            </button>
+          </div>
         </header>
 
         <main className="student-content">
