@@ -10,18 +10,20 @@ from flask_jwt_extended import (
     unset_jwt_cookies,
 )
 
+from app.extensions import db
+from app.models import User
 from app.services.auth_service import authenticate_user
-from flask_jwt_extended import verify_jwt_in_request
+
 from datetime import timedelta
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
 
 
+
 @auth_bp.post("/login")
 def login():
     data = request.get_json(silent=True) or {}
-
     email = data.get("email")
     password = data.get("password")
 
@@ -38,17 +40,16 @@ def login():
             "success": False,
             "message": "Invalid email or password",
         }), 401
-    
+
     token_options = {}
 
     if str(user.role).strip().lower() == "admin":
         token_options["expires_delta"] = timedelta(hours=3)
-    
+
     access_token = create_access_token(
         identity=str(user.user_id),
-        additional_claims={
-            "role": user.role,
-        },
+        additional_claims={"role": user.role},
+        **token_options,
     )
 
     response = jsonify({
@@ -63,9 +64,7 @@ def login():
     })
 
     set_access_cookies(response, access_token)
-
     return response, 200
-
 
 @auth_bp.post("/logout")
 def logout():
@@ -86,7 +85,7 @@ def logout():
 def me():
     user_id = get_jwt_identity()
 
-    user = User.query.get(int(user_id))
+    user = db.session.get(User, int(user_id))
 
     if not user:
         return jsonify({

@@ -1,19 +1,22 @@
-﻿import unittest
-
+import unittest
 from flask import Flask
-from flask_jwt_extended import JWTManager, create_access_token
 from sqlalchemy.pool import StaticPool
-
 from app.extensions import bcrypt, db
 from app.models import User
 from app.routes.auth import auth_bp
-
-
+from datetime import timedelta
+from http.cookies import SimpleCookie
+from flask_jwt_extended import (
+    JWTManager,
+    create_access_token,
+    decode_token,
+)
 class TestAuthentication(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.app = Flask(__name__)
         cls.app.config.update(
+            JWT_ACCESS_TOKEN_EXPIRES=timedelta(minutes=30),
             TESTING=True,
             SECRET_KEY="test-secret",
             JWT_SECRET_KEY="test-jwt-secret-key-32-bytes-long",
@@ -204,6 +207,64 @@ class TestAuthentication(unittest.TestCase):
         self.assertTrue(response.get_json()["success"])
         self.assertIn("access_token_cookie", response.headers.get("Set-Cookie", ""))
 
+
+    def _login_and_decode_token(self, role, email):
+        with self.app.app_context():
+            password_hash = bcrypt.generate_password_hash(
+                "CorrectPassword123!"
+            ).decode("utf-8")
+
+            user = User(
+                name=f"Test {role.title()}",
+                email=email,
+                password_hash=password_hash,
+                role=role,
+            )
+            db.session.add(user)
+            db.session.commit()
+
+        response = self.client.post(
+            "/api/auth/login",
+            json={
+                "email": email,
+                "password": "CorrectPassword123!",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+        cookies = SimpleCookie()
+        for header in response.headers.getlist("Set-Cookie"):
+            cookies.load(header)
+
+        self.assertIn("access_token_cookie", cookies)
+
+        with self.app.app_context():
+            return decode_token(
+                cookies["access_token_cookie"].value
+            )
+
+    def test_admin_login_token_expires_after_three_hours(self):
+        claims = self._login_and_decode_token(
+            "ADMIN",
+            "admin@test.local",
+        )
+
+        self.assertEqual(
+            claims["exp"] - claims["iat"],
+            3 * 60 * 60,
+        )
+
+    def test_student_login_uses_configured_default_expiry(self):
+        claims = self._login_and_decode_token(
+            "STUDENT",
+            "another-student@test.local",
+        )
+
+        self.assertEqual(
+            claims["exp"] - claims["iat"],
+            30 * 60,
+        )
 
 if __name__ == "__main__":
     unittest.main()
