@@ -179,14 +179,35 @@ export async function getAdminAttendanceRecords(sessionId) {
   return response.data;
 }
 
-export async function getAdminAttendanceAnalytics(params = {}) {
-  const response = await api.get(
-    "/admin/attendance/analytics",
-    {
-      params,
-    },
-  );
+export async function getAdminAttendanceFilterOptions() {
+  const response = await api.get("/admin/attendance/filter-options");
+  return response.data;
+}
 
+export async function getAdminAttendanceDashboard(params = {}) {
+  const response = await api.get("/admin/attendance/dashboard", {
+    params,
+  });
+  return response.data;
+}
+
+export async function getAdminAttendanceRecordsList(params = {}) {
+  const response = await api.get("/admin/attendance/records", {
+    params,
+  });
+  return response.data;
+}
+
+export async function getAdminAttendanceRecordDetail(attendanceId) {
+  const response = await api.get(`/admin/attendance/records/${attendanceId}`);
+  return response.data;
+}
+
+export async function exportAdminAttendanceCsv(params = {}) {
+  const response = await api.get("/admin/attendance/export", {
+    params,
+    responseType: "blob",
+  });
   return response.data;
 }
 

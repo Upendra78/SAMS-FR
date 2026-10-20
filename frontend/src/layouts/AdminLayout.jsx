@@ -143,7 +143,8 @@ function AdminLayout() {
     pathname === "/admin/assignments";
 
   const isAttendanceRoute =
-    pathname.startsWith("/admin/attendance-reports");
+    pathname.startsWith("/admin/attendance-reports") ||
+    pathname.startsWith("/admin/attendance");
 
   const isTimetableRoute =
     pathname.startsWith("/admin/timetable");
@@ -416,7 +417,7 @@ function AdminLayout() {
               )}
             </div>
 
-            {/* Attendance Reports */}
+            {/* Reports & Analytics */}
             <div className="admin-nav-group">
               <button
                 type="button"
@@ -429,7 +430,7 @@ function AdminLayout() {
                 </span>
 
                 <span className="admin-nav-label">
-                  Attendance Reports
+                  Reports & Analytics
                 </span>
 
                 <span className="admin-nav-chevron">
@@ -447,15 +448,18 @@ function AdminLayout() {
                 <div className="admin-subnav">
                   <NavLink
                     to="/admin/attendance-reports"
-                    end
                     className={getSubNavClass}
                   >
-                    <span className="admin-subnav-icon">
-                      <FontAwesomeIcon icon={faChartColumn} />
-                    </span>
-
                     <span>Attendance Reports</span>
                   </NavLink>
+
+                  <span className="admin-subnav-link admin-subnav-disabled" title="Academic Reports">
+                    <span>Academic Reports</span>
+                  </span>
+
+                  <span className="admin-subnav-link admin-subnav-disabled" title="System Reports">
+                    <span>System Reports</span>
+                  </span>
                 </div>
               )}
             </div>

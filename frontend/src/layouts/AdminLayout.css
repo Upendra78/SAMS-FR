@@ -383,6 +383,16 @@
   background: #ffffff;
 }
 
+.admin-subnav-link.admin-subnav-disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.admin-subnav-link.admin-subnav-disabled:hover {
+  background: transparent;
+  color: #9eacc1;
+}
+
 .admin-header-search {
   position: relative;
   display: flex;

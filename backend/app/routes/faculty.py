@@ -14,26 +14,15 @@ faculty_bp = Blueprint(
 
 
 def get_current_faculty():
-    user_id = int(get_jwt_identity())
+    identity = get_jwt_identity()
+    if not identity:
+        return None
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return None
 
-    faculty = Faculty.query.filter_by(user_id=user_id).first()
-    if not faculty:
-        user = db.session.get(User, user_id)
-        if user and user.role in ("FACULTY", "ADMIN"):
-            dept = Department.query.first()
-            dept_id = dept.department_id if dept else 1
-            faculty = Faculty(
-                user_id=user_id,
-                department_id=dept_id,
-                employee_id=f"FAC-{user_id:04d}",
-                designation="Faculty Member",
-                employment_status="Permanent",
-                country="India",
-            )
-            db.session.add(faculty)
-            db.session.commit()
-
-    return faculty
+    return Faculty.query.filter_by(user_id=user_id).first()
 
 
 def serialize_faculty_profile(faculty):
@@ -90,7 +79,7 @@ def get_faculty_profile():
     if not faculty:
         return jsonify({
             "success": False,
-            "message": "Faculty profile not found",
+            "message": "Faculty profile not found. Please contact administration.",
         }), 404
 
     return jsonify({
@@ -111,7 +100,7 @@ def update_faculty_profile():
     if not faculty:
         return jsonify({
             "success": False,
-            "message": "Faculty profile not found",
+            "message": "Faculty profile not found. Please contact administration.",
         }), 404
 
     data = request.get_json(silent=True) or {}
@@ -218,7 +207,7 @@ def change_faculty_password():
     if not faculty:
         return jsonify({
             "success": False,
-            "message": "Faculty profile not found",
+            "message": "Faculty profile not found. Please contact administration.",
         }), 404
 
     data = request.get_json(silent=True) or {}
@@ -270,7 +259,7 @@ def get_faculty_courses():
     if not faculty:
         return jsonify({
             "success": False,
-            "message": "Faculty profile not found",
+            "message": "Faculty profile not found. Please contact administration.",
         }), 404
 
     offerings = (
@@ -313,7 +302,7 @@ def get_faculty_course(course_id):
     if not faculty:
         return jsonify({
             "success": False,
-            "message": "Faculty profile not found",
+            "message": "Faculty profile not found. Please contact administration.",
         }), 404
 
     offerings = (
@@ -396,7 +385,7 @@ def get_faculty_students():
     if not faculty:
         return jsonify({
             "success": False,
-            "message": "Faculty profile not found",
+            "message": "Faculty profile not found. Please contact administration.",
         }), 404
 
     offering_id_filter = request.args.get("offering_id", type=int)

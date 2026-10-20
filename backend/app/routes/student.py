@@ -60,7 +60,7 @@ def serialize_student_profile(student):
     attendance_rate = (
         round((present_records / total_records * 100), 1)
         if total_records > 0
-        else 100.0
+        else 0.0
     )
 
     enrollments_count = Enrollment.query.filter_by(
@@ -264,7 +264,7 @@ def student_dashboard():
         rate = (
             round((period_present / period_total) * 100, 1)
             if period_total > 0
-            else (overall_attendance if overall_attendance > 0 else 0.0)
+            else None
         )
         trend_points.append({
             "label": label,
@@ -281,7 +281,12 @@ def student_dashboard():
     if len(trend_points) >= 2:
         last_rate = trend_points[-1]["rate"]
         prev_rate = trend_points[-2]["rate"]
-        trend_change = round(last_rate - prev_rate, 1)
+        if last_rate is not None and prev_rate is not None:
+            trend_change = round(last_rate - prev_rate, 1)
+        elif last_rate is not None:
+            trend_change = round(last_rate, 1)
+        else:
+            trend_change = None
 
         last_present = trend_points[-1]["present"]
         prev_present = trend_points[-2]["present"]

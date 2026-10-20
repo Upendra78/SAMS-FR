@@ -161,10 +161,11 @@ function StudentDashboard() {
           ? chartWidth / 2
           : paddingX + (idx / (trendPoints.length - 1)) * usableWidth;
 
-      const clampedRate = Math.min(100, Math.max(0, pt.rate || 0));
-      const y = paddingY + usableHeight - (clampedRate / 100) * usableHeight;
+      const hasSessions = pt.total != null && pt.total > 0 && pt.rate !== null && pt.rate !== undefined;
+      const rateVal = hasSessions ? Math.min(100, Math.max(0, pt.rate)) : 0;
+      const y = paddingY + usableHeight - (rateVal / 100) * usableHeight;
 
-      return { x, y, ...pt };
+      return { x, y, hasSessions, ...pt };
     });
   }, [trendPoints]);
 
@@ -573,8 +574,17 @@ function StudentDashboard() {
                           top: `${(hoveredPoint.y / chartHeight) * 100}%`,
                         }}
                       >
-                        <strong>{hoveredPoint.rate}%</strong>
-                        <small>{hoveredPoint.label}</small>
+                        <strong>
+                          {hoveredPoint.rate !== null && hoveredPoint.rate !== undefined
+                            ? `${hoveredPoint.rate}%`
+                            : "No sessions"}
+                        </strong>
+                        <small>
+                          {hoveredPoint.label}
+                          {hoveredPoint.total > 0
+                            ? ` (${hoveredPoint.present}/${hoveredPoint.total} attended)`
+                            : " (0 classes scheduled)"}
+                        </small>
                       </div>
                     )}
                   </div>
