@@ -24,7 +24,11 @@ class Department(db.Model):
     # A department can exist without an assigned HOD.
     head_faculty_id = db.Column(
         db.Integer,
-        db.ForeignKey("faculty.faculty_id"),
+        db.ForeignKey(
+            "faculty.faculty_id",
+            use_alter=True,
+            name="fk_departments_head_faculty_id",
+        ),
         nullable=True,
         unique=True,
     )

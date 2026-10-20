@@ -169,6 +169,10 @@ function AppRoutes() {
           path="attendance-reports"
           element={<AttendanceReports />}
         />
+        <Route
+          path="attendance"
+          element={<AttendanceReports />}
+        />
 
         {/* Admin account */}
         <Route
