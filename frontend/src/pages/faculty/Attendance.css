@@ -1778,13 +1778,28 @@
   border-color: #dc2626;
 }
 
-.attendance-dashboard-layout .attendance-outline-button.register-face {
-  border-color: #8b5cf6;
-  color: #7c3aed;
-  background: #f5f3ff;
+.attendance-dashboard-layout .attendance-schedule-item.clickable {
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.attendance-dashboard-layout .attendance-outline-button.register-face:hover {
-  background: #ede9fe;
-  color: #6d28d9;
+.attendance-dashboard-layout .attendance-schedule-item.clickable:hover {
+  border-color: #3b82f6;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.08);
 }
+
+.attendance-dashboard-layout .attendance-status-badge.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  background: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+  margin-top: 8px;
+}
+

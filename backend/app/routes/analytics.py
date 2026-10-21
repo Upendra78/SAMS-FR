@@ -41,6 +41,8 @@ def get_attendance_analytics():
         }), 404
 
     offering_id = request.args.get("offering_id", type=int)
+    semester = request.args.get("semester", type=int)
+    academic_year = request.args.get("academic_year")
     from_date_raw = request.args.get("from_date")
     to_date_raw = request.args.get("to_date")
 
@@ -79,6 +81,12 @@ def get_attendance_analytics():
         offering_query = offering_query.filter_by(
             offering_id=offering_id
         )
+
+    if semester is not None:
+        offering_query = offering_query.filter(CourseOffering.semester == semester)
+
+    if academic_year and academic_year not in ["All", "all", ""]:
+        offering_query = offering_query.filter(CourseOffering.academic_year == academic_year)
 
     offerings = (
         offering_query
@@ -197,9 +205,9 @@ def get_attendance_analytics():
         absent_count = possible_attendance - present_count
 
         attendance_percentage = (
-            (present_count / possible_attendance) * 100
+            round((present_count / possible_attendance) * 100, 2)
             if possible_attendance > 0
-            else 0
+            else None
         )
 
         total_courses += 1
@@ -207,6 +215,8 @@ def get_attendance_analytics():
         total_students += student_count
         total_present += present_count
         total_absent += absent_count
+
+        last_session_date = sessions[-1].session_date.isoformat() if sessions else None
 
         course_reports.append({
             "offering_id": offering.offering_id,
@@ -221,25 +231,26 @@ def get_attendance_analytics():
             "students": student_count,
             "present": present_count,
             "absent": absent_count,
-            "attendance_percentage": round(
-                attendance_percentage,
-                2,
-            ),
+            "attendance_percentage": attendance_percentage,
             "low_attendance_students": low_attendance_count,
+            "has_sessions": session_count > 0,
+            "last_session_date": last_session_date,
         })
 
     total_possible_attendance = total_present + total_absent
 
     overall_attendance_percentage = (
-        (total_present / total_possible_attendance) * 100
+        round((total_present / total_possible_attendance) * 100, 2)
         if total_possible_attendance > 0
-        else 0
+        else None
     )
 
     return jsonify({
         "success": True,
         "filters": {
             "offering_id": offering_id,
+            "semester": semester,
+            "academic_year": academic_year,
             "from_date": (
                 from_date.isoformat()
                 if from_date
@@ -257,10 +268,8 @@ def get_attendance_analytics():
             "total_students": total_students,
             "total_present": total_present,
             "total_absent": total_absent,
-            "overall_attendance_percentage": round(
-                overall_attendance_percentage,
-                2,
-            ),
+            "overall_attendance_percentage": overall_attendance_percentage,
+            "has_sessions": total_sessions > 0,
             "courses": course_reports,
             "minimum_attendance_percentage": (
                 MINIMUM_ATTENDANCE_PERCENTAGE

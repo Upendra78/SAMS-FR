@@ -115,7 +115,7 @@
   gap: 16px;
 }
 
-.student-stat-card {
+.student-stat-cards-row .student-stat-card {
   position: relative;
   border-radius: 16px;
   overflow: hidden;
@@ -271,16 +271,16 @@
 }
 
 /* Hover effects for all 4 cards */
-.student-stat-card:hover {
+.student-stat-cards-row .student-stat-card:hover {
   transform: translateY(-6px);
 }
 
-.student-stat-card:hover .student-card-bg-img {
+.student-stat-cards-row .student-stat-card:hover .student-card-bg-img {
   transform: scale(1.08);
   opacity: 1;
 }
 
-.student-stat-card:hover .student-card-icon-badge {
+.student-stat-cards-row .student-stat-card:hover .student-card-icon-badge {
   transform: scale(1.12) rotate(-3deg);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
 }

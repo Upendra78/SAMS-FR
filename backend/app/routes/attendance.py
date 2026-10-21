@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt, get_jwt_identity
 
 from app.extensions import db
 from app.models import (
@@ -13,7 +13,7 @@ from app.models import (
     Student,
     TimetableEntry,
 )
-from app.utils.auth import faculty_required
+from app.utils.auth import faculty_required, faculty_or_admin_required
 
 
 attendance_bp = Blueprint(
@@ -24,11 +24,36 @@ attendance_bp = Blueprint(
 
 
 def get_current_faculty():
-    user_id = int(get_jwt_identity())
+    identity = get_jwt_identity()
+    if not identity:
+        return None
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return None
 
     return Faculty.query.filter_by(
         user_id=user_id
     ).first()
+
+
+def serialize_attendance_record(record):
+    if not record:
+        return None
+    student = record.student
+    student_name = student.user.name if (student and student.user) else f"Student #{record.student_id}"
+    enrollment_no = student.enrollment_no if student else "N/A"
+    return {
+        "attendance_id": record.attendance_id,
+        "session_id": record.session_id,
+        "student_id": record.student_id,
+        "student_name": student_name,
+        "enrollment_no": enrollment_no,
+        "status": record.status,
+        "marked_at": record.marked_at.isoformat() if record.marked_at else None,
+        "confidence_score": record.confidence_score,
+        "recognition_method": record.recognition_method,
+    }
 
 
 def serialize_session(session):
@@ -217,12 +242,20 @@ def get_attendance_sessions():
             "message": "Faculty profile not found",
         }), 404
 
-    sessions = (
-        AttendanceSession.query
-        .filter_by(faculty_id=faculty.faculty_id)
-        .order_by(AttendanceSession.session_id.desc())
-        .all()
-    )
+    offering_id = request.args.get("offering_id", type=int)
+    status_filter = request.args.get("status")
+    session_date = request.args.get("date") or request.args.get("session_date")
+
+    query = AttendanceSession.query.filter_by(faculty_id=faculty.faculty_id)
+
+    if offering_id:
+        query = query.filter(AttendanceSession.offering_id == offering_id)
+    if status_filter and status_filter.upper() != "ALL":
+        query = query.filter(AttendanceSession.status == status_filter.upper())
+    if session_date:
+        query = query.filter(AttendanceSession.session_date == session_date)
+
+    sessions = query.order_by(AttendanceSession.session_id.desc()).all()
 
     return jsonify({
         "success": True,
@@ -356,19 +389,20 @@ def close_attendance_session(session_id):
 
 
 # ============================================================
-# MARK ATTENDANCE RECORD
+# MARK ATTENDANCE RECORD / MANUAL CORRECTION
 # ============================================================
 
 @attendance_bp.post("/sessions/<int:session_id>/records")
-@faculty_required
+@faculty_or_admin_required
 def mark_attendance(session_id):
-    faculty = get_current_faculty()
+    claims = get_jwt()
+    user_role = claims.get("role")
 
-    if not faculty:
+    if user_role == "FACULTY":
         return jsonify({
             "success": False,
-            "message": "Faculty profile not found",
-        }), 404
+            "message": "Manual attendance marking by faculty is disabled. Attendance must be recorded via face recognition.",
+        }), 403
 
     session = db.session.get(
         AttendanceSession,
@@ -381,32 +415,38 @@ def mark_attendance(session_id):
             "message": "Attendance session not found",
         }), 404
 
-    if session.faculty_id != faculty.faculty_id:
-        return jsonify({
-            "success": False,
-            "message": "You are not authorized for this session",
-        }), 403
-
-    if session.status != "ACTIVE":
-        return jsonify({
-            "success": False,
-            "message": "Attendance session is not active",
-        }), 409
-
     data = request.get_json(silent=True) or {}
 
     student_id = data.get("student_id")
+    status_val = str(data.get("status", "PRESENT")).upper().strip()
     confidence_score = data.get("confidence_score")
-    recognition_method = data.get(
-        "recognition_method",
-        "FACE",
-    )
+    recognition_method = str(data.get("recognition_method", "MANUAL")).upper().strip()
+    allow_update = data.get("allow_update", True)
 
     if not student_id:
         return jsonify({
             "success": False,
             "message": "student_id is required",
         }), 400
+
+    if status_val not in {"PRESENT", "ABSENT", "LATE"}:
+        return jsonify({
+            "success": False,
+            "message": "Invalid status. Must be PRESENT, ABSENT, or LATE",
+        }), 400
+
+    if recognition_method not in {"FACE", "MANUAL", "SYSTEM"}:
+        return jsonify({
+            "success": False,
+            "message": "Invalid recognition_method",
+        }), 400
+
+    # Face capture requires active session; manual correction is permitted on active or closed sessions
+    if recognition_method == "FACE" and session.status != "ACTIVE":
+        return jsonify({
+            "success": False,
+            "message": "Attendance session is not active",
+        }), 409
 
     student = db.session.get(
         Student,
@@ -437,10 +477,26 @@ def mark_attendance(session_id):
     ).first()
 
     if existing_record:
+        if not allow_update:
+            return jsonify({
+                "success": False,
+                "message": "Attendance already marked for this student",
+            }), 409
+
+        existing_record.status = status_val
+        existing_record.recognition_method = recognition_method
+        existing_record.marked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        if confidence_score is not None:
+            try:
+                existing_record.confidence_score = float(confidence_score)
+            except (TypeError, ValueError):
+                pass
+        db.session.commit()
         return jsonify({
-            "success": False,
-            "message": "Attendance already marked for this student",
-        }), 409
+            "success": True,
+            "message": "Attendance record updated successfully",
+            "data": serialize_attendance_record(existing_record),
+        }), 200
 
     if confidence_score is not None:
         try:
@@ -457,20 +513,10 @@ def mark_attendance(session_id):
                 "message": "confidence_score must be between 0 and 1",
             }), 400
 
-    recognition_method = str(
-        recognition_method
-    ).upper().strip()
-
-    if recognition_method not in {"FACE", "MANUAL", "SYSTEM"}:
-        return jsonify({
-            "success": False,
-            "message": "Invalid recognition_method",
-        }), 400
-
     record = AttendanceRecord(
         session_id=session_id,
         student_id=student_id,
-        status="PRESENT",
+        status=status_val,
         marked_at=datetime.now(timezone.utc).replace(tzinfo=None),
         confidence_score=confidence_score,
         recognition_method=recognition_method,
@@ -482,16 +528,91 @@ def mark_attendance(session_id):
     return jsonify({
         "success": True,
         "message": "Attendance marked successfully",
-        "data": {
-            "attendance_id": record.attendance_id,
-            "session_id": record.session_id,
-            "student_id": record.student_id,
-            "status": record.status,
-            "marked_at": record.marked_at.isoformat(),
-            "confidence_score": record.confidence_score,
-            "recognition_method": record.recognition_method,
-        },
+        "data": serialize_attendance_record(record),
     }), 201
+
+
+# ============================================================
+# UPDATE / CORRECT ATTENDANCE RECORD (PATCH)
+# ============================================================
+
+@attendance_bp.patch("/sessions/<int:session_id>/records/<int:student_id>")
+@faculty_or_admin_required
+def update_attendance_record(session_id, student_id):
+    claims = get_jwt()
+    user_role = claims.get("role")
+
+    if user_role == "FACULTY":
+        return jsonify({
+            "success": False,
+            "message": "Manual attendance marking by faculty is disabled. Attendance must be recorded via face recognition.",
+        }), 403
+
+    session = db.session.get(AttendanceSession, session_id)
+    if not session:
+        return jsonify({
+            "success": False,
+            "message": "Attendance session not found",
+        }), 404
+
+    student = db.session.get(Student, student_id)
+    if not student:
+        return jsonify({
+            "success": False,
+            "message": "Student not found",
+        }), 404
+
+    enrollment = Enrollment.query.filter_by(
+        student_id=student_id,
+        offering_id=session.offering_id,
+        status="ACTIVE",
+    ).first()
+
+    if not enrollment:
+        return jsonify({
+            "success": False,
+            "message": "Student is not enrolled in this course",
+        }), 403
+
+    data = request.get_json(silent=True) or {}
+    status_val = str(data.get("status", "PRESENT")).upper().strip()
+    if status_val not in {"PRESENT", "ABSENT", "LATE"}:
+        return jsonify({
+            "success": False,
+            "message": "Invalid status. Must be PRESENT, ABSENT, or LATE",
+        }), 400
+
+    recognition_method = str(data.get("recognition_method", "MANUAL")).upper().strip()
+    if recognition_method not in {"FACE", "MANUAL", "SYSTEM"}:
+        recognition_method = "MANUAL"
+
+    record = AttendanceRecord.query.filter_by(
+        session_id=session_id,
+        student_id=student_id,
+    ).first()
+
+    if not record:
+        record = AttendanceRecord(
+            session_id=session_id,
+            student_id=student_id,
+            status=status_val,
+            marked_at=datetime.now(timezone.utc).replace(tzinfo=None),
+            confidence_score=None,
+            recognition_method=recognition_method,
+        )
+        db.session.add(record)
+    else:
+        record.status = status_val
+        record.recognition_method = recognition_method
+        record.marked_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    db.session.commit()
+
+    return jsonify({
+        "success": True,
+        "message": "Attendance record updated successfully",
+        "data": serialize_attendance_record(record),
+    }), 200
 
 
 # ============================================================
@@ -533,17 +654,7 @@ def get_session_attendance(session_id):
         .all()
     )
 
-    data = [
-        {
-            "attendance_id": record.attendance_id,
-            "student_id": record.student_id,
-            "status": record.status,
-            "marked_at": record.marked_at.isoformat(),
-            "confidence_score": record.confidence_score,
-            "recognition_method": record.recognition_method,
-        }
-        for record in records
-    ]
+    data = [serialize_attendance_record(record) for record in records]
 
     return jsonify({
         "success": True,

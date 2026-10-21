@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.extensions import bcrypt, db
 from app.models import (
@@ -13,7 +14,9 @@ from app.models import (
     Department,
     Enrollment,
     Faculty,
+    FaceProfile,
     Student,
+    TimetableEntry,
     User,
 )
 from app.services.auth_service import create_user
@@ -1216,36 +1219,189 @@ def get_student_attendance_summary(student_id):
 # STUDENT MANAGEMENT
 # ============================================================
 
+def _serialize_student(student, include_details=False):
+    is_active = getattr(student.user, "is_active", True)
+    has_face = any(fp.is_active for fp in student.face_profiles) if student.face_profiles else False
+
+    data = {
+        "student_id": student.student_id,
+        "user_id": student.user_id,
+        "name": student.user.name,
+        "email": student.user.email,
+        "enrollment_no": student.enrollment_no,
+        "roll_no": getattr(student, "roll_no", None) or student.enrollment_no,
+        "semester": student.semester,
+        "section": student.section,
+        "academic_year": student.academic_year,
+        "department_id": student.department.department_id if student.department else None,
+        "department_name": student.department.department_name if student.department else "",
+        "department_code": student.department.department_code if student.department else "",
+        "is_active": is_active,
+        "status": "Active" if is_active else "Inactive",
+        "face_registered": has_face,
+        "face_status": "Registered" if has_face else "Not Registered",
+        "photo_url": student.photo_url,
+        "phone": student.phone or "",
+        "guardian_phone": student.guardian_phone or "",
+        "date_of_birth": student.date_of_birth or "",
+        "gender": student.gender or "",
+        "address": student.address or "",
+        "city": student.city or "",
+        "state": student.state or "",
+        "pin_code": student.pin_code or "",
+        "country": student.country or "India",
+        "father_name": student.father_name or "",
+        "mother_name": student.mother_name or "",
+        "blood_group": student.blood_group or "",
+        "admission_date": student.admission_date or "",
+        "admission_year": student.academic_year or "",
+        "batch_id": student.batch_id,
+        "batch_name": student.batch.batch_name if student.batch else None,
+        "attendance_summary": get_student_attendance_summary(student.student_id),
+    }
+
+    if include_details and student.enrollments:
+        data["enrollments"] = [
+            {
+                "enrollment_id": enr.enrollment_id,
+                "offering_id": enr.offering_id,
+                "course_code": enr.offering.course.course_code if enr.offering and enr.offering.course else "",
+                "course_name": enr.offering.course.course_name if enr.offering and enr.offering.course else "",
+                "semester": enr.offering.semester if enr.offering else None,
+                "section": enr.offering.section if enr.offering else "",
+                "status": enr.status,
+            }
+            for enr in student.enrollments
+        ]
+
+    return data
+
+
+@admin_bp.get("/students/summary")
+@admin_required
+def get_students_summary():
+    total_students = Student.query.count()
+    active_students = Student.query.join(Student.user).filter(User.is_active.is_(True)).count()
+    inactive_students = total_students - active_students
+    face_registered = (
+        db.session.query(FaceProfile.student_id)
+        .filter(FaceProfile.is_active.is_(True))
+        .distinct()
+        .count()
+    )
+    face_registered_percentage = (
+        round((face_registered / total_students) * 100, 1)
+        if total_students > 0
+        else 0.0
+    )
+
+    distinct_semesters = [
+        s[0]
+        for s in db.session.query(Student.semester)
+        .filter(Student.semester.isnot(None))
+        .distinct()
+        .order_by(Student.semester.asc())
+        .all()
+    ]
+    distinct_sections = [
+        s[0]
+        for s in db.session.query(Student.section)
+        .filter(Student.section.isnot(None), Student.section != "")
+        .distinct()
+        .order_by(Student.section.asc())
+        .all()
+    ]
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_students": total_students,
+            "active_students": active_students,
+            "inactive_students": inactive_students,
+            "face_registered": face_registered,
+            "face_registered_percentage": face_registered_percentage,
+            "semesters": distinct_semesters,
+            "sections": distinct_sections,
+        },
+    }), 200
+
+
+@admin_bp.get("/students/filter-options")
+@admin_required
+def get_students_filter_options():
+    semesters = [
+        s[0]
+        for s in db.session.query(Student.semester)
+        .filter(Student.semester.isnot(None))
+        .distinct()
+        .order_by(Student.semester.asc())
+        .all()
+    ]
+    sections = [
+        s[0]
+        for s in db.session.query(Student.section)
+        .filter(Student.section.isnot(None), Student.section != "")
+        .distinct()
+        .order_by(Student.section.asc())
+        .all()
+    ]
+    departments = [
+        {
+            "department_id": d.department_id,
+            "department_name": d.department_name,
+            "department_code": d.department_code,
+        }
+        for d in Department.query.order_by(Department.department_name.asc()).all()
+    ]
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "semesters": semesters,
+            "sections": sections,
+            "departments": departments,
+        },
+    }), 200
+
+
 @admin_bp.get("/students")
 @admin_required
 def get_students():
-    students = (
+    query = (
         Student.query
         .join(Student.user)
         .join(Student.department)
-        .order_by(Student.student_id.asc())
-        .all()
     )
 
-    data = [
-        {
-            "student_id": student.student_id,
-            "user_id": student.user_id,
-            "name": student.user.name,
-            "email": student.user.email,
-            "enrollment_no": student.enrollment_no,
-            "semester": student.semester,
-            "section": student.section,
-            "academic_year": student.academic_year,
-            "department_id": student.department.department_id,
-            "department_name": student.department.department_name,
-            "department_code": student.department.department_code,
-            "attendance_summary": get_student_attendance_summary(
-                student.student_id
-            ),
-        }
-        for student in students
-    ]
+    department_id = request.args.get("department_id", type=int)
+    semester = request.args.get("semester", type=int)
+    section = request.args.get("section")
+    status = request.args.get("status")
+    search = request.args.get("search", "").strip()
+
+    if department_id:
+        query = query.filter(Student.department_id == department_id)
+    if semester:
+        query = query.filter(Student.semester == semester)
+    if section and section not in ["All", "all", "All Sections", ""]:
+        query = query.filter(Student.section == section)
+    if status in ["ACTIVE", "Active"]:
+        query = query.filter(User.is_active.is_(True))
+    elif status in ["INACTIVE", "Inactive"]:
+        query = query.filter(User.is_active.is_(False))
+
+    if search:
+        search_pattern = f"%{search}%"
+        query = query.filter(
+            db.or_(
+                User.name.ilike(search_pattern),
+                User.email.ilike(search_pattern),
+                Student.enrollment_no.ilike(search_pattern),
+            )
+        )
+
+    students = query.order_by(Student.student_id.asc()).all()
+    data = [_serialize_student(student) for student in students]
 
     return jsonify({
         "success": True,
@@ -1272,20 +1428,7 @@ def get_student(student_id):
 
     return jsonify({
         "success": True,
-        "data": {
-            "student_id": student.student_id,
-            "user_id": student.user_id,
-            "name": student.user.name,
-            "email": student.user.email,
-            "enrollment_no": student.enrollment_no,
-            "semester": student.semester,
-            "section": student.section,
-            "academic_year": student.academic_year,
-            "department_id": student.department.department_id,
-            "department_name": student.department.department_name,
-            "department_code": student.department.department_code,
-            "attendance_summary": get_student_attendance_summary(student.student_id),
-        },
+        "data": _serialize_student(student, include_details=True),
     }), 200
 
 
@@ -2542,32 +2685,162 @@ def delete_course_offering(offering_id):
 # FACULTY MANAGEMENT
 # ============================================================
 
+@admin_bp.get("/faculty/summary")
+@admin_required
+def get_faculty_summary():
+    total_faculty = Faculty.query.count()
+    active_faculty = (
+        Faculty.query
+        .join(Faculty.user)
+        .filter(User.is_active.is_(True))
+        .count()
+    )
+    inactive_faculty = (
+        Faculty.query
+        .join(Faculty.user)
+        .filter(User.is_active.is_(False))
+        .count()
+    )
+
+    total_departments = Department.query.count()
+
+    # Total classes: course offerings assigned to faculty
+    total_classes = CourseOffering.query.filter(
+        CourseOffering.faculty_id.isnot(None)
+    ).count()
+
+    distinct_courses = (
+        db.session.query(CourseOffering.course_id)
+        .filter(CourseOffering.faculty_id.isnot(None))
+        .distinct()
+        .count()
+    )
+
+    # Active semesters with assigned faculty offerings
+    semester_rows = (
+        db.session.query(CourseOffering.semester)
+        .filter(
+            CourseOffering.faculty_id.isnot(None),
+            CourseOffering.semester.isnot(None),
+        )
+        .distinct()
+        .order_by(CourseOffering.semester.asc())
+        .all()
+    )
+    active_semesters = [r[0] for r in semester_rows if r[0] is not None]
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_faculty": total_faculty,
+            "active_faculty": active_faculty,
+            "inactive_faculty": inactive_faculty,
+            "total_departments": total_departments,
+            "total_classes": total_classes,
+            "distinct_courses": distinct_courses,
+            "active_semesters": active_semesters,
+            "semester_display": ", ".join(str(s) for s in active_semesters) if active_semesters else "N/A",
+        },
+    }), 200
+
+
+@admin_bp.get("/faculty/filter-options")
+@admin_required
+def get_faculty_filter_options():
+    departments = Department.query.order_by(
+        Department.department_name.asc()
+    ).all()
+    dept_data = [
+        {
+            "department_id": d.department_id,
+            "department_name": d.department_name,
+            "department_code": d.department_code,
+        }
+        for d in departments
+    ]
+
+    semester_rows = (
+        db.session.query(CourseOffering.semester)
+        .filter(CourseOffering.semester.isnot(None))
+        .distinct()
+        .order_by(CourseOffering.semester.asc())
+        .all()
+    )
+    semesters = [r[0] for r in semester_rows if r[0] is not None]
+
+    courses = Course.query.order_by(Course.course_code.asc()).all()
+    course_data = [
+        {
+            "course_id": c.course_id,
+            "course_code": c.course_code,
+            "course_name": c.course_name,
+        }
+        for c in courses
+    ]
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "departments": dept_data,
+            "semesters": semesters,
+            "courses": course_data,
+        },
+    }), 200
+
+
 @admin_bp.get("/faculty")
 @admin_required
 def get_faculty():
     faculty_members = (
         Faculty.query
-        .join(Faculty.user)
-        .join(Faculty.department)
+        .options(
+            joinedload(Faculty.user),
+            joinedload(Faculty.department),
+            selectinload(Faculty.course_offerings).joinedload(CourseOffering.course),
+        )
         .order_by(Faculty.faculty_id.asc())
         .all()
     )
 
-    data = [
-        {
+    data = []
+    for faculty in faculty_members:
+        assigned_courses = sorted(list({
+            off.course.course_code
+            for off in faculty.course_offerings
+            if off.course and off.course.course_code
+        }))
+        assigned_course_names = sorted(list({
+            off.course.course_name
+            for off in faculty.course_offerings
+            if off.course and off.course.course_name
+        }))
+        semesters = sorted(list({
+            off.semester
+            for off in faculty.course_offerings
+            if off.semester is not None
+        }))
+
+        data.append({
             "faculty_id": faculty.faculty_id,
             "user_id": faculty.user_id,
-            "name": faculty.user.name,
-            "email": faculty.user.email,
+            "name": faculty.user.name if faculty.user else "N/A",
+            "email": faculty.user.email if faculty.user else "N/A",
+            "phone": faculty.phone or "",
             "employee_id": faculty.employee_id,
             "designation": faculty.designation,
-            "department_id": faculty.department.department_id,
-            "department_name": faculty.department.department_name,
-            "department_code": faculty.department.department_code,
-            "is_active": faculty.user.is_active,
-        }
-        for faculty in faculty_members
-    ]
+            "department_id": faculty.department.department_id if faculty.department else None,
+            "department_name": faculty.department.department_name if faculty.department else "N/A",
+            "department_code": faculty.department.department_code if faculty.department else "N/A",
+            "date_of_joining": faculty.date_of_joining or "",
+            "qualification": faculty.qualification or "",
+            "specialization": faculty.specialization or "",
+            "office_cabin": faculty.office_cabin or "",
+            "is_active": faculty.user.is_active if faculty.user else False,
+            "assigned_courses": assigned_courses,
+            "assigned_course_names": assigned_course_names,
+            "assigned_classes_count": len(faculty.course_offerings),
+            "semesters": semesters,
+        })
 
     return jsonify({
         "success": True,
@@ -2580,8 +2853,13 @@ def get_faculty():
 def get_faculty_by_id(faculty_id):
     faculty = (
         Faculty.query
-        .join(Faculty.user)
-        .join(Faculty.department)
+        .options(
+            joinedload(Faculty.user),
+            joinedload(Faculty.department),
+            selectinload(Faculty.course_offerings).joinedload(CourseOffering.course),
+            selectinload(Faculty.course_offerings).selectinload(CourseOffering.enrollments),
+            selectinload(Faculty.course_offerings).selectinload(CourseOffering.timetable_entries),
+        )
         .filter(Faculty.faculty_id == faculty_id)
         .first()
     )
@@ -2592,19 +2870,100 @@ def get_faculty_by_id(faculty_id):
             "message": "Faculty not found",
         }), 404
 
+    classes_list = []
+    schedule_list = []
+
+    for off in faculty.course_offerings:
+        c_code = off.course.course_code if off.course else "N/A"
+        c_name = off.course.course_name if off.course else "Unknown Course"
+        classes_list.append({
+            "offering_id": off.offering_id,
+            "course_id": off.course_id,
+            "course_code": c_code,
+            "course_name": c_name,
+            "semester": off.semester,
+            "section": off.section,
+            "academic_year": off.academic_year,
+            "room": off.room or "TBD",
+            "enrolled_students": len(off.enrollments),
+        })
+
+        for tt in off.timetable_entries:
+            start_str = (
+                tt.start_time.strftime("%H:%M")
+                if hasattr(tt.start_time, "strftime")
+                else str(tt.start_time)
+            )
+            end_str = (
+                tt.end_time.strftime("%H:%M")
+                if hasattr(tt.end_time, "strftime")
+                else str(tt.end_time)
+            )
+            schedule_list.append({
+                "timetable_entry_id": tt.timetable_entry_id,
+                "offering_id": off.offering_id,
+                "course_code": c_code,
+                "course_name": c_name,
+                "semester": off.semester,
+                "section": off.section,
+                "day_of_week": tt.day_of_week,
+                "start_time": start_str,
+                "end_time": end_str,
+                "room": tt.room or off.room or "TBD",
+            })
+
+    day_order = {
+        "Monday": 1,
+        "Tuesday": 2,
+        "Wednesday": 3,
+        "Thursday": 4,
+        "Friday": 5,
+        "Saturday": 6,
+        "Sunday": 7,
+    }
+    schedule_list.sort(
+        key=lambda x: (day_order.get(x["day_of_week"], 99), x["start_time"])
+    )
+
+    assigned_courses = sorted(list({
+        off.course.course_code
+        for off in faculty.course_offerings
+        if off.course and off.course.course_code
+    }))
+    semesters = sorted(list({
+        off.semester
+        for off in faculty.course_offerings
+        if off.semester is not None
+    }))
+
     return jsonify({
         "success": True,
         "data": {
             "faculty_id": faculty.faculty_id,
             "user_id": faculty.user_id,
-            "name": faculty.user.name,
-            "email": faculty.user.email,
+            "name": faculty.user.name if faculty.user else "N/A",
+            "email": faculty.user.email if faculty.user else "N/A",
+            "phone": faculty.phone or "",
             "employee_id": faculty.employee_id,
             "designation": faculty.designation,
-            "department_id": faculty.department.department_id,
-            "department_name": faculty.department.department_name,
-            "department_code": faculty.department.department_code,
-            "is_active": faculty.user.is_active,
+            "department_id": faculty.department.department_id if faculty.department else None,
+            "department_name": faculty.department.department_name if faculty.department else "N/A",
+            "department_code": faculty.department.department_code if faculty.department else "N/A",
+            "date_of_joining": faculty.date_of_joining or "",
+            "qualification": faculty.qualification or "",
+            "specialization": faculty.specialization or "",
+            "office_cabin": faculty.office_cabin or "",
+            "address": faculty.address or "",
+            "city": faculty.city or "",
+            "state": faculty.state or "",
+            "pin_code": faculty.pin_code or "",
+            "country": faculty.country or "India",
+            "is_active": faculty.user.is_active if faculty.user else False,
+            "assigned_courses": assigned_courses,
+            "assigned_classes_count": len(faculty.course_offerings),
+            "semesters": semesters,
+            "classes": classes_list,
+            "schedule": schedule_list,
         },
     }), 200
 
@@ -2735,11 +3094,22 @@ def create_faculty():
     # Create Faculty profile
     # -------------------------
 
+    phone = str(data.get("phone", "")).strip() or None
+    date_of_joining = str(data.get("date_of_joining", "")).strip() or None
+    qualification = str(data.get("qualification", "")).strip() or None
+    specialization = str(data.get("specialization", "")).strip() or None
+    office_cabin = str(data.get("office_cabin", "")).strip() or None
+
     faculty = Faculty(
         user_id=user.user_id,
         department_id=department.department_id,
         employee_id=employee_id,
         designation=designation,
+        phone=phone,
+        date_of_joining=date_of_joining,
+        qualification=qualification,
+        specialization=specialization,
+        office_cabin=office_cabin,
     )
 
     try:
@@ -2908,6 +3278,17 @@ def update_faculty(faculty_id):
             }), 404
 
         faculty.department_id = department.department_id
+
+    if "phone" in data:
+        faculty.phone = str(data["phone"]).strip() or None
+    if "date_of_joining" in data:
+        faculty.date_of_joining = str(data["date_of_joining"]).strip() or None
+    if "qualification" in data:
+        faculty.qualification = str(data["qualification"]).strip() or None
+    if "specialization" in data:
+        faculty.specialization = str(data["specialization"]).strip() or None
+    if "office_cabin" in data:
+        faculty.office_cabin = str(data["office_cabin"]).strip() or None
 
     try:
         db.session.commit()

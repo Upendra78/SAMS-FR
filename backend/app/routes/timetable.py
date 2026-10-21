@@ -105,10 +105,32 @@ def get_faculty_timetable():
             "message": "Faculty profile not found",
         }), 404
 
-    entries = (
+    offering_id = request.args.get("offering_id", type=int)
+
+    substitute_entry_ids = [
+        adj.timetable_entry_id
+        for adj in FacultyAdjustment.query.filter_by(
+            substitute_faculty_id=faculty.faculty_id,
+            status="APPROVED",
+        ).all()
+    ]
+
+    query = (
         TimetableEntry.query
         .join(CourseOffering)
-        .filter(CourseOffering.faculty_id == faculty.faculty_id)
+        .filter(
+            db.or_(
+                CourseOffering.faculty_id == faculty.faculty_id,
+                TimetableEntry.timetable_entry_id.in_(substitute_entry_ids),
+            ) if substitute_entry_ids else (CourseOffering.faculty_id == faculty.faculty_id)
+        )
+    )
+
+    if offering_id is not None:
+        query = query.filter(TimetableEntry.offering_id == offering_id)
+
+    entries = (
+        query
         .order_by(
             TimetableEntry.day_of_week,
             TimetableEntry.start_time,

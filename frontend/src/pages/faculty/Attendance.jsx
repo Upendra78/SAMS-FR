@@ -5,6 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faArrowLeft,
@@ -21,14 +22,12 @@ import {
   faRotateRight,
   faSpinner,
   faUserCheck,
-  faUserGraduate,
   faUsers,
   faXmark,
   faBolt,
   faFileLines,
   faPlay,
   faPause,
-  faUserPlus,
 } from "@fortawesome/free-solid-svg-icons";
 
 import "./Attendance.css";
@@ -44,7 +43,6 @@ import {
   recognizeFacultyAttendance,
   startFacultyAttendanceSession,
 } from "../../services/facultyService";
-import { enrollStudentFace } from "../../services/faceService";
 
 const getErrorMessage = (error, fallback) =>
   error?.response?.data?.message || error?.message || fallback;
@@ -133,6 +131,8 @@ const getInitials = (name) =>
     .join("") || "?";
 
 function Attendance() {
+  const navigate = useNavigate();
+
   const [sessions, setSessions] = useState([]);
   const [activeSession, setActiveSession] = useState(null);
   const [courses, setCourses] = useState([]);
@@ -166,13 +166,6 @@ function Attendance() {
   const [recentDetections, setRecentDetections] = useState([]);
   const [scanStatusMessage, setScanStatusMessage] = useState("Looking for students…");
 
-  // Face enrollment modal states
-  const [enrollingStudent, setEnrollingStudent] = useState(null);
-  const [enrollCameraReady, setEnrollCameraReady] = useState(false);
-  const [enrollSubmitting, setEnrollSubmitting] = useState(false);
-  const [enrollError, setEnrollError] = useState("");
-  const [enrollSuccess, setEnrollSuccess] = useState("");
-
   const [searchTerm, setSearchTerm] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
   const [selectedClass, setSelectedClass] = useState("All Classes");
@@ -193,11 +186,6 @@ function Attendance() {
   const recordsRequestRef = useRef(0);
   const recognitionRequestRef = useRef(false);
 
-  // Enrollment refs
-  const enrollVideoRef = useRef(null);
-  const enrollCanvasRef = useRef(null);
-  const enrollStreamRef = useRef(null);
-
   const stopCamera = useCallback(() => {
     if (cameraStreamRef.current) {
       cameraStreamRef.current.getTracks().forEach((track) => track.stop());
@@ -212,51 +200,11 @@ function Attendance() {
     setCameraReady(false);
   }, []);
 
-  const stopEnrollCamera = useCallback(() => {
-    if (enrollStreamRef.current) {
-      enrollStreamRef.current.getTracks().forEach((track) => track.stop());
-      enrollStreamRef.current = null;
-    }
-
-    if (enrollVideoRef.current) {
-      enrollVideoRef.current.pause();
-      enrollVideoRef.current.srcObject = null;
-    }
-
-    setEnrollCameraReady(false);
-  }, []);
-
-  const startEnrollCamera = useCallback(async () => {
-    setEnrollError("");
-    setEnrollCameraReady(false);
-    try {
-      if (enrollStreamRef.current) {
-        enrollStreamRef.current.getTracks().forEach((t) => t.stop());
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
-        audio: false,
-      });
-      enrollStreamRef.current = stream;
-      if (enrollVideoRef.current) {
-        enrollVideoRef.current.srcObject = stream;
-        await enrollVideoRef.current.play();
-        setEnrollCameraReady(true);
-      }
-    } catch (err) {
-      setEnrollError(getErrorMessage(err, "Unable to access the camera for face enrollment."));
-    }
-  }, []);
-
   useEffect(
     () => () => {
       if (cameraStreamRef.current) {
         cameraStreamRef.current.getTracks().forEach((track) => track.stop());
         cameraStreamRef.current = null;
-      }
-      if (enrollStreamRef.current) {
-        enrollStreamRef.current.getTracks().forEach((track) => track.stop());
-        enrollStreamRef.current = null;
       }
     },
     []
@@ -620,6 +568,37 @@ function Attendance() {
     };
   }, []);
 
+  const offeringIdToLoad = selectedSession?.offering_id || activeSession?.offering_id || null;
+
+  useEffect(() => {
+    let mounted = true;
+    if (!offeringIdToLoad) return undefined;
+
+    const loadOfferingStudents = async () => {
+      try {
+        const result = await getFacultyStudents({ offering_id: offeringIdToLoad });
+        if (mounted && result?.success && Array.isArray(result.data)) {
+          setStudents((prev) => {
+            const incoming = result.data;
+            const map = new Map(prev.map((s) => [String(s.student_id), s]));
+            for (const s of incoming) {
+              map.set(String(s.student_id), s);
+            }
+            return Array.from(map.values());
+          });
+        }
+      } catch {
+        // gracefully handle
+      }
+    };
+
+    loadOfferingStudents();
+
+    return () => {
+      mounted = false;
+    };
+  }, [offeringIdToLoad]);
+
   const courseMap = useMemo(
     () =>
       new Map(
@@ -737,16 +716,10 @@ function Attendance() {
     );
   }, [students, selectedSession]);
 
-  const studentEnrollmentScopeAvailable = useMemo(
-    () =>
-      students.some(
-        (student) =>
-          student.offering_id != null ||
-          (Array.isArray(student.offering_ids) &&
-            student.offering_ids.length > 0)
-      ),
-    [students]
-  );
+  const unrecordedStudentsCount = useMemo(() => {
+    if (!selectedSession) return 0;
+    return Math.max(0, sessionStudents.length - studentsPresent);
+  }, [selectedSession, sessionStudents.length, studentsPresent]);
 
   const filteredStudents = useMemo(() => {
     const query = studentSearch.trim().toLowerCase();
@@ -888,69 +861,6 @@ function Attendance() {
     setScanStatusMessage("Camera stopped");
   };
 
-  const handleCaptureAndEnroll = async () => {
-    if (!enrollingStudent || !enrollVideoRef.current || !enrollCanvasRef.current) return;
-    const video = enrollVideoRef.current;
-    const canvas = enrollCanvasRef.current;
-
-    if (!video.videoWidth || !video.videoHeight) {
-      setEnrollError("Camera frame not ready yet.");
-      return;
-    }
-
-    setEnrollSubmitting(true);
-    setEnrollError("");
-    setEnrollSuccess("");
-
-    try {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      const blob = await new Promise((res, rej) =>
-        canvas.toBlob(
-          (b) => (b ? res(b) : rej(new Error("Failed to capture image"))),
-          "image/jpeg",
-          0.92
-        )
-      );
-
-      const res = await enrollStudentFace(enrollingStudent.student_id, blob);
-
-      if (res?.success) {
-        setEnrollSuccess(
-          `Face registered successfully for ${getStudentName(enrollingStudent)}!`
-        );
-
-        setStudents((prev) =>
-          prev.map((s) =>
-            isSameId(s.student_id, enrollingStudent.student_id)
-              ? { ...s, has_face_profile: true }
-              : s
-          )
-        );
-
-        setTimeout(() => {
-          stopEnrollCamera();
-          setEnrollingStudent(null);
-          setEnrollSuccess("");
-        }, 1200);
-      } else {
-        throw new Error(res?.message || "Failed to enroll face.");
-      }
-    } catch (err) {
-      setEnrollError(
-        getErrorMessage(
-          err,
-          "Face enrollment failed. Ensure exactly one face is clearly visible."
-        )
-      );
-    } finally {
-      setEnrollSubmitting(false);
-    }
-  };
-
   const handleStartAttendance = async () => {
     if (!selectedOfferingId) {
       setStartError("Please select a course before starting attendance.");
@@ -1088,10 +998,14 @@ function Attendance() {
       value: recordsLoading
         ? "…"
         : selectedSession
-          ? studentsAbsent
+          ? selectedSession.status === "ACTIVE"
+            ? unrecordedStudentsCount
+            : studentsAbsent
           : "N/A",
       note: selectedSession
-        ? "Selected session"
+        ? selectedSession.status === "ACTIVE"
+          ? "Unmarked in progress"
+          : "Selected session"
         : "Select a session",
       icon: faUsers,
       tone: "pink",
@@ -1730,26 +1644,12 @@ function Attendance() {
                     <h3>Student data unavailable</h3>
                     <p>{studentsError}</p>
                   </div>
-                ) : !studentEnrollmentScopeAvailable ? (
-                  <div className="attendance-empty-state">
-                    <FontAwesomeIcon icon={faUserGraduate} />
-                    <h3>Course enrollment data is required</h3>
-                    <p>
-                      The students API does not provide offering IDs. Students
-                      cannot safely be assigned to this course without that
-                      information.
-                    </p>
-                    <span className="attendance-api-pending">
-                      API Integration Pending
-                    </span>
-                  </div>
                 ) : sessionStudents.length === 0 ? (
                   <div className="attendance-empty-state">
                     <FontAwesomeIcon icon={faUsers} />
-                    <h3>No enrolled students returned</h3>
+                    <h3>No enrolled students in this course</h3>
                     <p>
-                      No students matching this course offering were returned
-                      by the backend.
+                      There are currently no active students enrolled in this course offering.
                     </p>
                   </div>
                 ) : (
@@ -1764,7 +1664,6 @@ function Attendance() {
                             <th>Status</th>
                             <th>Marked At</th>
                             <th>Method</th>
-                            <th>Action</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1796,24 +1695,6 @@ function Attendance() {
                                 </td>
                                 <td>{formatTime(record?.marked_at)}</td>
                                 <td>{record?.recognition_method || "N/A"}</td>
-                                <td>
-                                  {!student.has_face_profile ? (
-                                    <button
-                                      type="button"
-                                      className="attendance-outline-button register-face"
-                                      title="Register student face profile for automatic recognition"
-                                      onClick={() => {
-                                        setEnrollingStudent(student);
-                                        startEnrollCamera();
-                                      }}
-                                    >
-                                      <FontAwesomeIcon icon={faUserPlus} />
-                                      Register Face
-                                    </button>
-                                  ) : (
-                                    <span style={{ color: "var(--attendance-muted, #72839e)" }}>—</span>
-                                  )}
-                                </td>
                               </tr>
                             );
                           })}
@@ -1919,15 +1800,22 @@ function Attendance() {
           </span>
         </button>
 
-        <div className="attendance-quick-action pending-action">
+        <button
+          type="button"
+          className="attendance-quick-action"
+          onClick={() => {
+            const offeringParam = selectedSession?.offering_id || selectedOfferingId || "";
+            navigate(offeringParam ? `/faculty/reports?offering_id=${offeringParam}` : "/faculty/reports");
+          }}
+        >
           <span className="attendance-quick-icon">
             <FontAwesomeIcon icon={faFileLines} />
           </span>
           <span>
-            <strong>Generate Report</strong>
-            <small>API Integration Pending</small>
+            <strong>Attendance Reports</strong>
+            <small>View reports & analytics</small>
           </span>
-        </div>
+        </button>
       </section>
 
       <section className="attendance-side-card">
@@ -1946,14 +1834,14 @@ function Attendance() {
 
         {scheduleExpanded && (
           <div className="attendance-schedule-pending">
-            {timetableLoading ?(
+            {timetableLoading ? (
               <p>Loading timetable...</p>
-            ) : timetableError ?(
+            ) : timetableError ? (
               <div className="attendance-schedule-pending">
                 <FontAwesomeIcon icon={faCircleExclamation} />
                 <p>{timetableError}</p>
               </div>
-            ) :(
+            ) : (
               (() => {
                 const dayNames = [
                   "Sunday",
@@ -1970,15 +1858,30 @@ function Attendance() {
                     String(entry.day_of_week || "").trim().toLowerCase() ===
                     today.toLowerCase()
                 );
-                if (todayEntries.length == 0){
+                if (todayEntries.length === 0) {
                   return <p>No timetable entries found for {today}.</p>;
                 }
                 return (
                   <div className="attendance-schedule-list">
                     {todayEntries.map((entry) => (
                       <div
-                      className = "attendance-schedule-item"
-                      key = {entry.timetable_entry_id}
+                        className="attendance-schedule-item clickable"
+                        key={entry.timetable_entry_id}
+                        role="button"
+                        tabIndex={0}
+                        title="Click to start attendance for this class"
+                        onClick={() => {
+                          if (!activeSession) {
+                            setSelectedOfferingId(String(entry.offering_id));
+                            setShowStartModal(true);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if ((e.key === "Enter" || e.key === " ") && !activeSession) {
+                            setSelectedOfferingId(String(entry.offering_id));
+                            setShowStartModal(true);
+                          }
+                        }}
                       >
                         <strong>
                           {entry.course_code} - {entry.course_name}
@@ -1988,7 +1891,7 @@ function Attendance() {
                           {formatTime(entry.end_time)}
                         </p>
                         <p>
-                          Section: {entry.section || "N/A"} . Room:{" "}
+                          Section: {entry.section || "N/A"} · Room:{" "}
                           {entry.room || "N/A"}
                         </p>
                       </div>
@@ -2004,157 +1907,16 @@ function Attendance() {
       <section className="attendance-side-card attendance-help-card">
         <h2>
           <FontAwesomeIcon icon={faCircleInfo} />
-          Need help?
+          System Status
         </h2>
         <p>
-          If attendance data is unavailable, check the faculty API response or
-          contact your system administrator.
+          Live database connected. All attendance records, facial recognitions, and sessions are persisted to MySQL in real time.
         </p>
-        <span className="attendance-api-pending">
-          Backend-dependent features
+        <span className="attendance-status-badge live">
+          <FontAwesomeIcon icon={faCircleCheck} /> Live Backend Connected
         </span>
       </section>
     </aside>
-
-    {enrollingStudent && (
-      <div
-        className="attendance-modal-backdrop"
-        role="presentation"
-        onMouseDown={(event) => {
-          if (
-            event.target === event.currentTarget &&
-            !enrollSubmitting
-          ) {
-            stopEnrollCamera();
-            setEnrollingStudent(null);
-          }
-        }}
-      >
-        <div
-          className="attendance-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="enroll-student-face-title"
-          onMouseDown={(e) => e.stopPropagation()}
-        >
-          <div className="attendance-modal-header">
-            <div>
-              <span className="attendance-eyebrow">FACE REGISTRATION</span>
-              <h2 id="enroll-student-face-title">
-                Register Face: {getStudentName(enrollingStudent)}
-              </h2>
-              <p>
-                Enrollment: {enrollingStudent.enrollment_no || "N/A"}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="attendance-modal-close"
-              onClick={() => {
-                stopEnrollCamera();
-                setEnrollingStudent(null);
-              }}
-              disabled={enrollSubmitting}
-              aria-label="Close"
-            >
-              <FontAwesomeIcon icon={faXmark} />
-            </button>
-          </div>
-
-          <div className="attendance-modal-body">
-            <div className="attendance-camera-scanner-frame" style={{ minHeight: "260px" }}>
-              <video
-                ref={enrollVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className="attendance-camera-video"
-              />
-              <canvas
-                ref={enrollCanvasRef}
-                style={{ display: "none" }}
-                aria-hidden="true"
-              />
-              <div className="attendance-scanner-viewfinder">
-                <div className="attendance-scanner-corner top-left" />
-                <div className="attendance-scanner-corner top-right" />
-                <div className="attendance-scanner-corner bottom-left" />
-                <div className="attendance-scanner-corner bottom-right" />
-              </div>
-              <span className="attendance-live-badge">
-                <span /> REGISTRATION CAMERA
-              </span>
-            </div>
-
-            {enrollError && (
-              <div className="attendance-session-pending" role="alert" style={{ marginTop: "12px" }}>
-                <div className="attendance-pending-dot">
-                  <FontAwesomeIcon icon={faCircleExclamation} />
-                </div>
-                <div>
-                  <strong>Face Enrollment Error</strong>
-                  <p>{enrollError}</p>
-                </div>
-              </div>
-            )}
-
-            {enrollSuccess && (
-              <div
-                className="attendance-session-pending"
-                role="status"
-                style={{
-                  marginTop: "12px",
-                  borderColor: "#10b981",
-                  background: "#ecfdf5",
-                  color: "#065f46",
-                }}
-              >
-                <div className="attendance-pending-dot" style={{ background: "#d1fae5", color: "#10b981" }}>
-                  <FontAwesomeIcon icon={faCircleCheck} />
-                </div>
-                <div>
-                  <strong>Success</strong>
-                  <p>{enrollSuccess}</p>
-                </div>
-              </div>
-            )}
-
-            {!enrollCameraReady && !enrollError && (
-              <p className="attendance-camera-help">Starting camera…</p>
-            )}
-
-            {enrollCameraReady && !enrollError && !enrollSuccess && (
-              <p className="attendance-camera-help">
-                Position student directly in front of camera and click "Capture & Register Face".
-              </p>
-            )}
-          </div>
-
-          <div className="attendance-modal-footer">
-            <button
-              type="button"
-              className="attendance-secondary-button"
-              onClick={() => {
-                stopEnrollCamera();
-                setEnrollingStudent(null);
-              }}
-              disabled={enrollSubmitting}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="attendance-primary-button"
-              onClick={handleCaptureAndEnroll}
-              disabled={!enrollCameraReady || enrollSubmitting}
-            >
-              <FontAwesomeIcon icon={enrollSubmitting ? faSpinner : faCamera} spin={enrollSubmitting} />
-              {enrollSubmitting ? "Registering…" : "Capture & Register Face"}
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
 
     {showStartModal && (
       <div

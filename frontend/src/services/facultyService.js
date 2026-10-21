@@ -24,8 +24,14 @@ export async function changeFacultyPassword(passwordData) {
   return response.data;
 }
 
-export async function getFacultyCourses() {
-  const response = await api.get("/faculty/courses");
+export async function getFacultyClassesSummary(params = {}) {
+  const response = await api.get("/faculty/classes/summary", { params });
+
+  return response.data;
+}
+
+export async function getFacultyCourses(params = {}) {
+  const response = await api.get("/faculty/courses", { params });
 
   return response.data;
 }
@@ -38,15 +44,16 @@ export async function getFacultyCourseDetails(courseId) {
   return response.data;
 }
 
-export async function getFacultyStudents() {
-  const response = await api.get("/faculty/students");
+export async function getFacultyStudents(params = {}) {
+  const response = await api.get("/faculty/students", { params });
 
   return response.data;
 }
 
-export async function getFacultyAttendanceSessions() {
+export async function getFacultyAttendanceSessions(params = {}) {
   const response = await api.get(
-    "/faculty/attendance/sessions"
+    "/faculty/attendance/sessions",
+    { params }
   );
 
   return response.data;
@@ -93,18 +100,6 @@ export async function getFacultyAttendanceRecords(
   return response.data;
 }
 
-export async function markFacultyAttendance(
-  sessionId,
-  attendanceData
-) {
-  const response = await api.post(
-    `/faculty/attendance/sessions/${sessionId}/records`,
-    attendanceData
-  );
-
-  return response.data;
-}
-
 export async function recognizeFacultyAttendance(
   sessionId,
   imageBlob
@@ -130,8 +125,8 @@ export async function recognizeFacultyAttendance(
   return response.data;
 }
 
-export async function getFacultyTimetable() {
-  const response = await api.get("/timetable/faculty");
+export async function getFacultyTimetable(params = {}) {
+  const response = await api.get("/timetable/faculty", { params });
 
   return response.data;
 }

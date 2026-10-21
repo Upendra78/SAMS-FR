@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
@@ -250,6 +250,48 @@ class TestAdminFaculty(unittest.TestCase):
             headers=self.admin_headers(),
         )
         self.assertEqual(response.status_code, 404)
+
+    def test_get_faculty_summary(self):
+        response = self.client.get(
+            "/api/admin/faculty/summary",
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        data = body["data"]
+        self.assertEqual(data["total_faculty"], 1)
+        self.assertEqual(data["total_departments"], 1)
+        self.assertIn("total_classes", data)
+        self.assertIn("active_semesters", data)
+
+    def test_get_faculty_filter_options(self):
+        response = self.client.get(
+            "/api/admin/faculty/filter-options",
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        data = body["data"]
+        self.assertIn("departments", data)
+        self.assertIn("semesters", data)
+        self.assertIn("courses", data)
+        self.assertEqual(len(data["departments"]), 1)
+
+    def test_get_faculty_detail_includes_classes_and_schedule(self):
+        response = self.client.get(
+            f"/api/admin/faculty/{self.faculty_id}",
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        data = body["data"]
+        self.assertIn("classes", data)
+        self.assertIn("schedule", data)
+        self.assertIn("assigned_courses", data)
+        self.assertIn("phone", data)
 
 
 if __name__ == "__main__":

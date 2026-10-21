@@ -2,7 +2,17 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
 from app.extensions import db, bcrypt
-from app.models import Faculty, CourseOffering, Enrollment, User, Department
+from app.models import (
+    Faculty,
+    CourseOffering,
+    Enrollment,
+    User,
+    Department,
+    AttendanceRecord,
+    AttendanceSession,
+    FacultyAdjustment,
+    TimetableEntry,
+)
 from app.utils.auth import faculty_required, faculty_or_admin_required
 
 
@@ -248,6 +258,179 @@ def change_faculty_password():
     }), 200
 
 # ============================================================
+# GET FACULTY CLASSES SUMMARY
+# ============================================================
+
+@faculty_bp.get("/classes/summary")
+@faculty_required
+def get_faculty_classes_summary():
+    faculty = get_current_faculty()
+
+    if not faculty:
+        return jsonify({
+            "success": False,
+            "message": "Faculty profile not found. Please contact administration.",
+        }), 404
+
+    semester = request.args.get("semester", type=int)
+    academic_year = request.args.get("academic_year")
+    section = request.args.get("section")
+    day = request.args.get("day")
+
+    query = CourseOffering.query.filter_by(faculty_id=faculty.faculty_id)
+    if semester is not None:
+        query = query.filter(CourseOffering.semester == semester)
+    if academic_year and academic_year not in ["All", "all", ""]:
+        query = query.filter(CourseOffering.academic_year == academic_year)
+    if section and section not in ["All", "all", "All Sections", ""]:
+        query = query.filter(CourseOffering.section == section)
+    if day and day not in ["All", "all", "All Days", ""]:
+        day_match = (
+            db.session.query(TimetableEntry.offering_id)
+            .filter(db.func.lower(TimetableEntry.day_of_week) == day.strip().lower())
+            .subquery()
+        )
+        query = query.filter(CourseOffering.offering_id.in_(day_match))
+
+    offerings = query.all()
+    offering_ids = [o.offering_id for o in offerings]
+    distinct_courses_count = len(set(o.course_id for o in offerings))
+    total_offerings_count = len(offerings)
+    active_semesters_count = len(set(o.semester for o in offerings if o.semester is not None))
+
+    if offering_ids:
+        unique_student_ids = (
+            db.session.query(Enrollment.student_id)
+            .filter(
+                Enrollment.offering_id.in_(offering_ids),
+                Enrollment.status == "ACTIVE",
+            )
+            .distinct()
+            .all()
+        )
+        unique_students_count = len(unique_student_ids)
+        total_enrollments_count = (
+            Enrollment.query
+            .filter(
+                Enrollment.offering_id.in_(offering_ids),
+                Enrollment.status == "ACTIVE",
+            )
+            .count()
+        )
+    else:
+        unique_students_count = 0
+        total_enrollments_count = 0
+
+    substitute_entry_ids = [
+        adj.timetable_entry_id
+        for adj in FacultyAdjustment.query.filter_by(
+            substitute_faculty_id=faculty.faculty_id,
+            status="APPROVED",
+        ).all()
+    ]
+    tt_query = TimetableEntry.query.join(CourseOffering).filter(
+        db.or_(
+            CourseOffering.faculty_id == faculty.faculty_id,
+            TimetableEntry.timetable_entry_id.in_(substitute_entry_ids),
+        ) if substitute_entry_ids else (CourseOffering.faculty_id == faculty.faculty_id)
+    )
+    if semester is not None:
+        tt_query = tt_query.filter(CourseOffering.semester == semester)
+    if academic_year and academic_year not in ["All", "all", ""]:
+        tt_query = tt_query.filter(CourseOffering.academic_year == academic_year)
+    if section and section not in ["All", "all", "All Sections", ""]:
+        tt_query = tt_query.filter(CourseOffering.section == section)
+    if day and day not in ["All", "all", "All Days", ""]:
+        tt_query = tt_query.filter(db.func.lower(TimetableEntry.day_of_week) == day.strip().lower())
+
+    tt_entries_list = tt_query.all()
+    weekly_timetable_slots = len(tt_entries_list)
+
+    total_weekly_minutes = 0
+    for entry in tt_entries_list:
+        if entry.start_time and entry.end_time:
+            sm = entry.start_time.hour * 60 + entry.start_time.minute
+            em = entry.end_time.hour * 60 + entry.end_time.minute
+            diff = max(0, em - sm)
+            total_weekly_minutes += diff
+        else:
+            total_weekly_minutes += 60
+    weekly_hours = round(total_weekly_minutes / 60, 1)
+    if weekly_hours.is_integer():
+        weekly_hours = int(weekly_hours)
+
+    if offering_ids:
+        closed_sessions = (
+            AttendanceSession.query
+            .filter(
+                AttendanceSession.offering_id.in_(offering_ids),
+                AttendanceSession.status == "CLOSED",
+            )
+            .all()
+        )
+        session_ids = [s.session_id for s in closed_sessions]
+        total_closed_sessions = len(session_ids)
+
+        if session_ids:
+            total_present = (
+                AttendanceRecord.query
+                .filter(
+                    AttendanceRecord.session_id.in_(session_ids),
+                    AttendanceRecord.status == "PRESENT",
+                )
+                .count()
+            )
+
+            total_possible = 0
+            for s in closed_sessions:
+                s_students = (
+                    Enrollment.query
+                    .filter_by(
+                        offering_id=s.offering_id,
+                        status="ACTIVE",
+                    )
+                    .count()
+                )
+                total_possible += s_students
+
+            total_absent = max(0, total_possible - total_present)
+            overall_attendance_percentage = (
+                round((total_present / total_possible) * 100, 2)
+                if total_possible > 0
+                else None
+            )
+        else:
+            total_present = 0
+            total_absent = 0
+            total_possible = 0
+            overall_attendance_percentage = None
+    else:
+        total_closed_sessions = 0
+        total_present = 0
+        total_absent = 0
+        total_possible = 0
+        overall_attendance_percentage = None
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "assigned_courses_count": distinct_courses_count,
+            "total_offerings_count": total_offerings_count,
+            "enrolled_students_count": unique_students_count,
+            "total_enrollments_count": total_enrollments_count,
+            "weekly_timetable_slots": weekly_timetable_slots,
+            "weekly_hours": weekly_hours,
+            "active_semesters_count": active_semesters_count,
+            "total_closed_sessions": total_closed_sessions,
+            "total_present": total_present,
+            "total_absent": total_absent,
+            "total_eligible_opportunities": total_possible,
+            "overall_attendance_percentage": overall_attendance_percentage,
+        },
+    }), 200
+
+
+# ============================================================
 # GET FACULTY COURSES
 # ============================================================
 
@@ -262,16 +445,95 @@ def get_faculty_courses():
             "message": "Faculty profile not found. Please contact administration.",
         }), 404
 
-    offerings = (
+    semester = request.args.get("semester", type=int)
+    academic_year = request.args.get("academic_year")
+    section = request.args.get("section")
+    day = request.args.get("day")
+
+    query = (
         CourseOffering.query
         .filter_by(faculty_id=faculty.faculty_id)
+    )
+
+    if semester is not None:
+        query = query.filter(CourseOffering.semester == semester)
+    if academic_year and academic_year not in ["All", "all", ""]:
+        query = query.filter(CourseOffering.academic_year == academic_year)
+    if section and section not in ["All", "all", "All Sections", ""]:
+        query = query.filter(CourseOffering.section == section)
+    if day and day not in ["All", "all", "All Days", ""]:
+        day_match = (
+            db.session.query(TimetableEntry.offering_id)
+            .filter(db.func.lower(TimetableEntry.day_of_week) == day.strip().lower())
+            .subquery()
+        )
+        query = query.filter(CourseOffering.offering_id.in_(day_match))
+
+    offerings = (
+        query
         .order_by(CourseOffering.offering_id.asc())
         .all()
     )
 
     data = []
 
+    short_day_map = {
+        "Monday": "Mon",
+        "Tuesday": "Tue",
+        "Wednesday": "Wed",
+        "Thursday": "Thu",
+        "Friday": "Fri",
+        "Saturday": "Sat",
+        "Sunday": "Sun",
+    }
+
     for offering in offerings:
+        active_student_count = (
+            Enrollment.query
+            .filter_by(
+                offering_id=offering.offering_id,
+                status="ACTIVE",
+            )
+            .count()
+        )
+
+        tt_entries = (
+            TimetableEntry.query
+            .filter_by(offering_id=offering.offering_id)
+            .order_by(TimetableEntry.day_of_week, TimetableEntry.start_time)
+            .all()
+        )
+
+        room = offering.room
+        if not room and tt_entries:
+            for entry in tt_entries:
+                if entry.room:
+                    room = entry.room
+                    break
+
+        days_list = [short_day_map.get(e.day_of_week, e.day_of_week[:3] if e.day_of_week else "") for e in tt_entries if e.day_of_week]
+        unique_days = list(dict.fromkeys([d for d in days_list if d]))
+        days_display = ", ".join(unique_days) if unique_days else "Not scheduled"
+
+        time_display = "—"
+        if tt_entries:
+            first_tt = tt_entries[0]
+            if first_tt.start_time and first_tt.end_time:
+                st_str = first_tt.start_time.strftime("%I:%M %p")
+                et_str = first_tt.end_time.strftime("%I:%M %p")
+                time_display = f"{st_str} - {et_str}"
+
+        serialized_tt = [
+            {
+                "timetable_entry_id": e.timetable_entry_id,
+                "day_of_week": e.day_of_week,
+                "start_time": e.start_time.strftime("%H:%M") if e.start_time else "",
+                "end_time": e.end_time.strftime("%H:%M") if e.end_time else "",
+                "room": e.room,
+            }
+            for e in tt_entries
+        ]
+
         data.append({
             "offering_id": offering.offering_id,
             "course_id": offering.course_id,
@@ -281,7 +543,11 @@ def get_faculty_courses():
             "semester": offering.semester,
             "section": offering.section,
             "academic_year": offering.academic_year,
-            "room": offering.room,
+            "room": room,
+            "student_count": active_student_count,
+            "days_display": days_display,
+            "time_display": time_display,
+            "timetable_entries": serialized_tt,
         })
 
     return jsonify({
@@ -351,12 +617,23 @@ def get_faculty_course(course_id):
                 "enrollment_status": enrollment.status,
             })
 
+        room = offering.room
+        if not room:
+            tt_entry = (
+                TimetableEntry.query
+                .filter_by(offering_id=offering.offering_id)
+                .filter(TimetableEntry.room.isnot(None))
+                .first()
+            )
+            if tt_entry:
+                room = tt_entry.room
+
         offering_data.append({
             "offering_id": offering.offering_id,
             "semester": offering.semester,
             "section": offering.section,
             "academic_year": offering.academic_year,
-            "room": offering.room,
+            "room": room,
             "student_count": len(students),
             "students": students,
         })
@@ -393,7 +670,10 @@ def get_faculty_students():
     query = (
         Enrollment.query
         .join(CourseOffering, Enrollment.offering_id == CourseOffering.offering_id)
-        .filter(CourseOffering.faculty_id == faculty.faculty_id)
+        .filter(
+            CourseOffering.faculty_id == faculty.faculty_id,
+            Enrollment.status == "ACTIVE",
+        )
     )
 
     if offering_id_filter:
