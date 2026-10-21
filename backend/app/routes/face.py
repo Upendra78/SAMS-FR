@@ -58,7 +58,7 @@ def _decode_image(image_input):
 
 
 @face_bp.post("/enroll")
-@role_required("ADMIN", "FACULTY", "STUDENT")
+@role_required("ADMIN", "STUDENT")
 def enroll_face():
     """Enroll or replace a student's face profile."""
     json_data = request.get_json(silent=True) or {}

@@ -14,6 +14,7 @@ import StudentLayout from "../layouts/StudentLayout";
 
 import AdminDashboard from "../pages/admin/AdminDashboard";
 import Students from "../pages/admin/Students";
+import FaceRegistration from "../pages/admin/FaceRegistration";
 import Faculty from "../pages/admin/Faculty";
 import Departments from "../pages/admin/Departments";
 import AcademicManagement from "../pages/admin/AcademicManagement";
@@ -92,10 +93,19 @@ function AppRoutes() {
           path="management"
           element={<AdminManagement />}
         />
+        <Route
+          path="add-user"
+          element={<AdminManagement />}
+        />
 
         <Route
           path="students"
           element={<Students />}
+        />
+
+        <Route
+          path="face-registration"
+          element={<FaceRegistration />}
         />
 
         <Route

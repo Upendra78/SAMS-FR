@@ -41,8 +41,18 @@ export async function deleteUser(userId) {
 
 // ==================== STUDENTS ====================
 
-export async function getAdminStudents() {
-  const response = await api.get("/admin/students");
+export async function getAdminStudents(params = {}) {
+  const response = await api.get("/admin/students", { params });
+  return response.data;
+}
+
+export async function getAdminStudentsSummary() {
+  const response = await api.get("/admin/students/summary");
+  return response.data;
+}
+
+export async function getAdminStudentsFilterOptions() {
+  const response = await api.get("/admin/students/filter-options");
   return response.data;
 }
 
@@ -83,6 +93,16 @@ export async function deleteAdminStudent(studentId) {
 
 export async function getAdminFaculty() {
   const response = await api.get("/admin/faculty");
+  return response.data;
+}
+
+export async function getAdminFacultySummary() {
+  const response = await api.get("/admin/faculty/summary");
+  return response.data;
+}
+
+export async function getAdminFacultyFilterOptions() {
+  const response = await api.get("/admin/faculty/filter-options");
   return response.data;
 }
 

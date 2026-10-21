@@ -306,6 +306,74 @@
 }
 
 /* =========================================
+   NESTED SUB NAVIGATION (LEVEL 2 & LEVEL 3)
+========================================= */
+
+.admin-nav-nested-group {
+  width: 100%;
+}
+
+.admin-subnav-group-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 35px;
+  padding: 6px 9px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #9eacc1;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition:
+    background-color 0.18s ease,
+    color 0.18s ease;
+}
+
+.admin-subnav-group-button:hover {
+  background: rgba(255, 255, 255, 0.045);
+  color: #fff;
+}
+
+.admin-subnav-group-button.parent-active {
+  color: #fff;
+  font-weight: 600;
+  background: rgba(48, 105, 204, 0.18);
+}
+
+.admin-subnav-group-left {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.admin-subnav-chevron {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  color: #7f90aa;
+  font-size: 8px;
+}
+
+.admin-subnav-group-button.parent-active .admin-subnav-chevron {
+  color: #fff;
+}
+
+.admin-nested-subnav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 4px 10px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* =========================================
    SYSTEM
 ========================================= */
 

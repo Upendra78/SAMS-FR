@@ -5,6 +5,7 @@ import {
   faBookOpen,
   faBuilding,
   faCalendarDays,
+  faCamera,
   faChartColumn,
   faChartLine,
   faChevronDown,
@@ -28,24 +29,21 @@ import useAuth from "../hooks/useAuth";
 
 import "./AdminLayout.css";
 
-const managementItems = [
-  {
-    label: "Users",
-    path: "/admin/management",
-    icon: faUsers,
-    end: true,
-  },
-  {
-    label: "Faculty",
-    path: "/admin/faculty",
-    icon: faChalkboardUser,
-  },
+const studentManagementItems = [
   {
     label: "Students",
     path: "/admin/students",
     icon: faGraduationCap,
+    end: true,
+  },
+  {
+    label: "Face Registration",
+    path: "/admin/face-registration",
+    icon: faCamera,
   },
 ];
+
+
 
 const academicItems = [
   {
@@ -132,10 +130,24 @@ function AdminLayout() {
   const pathname = location.pathname;
 
   // Determine which navigation groups match the current route.
-  const isManagementRoute =
+  const isAddUserRoute =
     pathname === "/admin/management" ||
-    pathname.startsWith("/admin/faculty") ||
-    pathname.startsWith("/admin/students");
+    pathname.startsWith("/admin/management") ||
+    pathname === "/admin/add-user" ||
+    pathname.startsWith("/admin/add-user");
+
+  const isStudentManagementRoute =
+    pathname === "/admin/students" ||
+    pathname.startsWith("/admin/students") ||
+    pathname === "/admin/face-registration" ||
+    pathname.startsWith("/admin/face-registration");
+
+  const isFacultyManagementRoute =
+    pathname === "/admin/faculty" ||
+    pathname.startsWith("/admin/faculty");
+
+  const isUserManagementRoute =
+    isAddUserRoute || isStudentManagementRoute || isFacultyManagementRoute;
 
   const isAcademicRoute =
     pathname.startsWith("/admin/academic-management") ||
@@ -151,7 +163,10 @@ function AdminLayout() {
 
   // null means follow the current route automatically.
   // true/false means the user has manually toggled the group.
-  const [managementManualOpen, setManagementManualOpen] =
+  const [userManagementManualOpen, setUserManagementManualOpen] =
+    useState(null);
+
+  const [studentManagementManualOpen, setStudentManagementManualOpen] =
     useState(null);
 
   const [academicManualOpen, setAcademicManualOpen] =
@@ -163,8 +178,11 @@ function AdminLayout() {
   const [timetableManualOpen, setTimetableManualOpen] =
     useState(null);
 
-  const managementOpen =
-    managementManualOpen ?? isManagementRoute;
+  const userManagementOpen =
+    userManagementManualOpen ?? isUserManagementRoute;
+
+  const studentManagementOpen =
+    studentManagementManualOpen ?? isStudentManagementRoute;
 
   const academicOpen =
     academicManualOpen ?? isAcademicRoute;
@@ -183,9 +201,18 @@ function AdminLayout() {
     }
   }
 
-  function handleManagementToggle() {
-    setManagementManualOpen((current) =>
-      !(current ?? isManagementRoute)
+  function handleUserManagementToggle() {
+    setUserManagementManualOpen((current) =>
+      !(current ?? isUserManagementRoute)
+    );
+  }
+
+  function handleStudentManagementToggle(e) {
+    if (e && e.stopPropagation) {
+      e.stopPropagation();
+    }
+    setStudentManagementManualOpen((current) =>
+      !(current ?? isStudentManagementRoute)
     );
   }
 
@@ -225,6 +252,10 @@ function AdminLayout() {
     return `admin-subnav-link ${isActive ? "active" : ""}`;
   }
 
+  function getAddUserNavClass({ isActive }) {
+    return `admin-subnav-link ${isActive || isAddUserRoute ? "active" : ""}`;
+  }
+
   return (
     <div className="admin-layout">
       {/* Sidebar */}
@@ -262,26 +293,26 @@ function AdminLayout() {
               </span>
             </NavLink>
 
-            {/* Admin Management */}
+            {/* User Management (Top-level Parent Menu) */}
             <div className="admin-nav-group">
               <button
                 type="button"
-                className={getGroupClass(isManagementRoute)}
-                onClick={handleManagementToggle}
-                aria-expanded={managementOpen}
+                className={getGroupClass(isUserManagementRoute)}
+                onClick={handleUserManagementToggle}
+                aria-expanded={userManagementOpen}
               >
                 <span className="admin-nav-icon">
                   <FontAwesomeIcon icon={faUsers} />
                 </span>
 
                 <span className="admin-nav-label">
-                  Admin Management
+                  User Management
                 </span>
 
                 <span className="admin-nav-chevron">
                   <FontAwesomeIcon
                     icon={
-                      managementOpen
+                      userManagementOpen
                         ? faChevronDown
                         : faChevronRight
                     }
@@ -289,22 +320,79 @@ function AdminLayout() {
                 </span>
               </button>
 
-              {managementOpen && (
+              {userManagementOpen && (
                 <div className="admin-subnav">
-                  {managementItems.map((item) => (
-                    <NavLink
-                      key={item.path}
-                      to={item.path}
-                      end={item.end}
-                      className={getSubNavClass}
+                  {/* User Management navigation item */}
+                  <NavLink
+                    to="/admin/management"
+                    className={getAddUserNavClass}
+                  >
+                    <span className="admin-subnav-icon">
+                      <FontAwesomeIcon icon={faUsers} />
+                    </span>
+
+                    <span>User</span>
+                  </NavLink>
+
+                  {/* Student Management (Subgroup) */}
+                  <div className="admin-nav-nested-group">
+                    <button
+                      type="button"
+                      className={`admin-subnav-group-button ${
+                        isStudentManagementRoute ? "parent-active" : ""
+                      }`}
+                      onClick={handleStudentManagementToggle}
+                      aria-expanded={studentManagementOpen}
                     >
-                      <span className="admin-subnav-icon">
-                        <FontAwesomeIcon icon={item.icon} />
+                      <span className="admin-subnav-group-left">
+                        <span className="admin-subnav-icon">
+                          <FontAwesomeIcon icon={faGraduationCap} />
+                        </span>
+                        <span>Student Management</span>
                       </span>
 
-                      <span>{item.label}</span>
-                    </NavLink>
-                  ))}
+                      <span className="admin-subnav-chevron">
+                        <FontAwesomeIcon
+                          icon={
+                            studentManagementOpen
+                              ? faChevronDown
+                              : faChevronRight
+                          }
+                        />
+                      </span>
+                    </button>
+
+                    {studentManagementOpen && (
+                      <div className="admin-nested-subnav">
+                        {studentManagementItems.map((item) => (
+                          <NavLink
+                            key={item.label}
+                            to={item.path}
+                            end={item.end}
+                            className={getSubNavClass}
+                          >
+                            <span className="admin-subnav-icon">
+                              <FontAwesomeIcon icon={item.icon} />
+                            </span>
+
+                            <span>{item.label}</span>
+                          </NavLink>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Faculty Management (Sibling under User Management) */}
+                  <NavLink
+                    to="/admin/faculty"
+                    className={getSubNavClass}
+                  >
+                    <span className="admin-subnav-icon">
+                      <FontAwesomeIcon icon={faChalkboardUser} />
+                    </span>
+
+                    <span>Faculty Management</span>
+                  </NavLink>
                 </div>
               )}
             </div>

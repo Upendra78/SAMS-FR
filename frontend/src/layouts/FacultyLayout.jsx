@@ -12,6 +12,8 @@ import {
   LogOut,
   Menu,
   X,
+  Search,
+  Bell,
 } from "lucide-react";
 import useAuth from "../hooks/useAuth";
 import "./FacultyLayout.css";
@@ -204,9 +206,28 @@ function FacultyLayout() {
             >
               {mobileNavigationOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
+
+            <div className="faculty-search-container">
+              <Search size={16} className="faculty-search-icon" aria-hidden="true" />
+              <input
+                type="text"
+                placeholder="Search classes, students, or anything..."
+                className="faculty-search-input"
+                aria-label="Search classes, students, or anything"
+              />
+            </div>
           </div>
 
           <div className="faculty-topbar-right">
+            <button
+              type="button"
+              className="faculty-bell-button"
+              aria-label="Notifications"
+            >
+              <Bell size={19} />
+              <span className="faculty-bell-badge" />
+            </button>
+
             {/* User Profile Pill */}
             <div className="faculty-user-profile-menu">
               <NavLink

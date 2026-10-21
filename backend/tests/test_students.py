@@ -1,4 +1,4 @@
-﻿import unittest
+import unittest
 from datetime import date, time
 
 from flask import Flask
@@ -359,6 +359,60 @@ class TestAdminStudents(unittest.TestCase):
             self.assertIsNotNone(target_admin)
             self.assertTrue(target_admin.is_active)
 
+    def create_student_record(self, name, email, enrollment_no, dept_id, semester, section):
+        with self.app.app_context():
+            u = User(name=name, email=email, password_hash="not-used", role="STUDENT")
+            db.session.add(u)
+            db.session.flush()
+            st = Student(
+                user_id=u.user_id,
+                department_id=dept_id,
+                enrollment_no=enrollment_no,
+                semester=semester,
+                section=section,
+                academic_year="2026-27",
+            )
+            db.session.add(st)
+            db.session.commit()
+
+    def test_get_students_filter_options(self):
+        with self.app.app_context():
+            dept = Department(department_name="Mechanical Engineering", department_code="ME")
+            db.session.add(dept)
+            db.session.commit()
+            dept_id = dept.department_id
+
+        # Seed students with specific semesters and sections
+        self.create_student_record("S1", "s1@test.local", "ME001", dept_id, semester=1, section="A")
+        self.create_student_record("S2", "s2@test.local", "ME002", dept_id, semester=5, section="B")
+        self.create_student_record("S3", "s3@test.local", "ME003", dept_id, semester=7, section="B")
+
+        response = self.client.get(
+            "/api/admin/students/filter-options",
+            headers=self.admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()["data"]
+        # In setUp, semester 3 / section A is already present
+        self.assertEqual(data["semesters"], [1, 3, 5, 7])
+        self.assertEqual(data["sections"], ["A", "B"])
+        self.assertTrue(any(d["department_name"] == "Mechanical Engineering" for d in data["departments"]))
+
+    def test_get_students_summary_includes_semesters_and_sections(self):
+        response = self.client.get(
+            "/api/admin/students/summary",
+            headers=self.admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()["data"]
+        self.assertIn("semesters", data)
+        self.assertIn("sections", data)
+        self.assertIn(3, data["semesters"])
+        self.assertIn("A", data["sections"])
+
 
 if __name__ == "__main__":
     unittest.main()
+

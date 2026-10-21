@@ -201,6 +201,24 @@ class TestFaceEnrollmentAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 401)
 
+    def test_faculty_cannot_enroll_face(self):
+        with self.app.app_context():
+            token = create_access_token(
+                identity="2",
+                additional_claims={"role": "FACULTY"},
+            )
+        headers = {"Authorization": f"Bearer {token}"}
+        response = self.client.post(
+            "/api/face/enroll",
+            headers=headers,
+            data={
+                "student_id": str(self.student_id),
+                "image": self._image_file(),
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 403)
+
     def test_missing_student_id(self):
         response = self.client.post(
             "/api/face/enroll",

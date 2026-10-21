@@ -22,6 +22,8 @@ import {
   faVideoSlash,
 } from "@fortawesome/free-solid-svg-icons";
 
+import "./LiveFaceCapture.css";
+
 const MEDIAPIPE_WASM_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm";
 
