@@ -199,8 +199,10 @@ export async function getAdminAttendanceRecords(sessionId) {
   return response.data;
 }
 
-export async function getAdminAttendanceFilterOptions() {
-  const response = await api.get("/admin/attendance/filter-options");
+export async function getAdminAttendanceFilterOptions(params = {}) {
+  const response = await api.get("/admin/attendance/filter-options", {
+    params,
+  });
   return response.data;
 }
 
@@ -264,6 +266,11 @@ export async function deleteAdminDepartment(departmentId) {
 }
 
  // ==================== COURSE OFFERINGS ====================
+
+export async function getAdminAcademicSummary(options = {}) {
+  const response = await api.get("/admin/academic/summary", options);
+  return response.data;
+}
 
 export async function getAdminCourses() {
   const response = await api.get("/admin/courses");
@@ -339,3 +346,29 @@ export async function createAdminBatch(batchData) {
   const response = await api.post("/admin/batches", batchData);
   return response.data;
 }
+
+export async function getAdminAcademicSession() {
+  const response = await api.get("/admin/academic-session");
+  return response.data;
+}
+
+export async function updateAdminAcademicSession(sessionData) {
+  const response = await api.post("/admin/academic-session", sessionData);
+  return response.data;
+}
+
+// ==================== RECENT ACTIVITY & AUDIT LOGS ====================
+
+export async function getRecentActivity(limit = 10) {
+  const response = await api.get("/admin/activity/recent", {
+    params: { limit },
+  });
+  return response.data;
+}
+
+export async function getActivityLogs(params = {}) {
+  const response = await api.get("/admin/activity", { params });
+  return response.data;
+}
+
+

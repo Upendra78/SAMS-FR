@@ -15,13 +15,76 @@ import {
   Sparkles,
   FileText,
   AlertTriangle,
+  RotateCw,
+  LogIn,
+  UserPlus,
+  GraduationCap,
+  Building2,
+  Calendar,
 } from "lucide-react";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faChalkboardUser } from "@fortawesome/free-solid-svg-icons";
 
-import { getAdminDashboard } from "../../services/adminService";
+import { getAdminDashboard, getRecentActivity } from "../../services/adminService";
+import { formatActivityTime } from "../../utils/dateUtils";
 import useAuth from "../../hooks/useAuth";
 import "./AdminDashboard.css";
+
+function getActivityIconConfig(actionType = "") {
+  const type = String(actionType).toUpperCase();
+  if (type.includes("LOGIN")) {
+    return {
+      icon: <LogIn size={13} />,
+      bgClass: "activity-icon-blue",
+    };
+  }
+  if (type.includes("STUDENT")) {
+    return {
+      icon: <GraduationCap size={13} />,
+      bgClass: "activity-icon-green",
+    };
+  }
+  if (type.includes("FACULTY")) {
+    return {
+      icon: <Users size={13} />,
+      bgClass: "activity-icon-purple",
+    };
+  }
+  if (type.includes("DEPARTMENT")) {
+    return {
+      icon: <Building2 size={13} />,
+      bgClass: "activity-icon-amber",
+    };
+  }
+  if (type.includes("TIMETABLE")) {
+    return {
+      icon: <Calendar size={13} />,
+      bgClass: "activity-icon-teal",
+    };
+  }
+  if (type.includes("ATTENDANCE")) {
+    return {
+      icon: <CheckCircle2 size={13} />,
+      bgClass: "activity-icon-emerald",
+    };
+  }
+  if (type.includes("COURSE") || type.includes("ENROLLMENT")) {
+    return {
+      icon: <BookOpen size={13} />,
+      bgClass: "activity-icon-purple",
+    };
+  }
+  if (type.includes("USER")) {
+    return {
+      icon: <UserPlus size={13} />,
+      bgClass: "activity-icon-blue",
+    };
+  }
+  return {
+    icon: <Clock size={13} />,
+    bgClass: "activity-icon-slate",
+  };
+}
 
 function getGreeting() {
   const hour = new Date().getHours();
@@ -57,6 +120,10 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState("");
 
+  const [recentActivities, setRecentActivities] = useState([]);
+  const [activityLoading, setActivityLoading] = useState(false);
+  const [activityError, setActivityError] = useState("");
+
   useEffect(() => {
     let cancelled = false;
 
@@ -73,11 +140,14 @@ function AdminDashboard() {
         }
 
         setDashboardData(result.data || null);
+        setRecentActivities(result.data?.recent_activity || []);
         setErrorMessage("");
+        setActivityError("");
       } catch (error) {
         if (cancelled) return;
 
         setDashboardData(null);
+        setRecentActivities([]);
         setErrorMessage(
           error?.response?.data?.message ||
             error?.message ||
@@ -96,6 +166,27 @@ function AdminDashboard() {
       cancelled = true;
     };
   }, []);
+
+  const handleRetryActivity = async () => {
+    setActivityLoading(true);
+    setActivityError("");
+    try {
+      const res = await getRecentActivity(6);
+      if (res?.success) {
+        setRecentActivities(res.data || []);
+      } else {
+        throw new Error(res?.message || "Failed to load recent activity.");
+      }
+    } catch (err) {
+      setActivityError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Unable to load recent activity."
+      );
+    } finally {
+      setActivityLoading(false);
+    }
+  };
 
   const formatMetric = (value) => {
     return value === null || value === undefined ? "N/A" : value;
@@ -474,25 +565,95 @@ function AdminDashboard() {
         <section className="admin-panel admin-recent-activity-panel">
           <div className="admin-panel-top">
             <div className="admin-panel-title-area">
-              <Clock size={18} className="text-blue" />
+              <Clock size={18} className="admin-panel-header-icon text-blue" />
               <div>
                 <h2>Recent Activity</h2>
-                <p>Activity history requires a dedicated backend API.</p>
+                <p>Latest system events and operations</p>
               </div>
             </div>
+            <Link to="/admin/activity" className="admin-panel-link-badge">
+              <span>View All</span>
+              <ExternalLink size={11} />
+            </Link>
           </div>
 
-          <div className="admin-panel-inner-box">
-            <div className="admin-empty-icon-circle blue-circle">
-              <Clock size={24} />
+          {activityLoading ? (
+            <div className="admin-panel-inner-box admin-activity-loading-box">
+              <div className="admin-activity-spinner" />
+              <p>Loading recent activities...</p>
             </div>
-            <h3>No recent activity</h3>
-            <p>API integration is pending for recent system activity.</p>
-            <button type="button" className="admin-btn-outline">
-              <span>Open activity logs</span>
-              <ExternalLink size={12} />
-            </button>
-          </div>
+          ) : activityError ? (
+            <div className="admin-panel-inner-box admin-activity-error-box">
+              <div className="admin-empty-icon-circle orange-circle">
+                <AlertTriangle size={24} />
+              </div>
+              <h3>Failed to load activity</h3>
+              <p>{activityError}</p>
+              <button
+                type="button"
+                className="admin-btn-outline"
+                onClick={handleRetryActivity}
+              >
+                <RotateCw size={12} className={activityLoading ? "spin" : ""} />
+                <span>Retry</span>
+              </button>
+            </div>
+          ) : recentActivities.length === 0 ? (
+            <div className="admin-panel-inner-box">
+              <div className="admin-empty-icon-circle blue-circle">
+                <Clock size={24} />
+              </div>
+              <h3>No recent activity</h3>
+              <p>No system activity has been recorded yet.</p>
+              <Link to="/admin/activity" className="admin-btn-outline">
+                <span>Open activity logs</span>
+                <ExternalLink size={12} />
+              </Link>
+            </div>
+          ) : (
+            <div className="admin-activity-container">
+              <div className="admin-activity-list">
+                {recentActivities.slice(0, 4).map((item) => {
+                  const iconConfig = getActivityIconConfig(item.action_type);
+                  return (
+                    <div key={item.id} className="admin-activity-row">
+                      <div className={`admin-activity-icon ${iconConfig.bgClass}`}>
+                        {iconConfig.icon}
+                      </div>
+                      <div className="admin-activity-content">
+                        <p className="admin-activity-desc" title={item.description}>
+                          {item.description}
+                        </p>
+                        <div className="admin-activity-meta">
+                          {item.actor_name && (
+                            <span className="admin-activity-actor">
+                              {item.actor_name}
+                            </span>
+                          )}
+                          {item.actor_name && (
+                            <span className="admin-activity-dot">•</span>
+                          )}
+                          <span
+                            className="admin-activity-time"
+                            title={item.created_at || ""}
+                          >
+                            {formatActivityTime(item.created_at)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="admin-activity-footer">
+                <Link to="/admin/activity" className="admin-activity-view-all-link">
+                  <span>Open activity logs</span>
+                  <ArrowRight size={13} />
+                </Link>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Column 3: Faculty Help + System Status */}

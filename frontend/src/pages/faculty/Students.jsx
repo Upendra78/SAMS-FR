@@ -48,6 +48,7 @@ const normalizeStudent = (student) => ({
       : "",
   section: student.section ?? "",
   academicYear: student.academic_year ?? "",
+  batchYear: student.batch_year ?? student.batch_name ?? "",
   departmentId: student.department?.department_id ?? null,
   department:
     student.department?.department_name ??
@@ -953,6 +954,14 @@ function Students() {
 
                 <strong>
                   {selectedStudent.academicYear || "N/A"}
+                </strong>
+              </div>
+
+              <div>
+                <span>Batch Year</span>
+
+                <strong>
+                  {selectedStudent.batchYear || "N/A"}
                 </strong>
               </div>
             </div>

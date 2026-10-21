@@ -1,6 +1,7 @@
 import csv
 from datetime import date, datetime, time, timedelta
 import io
+import re
 
 from flask import Blueprint, jsonify, make_response, request
 from sqlalchemy import and_, asc, case, desc, func, or_
@@ -17,6 +18,11 @@ from app.models import (
     User,
 )
 from app.utils.auth import admin_required
+from app.utils.academic_year import (
+    canonical_academic_year,
+    get_available_academic_sessions,
+    get_current_academic_session,
+)
 
 admin_attendance_bp = Blueprint(
     "admin_attendance",
@@ -25,23 +31,73 @@ admin_attendance_bp = Blueprint(
 )
 
 
-def _build_session_filter(query):
+def _parse_and_validate_dates():
+    from_date_raw = request.args.get("from_date")
+    to_date_raw = request.args.get("to_date")
+    from_d = None
+    to_d = None
+
+    if from_date_raw and from_date_raw.strip():
+        try:
+            from_d = date.fromisoformat(from_date_raw.strip())
+        except ValueError:
+            return None, None, (
+                jsonify({
+                    "success": False,
+                    "message": "from_date must be in YYYY-MM-DD format",
+                }),
+                400,
+            )
+
+    if to_date_raw and to_date_raw.strip():
+        try:
+            to_d = date.fromisoformat(to_date_raw.strip())
+        except ValueError:
+            return None, None, (
+                jsonify({
+                    "success": False,
+                    "message": "to_date must be in YYYY-MM-DD format",
+                }),
+                400,
+            )
+
+    if from_d and to_d and from_d > to_d:
+        return None, None, (
+            jsonify({
+                "success": False,
+                "message": "from_date cannot be later than to_date",
+            }),
+            400,
+        )
+
+    return from_d, to_d, None
+
+
+def _build_session_filter(query, from_d=None, to_d=None):
     academic_year = request.args.get("academic_year")
     semester = request.args.get("semester")
     section = request.args.get("section")
     course_id = request.args.get("course_id")
     faculty_id = request.args.get("faculty_id")
-    from_date_raw = request.args.get("from_date")
-    to_date_raw = request.args.get("to_date")
 
     if academic_year and academic_year not in ["All", "all", ""]:
+        canon_ay = canonical_academic_year(academic_year)
         clean_ay = academic_year.replace(" ", "")
-        query = query.filter(
-            or_(
-                CourseOffering.academic_year == academic_year,
-                CourseOffering.academic_year.ilike(f"%{clean_ay[:4]}%"),
-            )
-        )
+        canon_clean = canon_ay.replace(" ", "") if canon_ay else clean_ay
+        m = re.match(r"^(\d{4})-(\d{4})$", canon_ay) if canon_ay else None
+        short_ay = f"{m.group(1)}-{m.group(2)[2:]}" if m else None
+
+        filters = [
+            CourseOffering.academic_year == academic_year,
+            CourseOffering.academic_year == canon_ay,
+            func.replace(CourseOffering.academic_year, " ", "") == clean_ay,
+            func.replace(CourseOffering.academic_year, " ", "") == canon_clean,
+        ]
+        if short_ay:
+            filters.append(CourseOffering.academic_year == short_ay)
+            filters.append(func.replace(CourseOffering.academic_year, " ", "") == short_ay)
+
+        query = query.filter(or_(*filters))
 
     if semester and semester not in ["All", "all", ""]:
         try:
@@ -51,7 +107,13 @@ def _build_session_filter(query):
             pass
 
     if section and section not in ["All", "all", ""]:
-        query = query.filter(CourseOffering.section == section)
+        clean_sec = section.strip()
+        query = query.filter(
+            or_(
+                CourseOffering.section == section,
+                func.trim(CourseOffering.section).ilike(clean_sec),
+            )
+        )
 
     if course_id and course_id not in ["All", "all", ""]:
         try:
@@ -67,19 +129,11 @@ def _build_session_filter(query):
         except ValueError:
             pass
 
-    if from_date_raw:
-        try:
-            from_d = date.fromisoformat(from_date_raw)
-            query = query.filter(AttendanceSession.session_date >= from_d)
-        except ValueError:
-            pass
+    if from_d:
+        query = query.filter(AttendanceSession.session_date >= from_d)
 
-    if to_date_raw:
-        try:
-            to_d = date.fromisoformat(to_date_raw)
-            query = query.filter(AttendanceSession.session_date <= to_d)
-        except ValueError:
-            pass
+    if to_d:
+        query = query.filter(AttendanceSession.session_date <= to_d)
 
     return query
 
@@ -90,36 +144,63 @@ def _build_session_filter(query):
 @admin_attendance_bp.get("/filter-options")
 @admin_required
 def get_attendance_filter_options():
-    # 1. Distinct academic years
-    academic_years_raw = (
-        db.session.query(CourseOffering.academic_year)
-        .distinct()
-        .all()
-    )
-    raw_years = [y[0].strip() for y in academic_years_raw if y[0]]
-    academic_years = sorted(list(set(raw_years)), reverse=True)
-    if "2025-26" in academic_years:
-        academic_years.remove("2025-26")
-        academic_years.insert(0, "2025-26")
+    # 1. Distinct academic sessions (1-year sessions)
+    academic_years = get_available_academic_sessions()
 
-    # 2. Distinct semesters
-    semesters_raw = (
-        db.session.query(CourseOffering.semester)
-        .distinct()
-        .all()
-    )
-    semesters = sorted([s[0] for s in semesters_raw if s[0] is not None])
+    # 2. Distinct semesters from both offerings and student profiles
+    off_sems = db.session.query(CourseOffering.semester).filter(CourseOffering.semester.isnot(None)).distinct().all()
+    stu_sems = db.session.query(Student.semester).filter(Student.semester.isnot(None)).distinct().all()
+    all_sem_set = {s[0] for s in off_sems if s[0] is not None} | {s[0] for s in stu_sems if s[0] is not None}
+    semesters = sorted([int(s) for s in all_sem_set if isinstance(s, (int, str)) and str(s).isdigit()])
 
-    # 3. Distinct sections
-    sections_raw = (
-        db.session.query(CourseOffering.section)
+    # 3. Semester-to-sections mapping for dynamic contextual filtering
+    sem_sec_mapping = {}
+    off_sem_secs = (
+        db.session.query(CourseOffering.semester, CourseOffering.section)
+        .filter(CourseOffering.semester.isnot(None), CourseOffering.section.isnot(None))
         .distinct()
         .all()
     )
-    raw_secs = list({s[0].strip() for s in sections_raw if s[0]})
+    for sem, sec in off_sem_secs:
+        if sec and sec.strip():
+            sem_sec_mapping.setdefault(str(sem), set()).add(sec.strip())
+
+    stu_sem_secs = (
+        db.session.query(Student.semester, Student.section)
+        .filter(Student.semester.isnot(None), Student.section.isnot(None))
+        .distinct()
+        .all()
+    )
+    for sem, sec in stu_sem_secs:
+        if sec and sec.strip():
+            sem_sec_mapping.setdefault(str(sem), set()).add(sec.strip())
+
+    semester_sections = {
+        k: sorted(list(v)) for k, v in sem_sec_mapping.items()
+    }
+
+    # Distinct sections across all data
+    raw_secs = set()
+    for v in sem_sec_mapping.values():
+        raw_secs.update(v)
+    all_off_secs = db.session.query(CourseOffering.section).filter(CourseOffering.section.isnot(None)).distinct().all()
+    raw_secs.update({s[0].strip() for s in all_off_secs if s[0] and s[0].strip()})
+    all_stu_secs = db.session.query(Student.section).filter(Student.section.isnot(None)).distinct().all()
+    raw_secs.update({s[0].strip() for s in all_stu_secs if s[0] and s[0].strip()})
+
     std_secs = [s for s in ["A", "B", "C", "D"] if s in raw_secs]
     other_secs = sorted([s for s in raw_secs if s not in std_secs])
     sections = std_secs + other_secs
+
+    # Optional: if client requested filter options specifically for a semester
+    req_sem = request.args.get("semester")
+    if req_sem and req_sem not in ["All", "all", ""]:
+        s_key = str(req_sem)
+        if s_key in semester_sections:
+            sem_specific_secs = set(semester_sections[s_key])
+            std_s = [s for s in ["A", "B", "C", "D"] if s in sem_specific_secs]
+            other_s = sorted([s for s in sem_specific_secs if s not in std_s])
+            sections = std_s + other_s
 
     # 4. Courses
     courses_raw = (
@@ -164,6 +245,7 @@ def get_attendance_filter_options():
         "academic_years": academic_years,
         "semesters": semesters,
         "sections": sections,
+        "semester_sections": semester_sections,
         "courses": courses,
         "faculty": faculty,
         "date_range": {
@@ -179,15 +261,19 @@ def get_attendance_filter_options():
 @admin_attendance_bp.get("/dashboard")
 @admin_required
 def get_attendance_dashboard():
+    from_d, to_d, err = _parse_and_validate_dates()
+    if err:
+        return err
+
     # 1. Base query for sessions
     base_session_q = (
-        db.session.query(AttendanceSession)
+        db.session.query(AttendanceSession.session_id)
         .join(CourseOffering, AttendanceSession.offering_id == CourseOffering.offering_id)
         .join(Course, CourseOffering.course_id == Course.course_id)
     )
-    filtered_session_q = _build_session_filter(base_session_q)
-    sessions = filtered_session_q.all()
-    session_ids = [s.session_id for s in sessions]
+    filtered_session_q = _build_session_filter(base_session_q, from_d=from_d, to_d=to_d)
+    session_rows = filtered_session_q.all()
+    session_ids = [r[0] for r in session_rows]
 
     if not session_ids:
         return jsonify({
@@ -212,13 +298,19 @@ def get_attendance_dashboard():
     # 2. KPI metrics
     present_count = (
         db.session.query(func.count(AttendanceRecord.attendance_id))
-        .filter(AttendanceRecord.session_id.in_(session_ids), AttendanceRecord.status == "PRESENT")
+        .filter(
+            AttendanceRecord.session_id.in_(session_ids),
+            AttendanceRecord.status.in_(["PRESENT", "LATE"]),
+        )
         .scalar()
         or 0
     )
     absent_count = (
         db.session.query(func.count(AttendanceRecord.attendance_id))
-        .filter(AttendanceRecord.session_id.in_(session_ids), AttendanceRecord.status == "ABSENT")
+        .filter(
+            AttendanceRecord.session_id.in_(session_ids),
+            AttendanceRecord.status == "ABSENT",
+        )
         .scalar()
         or 0
     )
@@ -232,7 +324,7 @@ def get_attendance_dashboard():
     date_stats = (
         db.session.query(
             AttendanceSession.session_date,
-            func.sum(case((AttendanceRecord.status == "PRESENT", 1), else_=0)).label("present"),
+            func.sum(case((AttendanceRecord.status.in_(["PRESENT", "LATE"]), 1), else_=0)).label("present"),
             func.count(AttendanceRecord.attendance_id).label("total"),
         )
         .join(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.session_id)
@@ -243,10 +335,10 @@ def get_attendance_dashboard():
     )
 
     trend = []
-    # If more than 6 dates, sample approx 5 evenly spaced points
-    if len(date_stats) > 6:
-        step = max(1, len(date_stats) // 5)
-        sampled_indices = [i * step for i in range(5)]
+    # If more than 30 dates, sample approx 25 evenly spaced points to keep SVG clear
+    if len(date_stats) > 30:
+        step = max(1, len(date_stats) // 25)
+        sampled_indices = [i * step for i in range(25)]
         if (len(date_stats) - 1) not in sampled_indices:
             sampled_indices[-1] = len(date_stats) - 1
         selected_stats = [date_stats[i] for i in sampled_indices if i < len(date_stats)]
@@ -272,13 +364,13 @@ def get_attendance_dashboard():
             Course.course_id,
             Course.course_code,
             Course.course_name,
-            func.sum(case((AttendanceRecord.status == "PRESENT", 1), else_=0)).label("present"),
+            func.sum(case((AttendanceRecord.status.in_(["PRESENT", "LATE"]), 1), else_=0)).label("present"),
             func.count(AttendanceRecord.attendance_id).label("total"),
             func.count(func.distinct(AttendanceSession.session_id)).label("classes"),
         )
         .join(CourseOffering, CourseOffering.course_id == Course.course_id)
         .join(AttendanceSession, AttendanceSession.offering_id == CourseOffering.offering_id)
-        .join(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.session_id)
+        .outerjoin(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.session_id)
         .filter(AttendanceSession.session_id.in_(session_ids))
         .group_by(Course.course_id, Course.course_code, Course.course_name)
         .order_by(desc("classes"), desc("total"))
@@ -293,6 +385,7 @@ def get_attendance_dashboard():
     for idx, row in enumerate(top_courses):
         p = int(row[3] or 0)
         tot = int(row[4] or 0)
+        cls_count = int(row[5] or 0)
         rate = round((p / tot * 100), 1) if tot > 0 else 0.0
         by_course.append({
             "course_id": row[0],
@@ -301,7 +394,7 @@ def get_attendance_dashboard():
             "rate": rate,
             "present": p,
             "total": tot,
-            "classes": int(row[5] or 0),
+            "classes": cls_count,
             "color": palette[idx % len(palette)],
         })
 
@@ -325,11 +418,11 @@ def get_attendance_dashboard():
     section_stats = (
         db.session.query(
             CourseOffering.section,
-            func.sum(case((AttendanceRecord.status == "PRESENT", 1), else_=0)).label("present"),
+            func.sum(case((AttendanceRecord.status.in_(["PRESENT", "LATE"]), 1), else_=0)).label("present"),
             func.count(AttendanceRecord.attendance_id).label("total"),
         )
         .join(AttendanceSession, AttendanceSession.offering_id == CourseOffering.offering_id)
-        .join(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.session_id)
+        .outerjoin(AttendanceRecord, AttendanceRecord.session_id == AttendanceSession.session_id)
         .filter(AttendanceSession.session_id.in_(session_ids))
         .group_by(CourseOffering.section)
         .all()
@@ -342,7 +435,6 @@ def get_attendance_dashboard():
         "D": "#8b5cf6",
     }
     by_section = []
-    # Sort with standard sections A, B, C, D first
     sec_dict = {row[0]: row for row in section_stats}
     sorted_sec_names = [s for s in ["A", "B", "C", "D"] if s in sec_dict]
     remaining_secs = sorted([s for s in sec_dict if s not in sorted_sec_names])
@@ -387,6 +479,10 @@ def get_attendance_dashboard():
 @admin_attendance_bp.get("/records")
 @admin_required
 def get_admin_attendance_records_list():
+    from_d, to_d, err = _parse_and_validate_dates()
+    if err:
+        return err
+
     page = request.args.get("page", 1, type=int)
     per_page = request.args.get("per_page", 5, type=int)
     search = request.args.get("search", "").strip()
@@ -413,7 +509,7 @@ def get_admin_attendance_records_list():
         .join(User, Student.user_id == User.user_id)
     )
 
-    query = _build_session_filter(query)
+    query = _build_session_filter(query, from_d=from_d, to_d=to_d)
 
     if status_filter and status_filter not in ["All", "all", ""]:
         query = query.filter(AttendanceRecord.status == status_filter.upper())
@@ -447,22 +543,42 @@ def get_admin_attendance_records_list():
 
     data = []
     for rec, sess, off, crs, stu, usr in records:
-        is_present = rec.status.upper() == "PRESENT"
+        st = (rec.status or "").upper()
+        if st == "PRESENT":
+            status_display = "Present"
+        elif st == "LATE":
+            status_display = "Late"
+        else:
+            status_display = "Absent"
+        is_attended = st in ("PRESENT", "LATE")
+
         marked_time_str = (
             rec.marked_at.strftime("%I:%M %p")
-            if (is_present and rec.marked_at)
+            if (is_attended and rec.marked_at)
             else "-"
         )
         method_str = (
             "Face Recognition"
             if rec.recognition_method == "FACE"
-            else ("Manual" if is_present else "-")
+            else ("Manual" if is_attended else "-")
         )
         conf_str = (
             f"{rec.confidence_score:.1f}%"
-            if (is_present and rec.confidence_score is not None)
+            if (is_attended and rec.confidence_score is not None)
             else "-"
         )
+
+        sem_val = off.semester if (off and off.semester is not None) else (stu.semester if stu else None)
+        sec_val = off.section.strip() if (off and off.section) else (stu.section.strip() if (stu and stu.section) else None)
+
+        if sem_val is not None and sec_val:
+            sem_sec_display = f"Semester {sem_val} / Section {sec_val}"
+        elif sem_val is not None:
+            sem_sec_display = f"Semester {sem_val} / Section N/A"
+        elif sec_val:
+            sem_sec_display = f"N/A / Section {sec_val}"
+        else:
+            sem_sec_display = "N/A"
 
         data.append({
             "attendance_id": rec.attendance_id,
@@ -474,8 +590,10 @@ def get_admin_attendance_records_list():
             "roll_no": stu.enrollment_no,
             "course_code": crs.course_code,
             "course_name": crs.course_name,
-            "section": off.section,
-            "status": "Present" if is_present else "Absent",
+            "semester": sem_val,
+            "section": sec_val or "N/A",
+            "semester_section": sem_sec_display,
+            "status": status_display,
             "marked_at": marked_time_str,
             "method": method_str,
             "confidence_score": conf_str,
@@ -525,22 +643,41 @@ def get_single_attendance_record(attendance_id):
     rec, sess, off, crs, stu, usr = item
     faculty_user = sess.faculty.user if (sess.faculty and sess.faculty.user) else None
 
+    st = (rec.status or "").upper()
+    status_display = "Present" if st == "PRESENT" else ("Late" if st == "LATE" else "Absent")
+
+    sem_val = off.semester if (off and off.semester is not None) else (stu.semester if stu else None)
+    sec_val = off.section.strip() if (off and off.section) else (stu.section.strip() if (stu and stu.section) else None)
+
+    if sem_val is not None and sec_val:
+        sem_sec_display = f"Semester {sem_val} / Section {sec_val}"
+    elif sem_val is not None:
+        sem_sec_display = f"Semester {sem_val} / Section N/A"
+    elif sec_val:
+        sem_sec_display = f"N/A / Section {sec_val}"
+    else:
+        sem_sec_display = "N/A"
+
     return jsonify({
         "success": True,
         "data": {
             "attendance_id": rec.attendance_id,
-            "status": "Present" if rec.status.upper() == "PRESENT" else "Absent",
+            "status": status_display,
             "marked_at": rec.marked_at.strftime("%I:%M:%S %p") if rec.marked_at else None,
             "confidence_score": rec.confidence_score,
             "recognition_method": rec.recognition_method,
+            "semester": sem_val,
+            "section": sec_val or "N/A",
+            "semester_section": sem_sec_display,
             "student": {
                 "student_id": stu.student_id,
                 "name": usr.name,
                 "email": usr.email,
                 "enrollment_no": stu.enrollment_no,
-                "section": off.section,
-                "semester": off.semester,
-                "academic_year": off.academic_year,
+                "section": sec_val or "N/A",
+                "semester": sem_val if sem_val is not None else "N/A",
+                "semester_section": sem_sec_display,
+                "academic_year": off.academic_year if off else getattr(stu, "academic_year", "N/A"),
             },
             "session": {
                 "session_id": sess.session_id,
@@ -569,6 +706,10 @@ def get_single_attendance_record(attendance_id):
 @admin_attendance_bp.get("/export")
 @admin_required
 def export_attendance_records():
+    from_d, to_d, err = _parse_and_validate_dates()
+    if err:
+        return err
+
     search = request.args.get("search", "").strip()
     status_filter = request.args.get("status")
 
@@ -588,7 +729,7 @@ def export_attendance_records():
         .join(User, Student.user_id == User.user_id)
     )
 
-    query = _build_session_filter(query)
+    query = _build_session_filter(query, from_d=from_d, to_d=to_d)
 
     if status_filter and status_filter not in ["All", "all", ""]:
         query = query.filter(AttendanceRecord.status == status_filter.upper())
@@ -623,7 +764,7 @@ def export_attendance_records():
         "Roll No.",
         "Course Code",
         "Course Name",
-        "Section",
+        "Semester / Section",
         "Status",
         "Marked At",
         "Method",
@@ -631,18 +772,38 @@ def export_attendance_records():
     ])
 
     for rec, sess, off, crs, stu, usr in records:
-        is_present = rec.status.upper() == "PRESENT"
+        st = (rec.status or "").upper()
+        if st == "PRESENT":
+            status_display = "Present"
+        elif st == "LATE":
+            status_display = "Late"
+        else:
+            status_display = "Absent"
+        is_attended = st in ("PRESENT", "LATE")
+
+        sem_val = off.semester if (off and off.semester is not None) else (stu.semester if stu else None)
+        sec_val = off.section.strip() if (off and off.section) else (stu.section.strip() if (stu and stu.section) else None)
+
+        if sem_val is not None and sec_val:
+            sem_sec_display = f"Semester {sem_val} / Section {sec_val}"
+        elif sem_val is not None:
+            sem_sec_display = f"Semester {sem_val} / Section N/A"
+        elif sec_val:
+            sem_sec_display = f"N/A / Section {sec_val}"
+        else:
+            sem_sec_display = "N/A"
+
         writer.writerow([
             sess.session_date.strftime("%Y-%m-%d"),
             usr.name,
             stu.enrollment_no,
             crs.course_code,
             crs.course_name,
-            off.section,
-            "Present" if is_present else "Absent",
-            rec.marked_at.strftime("%I:%M %p") if (is_present and rec.marked_at) else "-",
-            "Face Recognition" if rec.recognition_method == "FACE" else ("Manual" if is_present else "-"),
-            f"{rec.confidence_score:.1f}%" if (is_present and rec.confidence_score is not None) else "-",
+            sem_sec_display,
+            status_display,
+            rec.marked_at.strftime("%I:%M %p") if (is_attended and rec.marked_at) else "-",
+            "Face Recognition" if rec.recognition_method == "FACE" else ("Manual" if is_attended else "-"),
+            f"{rec.confidence_score:.1f}%" if (is_attended and rec.confidence_score is not None) else "-",
         ])
 
     csv_data = output.getvalue()

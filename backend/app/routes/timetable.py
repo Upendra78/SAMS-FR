@@ -2,6 +2,7 @@ from datetime import datetime
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
+from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.models import (
@@ -13,6 +14,7 @@ from app.models import (
     TimetableEntry,
 )
 from app.utils.auth import admin_required, faculty_required, student_required
+from app.utils.academic_year import canonical_academic_year
 
 timetable_bp = Blueprint(
     "timetable",
@@ -21,22 +23,24 @@ timetable_bp = Blueprint(
 )
 
 
-def serialize_entry(entry):
+def serialize_entry(entry, adjustment_data=None):
     offering = entry.offering
     course = offering.course if offering else None
     faculty = offering.faculty if offering else None
 
-    # Check for latest approved faculty adjustment
-    latest_adjustment = (
-        FacultyAdjustment.query.filter_by(
-            timetable_entry_id=entry.timetable_entry_id,
-            status="APPROVED",
+    # If adjustment_data wasn't pre-fetched, query it on demand (for backward compatibility)
+    if adjustment_data is None:
+        latest_adjustment = (
+            FacultyAdjustment.query.filter_by(
+                timetable_entry_id=entry.timetable_entry_id,
+                status="APPROVED",
+            )
+            .order_by(FacultyAdjustment.effective_date.desc(), FacultyAdjustment.created_at.desc())
+            .first()
         )
-        .order_by(FacultyAdjustment.effective_date.desc(), FacultyAdjustment.created_at.desc())
-        .first()
-    )
-
-    adjustment_data = latest_adjustment.to_dict() if latest_adjustment else None
+        adjustment_data = latest_adjustment.to_dict() if latest_adjustment else None
+    elif adjustment_data == {}:
+        adjustment_data = None
 
     return {
         "timetable_entry_id": entry.timetable_entry_id,
@@ -59,7 +63,7 @@ def serialize_entry(entry):
         "course_name": course.course_name if course else "",
         "section": offering.section if offering else "",
         "semester": offering.semester if offering else None,
-        "academic_year": offering.academic_year if offering else "",
+        "academic_year": canonical_academic_year(offering.academic_year) if offering else "",
         "offering_id": offering.offering_id if offering else None,
         "active_adjustment": adjustment_data,
         "effective_faculty_name": (
@@ -71,10 +75,41 @@ def serialize_entry(entry):
 
 
 def success_response(entries):
+    adjustments_map = {}
+    if entries:
+        entry_ids = [e.timetable_entry_id for e in entries]
+        adjustments = (
+            FacultyAdjustment.query
+            .filter(
+                FacultyAdjustment.timetable_entry_id.in_(entry_ids),
+                FacultyAdjustment.status == "APPROVED",
+            )
+            .options(
+                joinedload(FacultyAdjustment.original_faculty).joinedload(Faculty.user),
+                joinedload(FacultyAdjustment.substitute_faculty).joinedload(Faculty.user),
+                joinedload(FacultyAdjustment.adjusted_by),
+                joinedload(FacultyAdjustment.timetable_entry).joinedload(TimetableEntry.offering).joinedload(CourseOffering.course),
+            )
+            .order_by(
+                FacultyAdjustment.effective_date.desc(),
+                FacultyAdjustment.created_at.desc(),
+            )
+            .all()
+        )
+        for adj in adjustments:
+            if adj.timetable_entry_id not in adjustments_map:
+                adjustments_map[adj.timetable_entry_id] = adj.to_dict()
+
     return jsonify({
         "success": True,
         "count": len(entries),
-        "data": [serialize_entry(entry) for entry in entries],
+        "data": [
+            serialize_entry(
+                entry,
+                adjustment_data=adjustments_map.get(entry.timetable_entry_id, {})
+            )
+            for entry in entries
+        ],
     }), 200
 
 
@@ -84,6 +119,11 @@ def get_admin_timetable():
     entries = (
         TimetableEntry.query
         .join(CourseOffering)
+        .options(
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.course),
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.department),
+        )
         .order_by(
             TimetableEntry.day_of_week,
             TimetableEntry.start_time,
@@ -118,6 +158,11 @@ def get_faculty_timetable():
     query = (
         TimetableEntry.query
         .join(CourseOffering)
+        .options(
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.course),
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.department),
+        )
         .filter(
             db.or_(
                 CourseOffering.faculty_id == faculty.faculty_id,
@@ -163,6 +208,11 @@ def get_student_timetable():
 
     entries = (
         TimetableEntry.query
+        .options(
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.course),
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+            joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.department),
+        )
         .filter(TimetableEntry.offering_id.in_(offering_ids))
         .order_by(
             TimetableEntry.day_of_week,

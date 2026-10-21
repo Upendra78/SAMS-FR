@@ -7,7 +7,16 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.extensions import db
-from app.models import Course, CourseOffering, Enrollment, Student
+from app.services.activity_service import record_activity
+from app.models import Batch, Course, CourseOffering, Enrollment, Student
+from app.utils.academic_year import (
+    canonical_academic_year,
+    extract_cohort_start_year,
+    format_batch_cohort,
+    get_current_academic_session,
+    is_batch_cohort,
+    is_single_academic_session,
+)
 from app.utils.auth import admin_required, student_required
 
 
@@ -34,8 +43,14 @@ def _parse_group_request(data):
     except (TypeError, ValueError):
         return None, "department_id and semester must be valid integers"
 
-    cohort = data.get("academic_year")
+    cohort = (
+        data.get("batch_year")
+        or data.get("batch_name")
+        or data.get("cohort")
+        or data.get("academic_year")
+    )
     section = data.get("section")
+    session_ay = data.get("academic_session") or data.get("session_academic_year")
 
     if department_id < 1:
         return None, "department_id must be greater than 0"
@@ -46,25 +61,31 @@ def _parse_group_request(data):
     if not isinstance(cohort, str) or not isinstance(section, str):
         return None, "A cohort and section are required"
 
-    normalized_cohort = re.sub(r"\s+", "", cohort)
-    cohort_match = re.fullmatch(r"(\d{4})-(\d{4})", normalized_cohort)
+    normalized_cohort = format_batch_cohort(cohort)
+    cohort_start_year = extract_cohort_start_year(cohort)
 
-    if not cohort_match:
+    if not cohort_start_year or not re.match(r"^\d{4}-\d{4}$", normalized_cohort):
         return None, (
             "Cohort must use the format YYYY-YYYY, "
             "for example 2026-2030"
         )
 
-    cohort_start_year = cohort_match.group(1)
     normalized_section = section.strip()
 
     if not normalized_section:
         return None, "Section cannot be empty"
 
+    if session_ay and is_single_academic_session(session_ay):
+        offering_session = canonical_academic_year(session_ay)
+    else:
+        offering_session = get_current_academic_session()
+
     group = {
         "department_id": department_id,
         "academic_year": normalized_cohort,
+        "batch_year": normalized_cohort,
         "cohort_start_year": cohort_start_year,
+        "academic_session": offering_session,
         "semester": semester,
         "section": normalized_section,
     }
@@ -75,21 +96,28 @@ def _parse_group_request(data):
 def _get_group_enrollment_context(group):
     """
     Find active students and existing offerings for the selected cohort.
-
-    Student.academic_year represents the cohort range, while Course.batch
-    represents the cohort start year. CourseOffering.academic_year represents
-    the academic session, so it is intentionally not compared to the cohort.
+    Student cohort may be stored in Batch.batch_name or legacy Student.academic_year.
+    Course.batch represents the cohort start year. CourseOffering.academic_year
+    represents the academic session.
     """
+    cohort = group["academic_year"]
+    start_year = group["cohort_start_year"]
+    cohort_clean = cohort.replace(" ", "")
 
     students = (
         Student.query
         .join(Student.user)
+        .outerjoin(Student.batch)
         .filter(
             Student.department_id == group["department_id"],
             Student.semester == group["semester"],
             Student.section == group["section"],
-            db.func.replace(Student.academic_year, " ", "")
-            == group["academic_year"],
+            db.or_(
+                Batch.batch_name == cohort,
+                Batch.batch_name == start_year,
+                db.func.replace(Student.academic_year, " ", "") == cohort_clean,
+                db.func.replace(Student.academic_year, " ", "") == f"{start_year}-{int(start_year)+4}",
+            ),
             Student.user.has(is_active=True),
         )
         .order_by(Student.student_id.asc())
@@ -267,6 +295,12 @@ def delete_enrollment(enrollment_id):
     try:
         db.session.delete(enrollment)
         db.session.commit()
+        record_activity(
+            action_type="ENROLLMENT_DELETED",
+            description=f"Deleted enrollment record #{enrollment_id}",
+            entity_type="Enrollment",
+            entity_id=str(enrollment_id),
+        )
     except Exception:
         db.session.rollback()
         return jsonify({
@@ -488,9 +522,8 @@ def bulk_enroll_group():
     created_offerings = []
     matched_offerings = []
 
-    # New offerings use the existing academic-session convention.
-    start_year = int(group["cohort_start_year"])
-    session = f"{start_year} -{start_year + 1}"
+    # New offerings use the academic session convention.
+    session = canonical_academic_year(group.get("academic_session") or get_current_academic_session())
 
     try:
         for course in courses:
@@ -548,6 +581,13 @@ def bulk_enroll_group():
             db.session.execute(db.insert(Enrollment), rows)
 
         db.session.commit()
+
+        record_activity(
+            action_type="ENROLLMENT_BULK_CREATED",
+            description=f"Bulk enrolled {len(rows)} students into {len(offering_ids)} course offerings",
+            entity_type="Enrollment",
+            details={"created": len(rows), "offerings": len(offering_ids)},
+        )
 
     except IntegrityError:
         db.session.rollback()

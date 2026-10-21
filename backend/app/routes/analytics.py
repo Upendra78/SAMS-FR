@@ -11,6 +11,7 @@ from app.models import (
     Faculty,
 )
 from app.utils.auth import faculty_required
+from app.utils.academic_year import canonical_academic_year
 
 MINIMUM_ATTENDANCE_PERCENTAGE = 75.0
 
@@ -225,7 +226,7 @@ def get_attendance_analytics():
             "course_name": offering.course.course_name,
             "semester": offering.semester,
             "section": offering.section,
-            "academic_year": offering.academic_year,
+            "academic_year": canonical_academic_year(offering.academic_year),
             "room": offering.room,
             "total_sessions": session_count,
             "students": student_count,

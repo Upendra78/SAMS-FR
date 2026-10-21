@@ -1,13 +1,18 @@
-import api from "./api";
+import api, { clearApiCache } from "./api";
 
 export async function login(credentials) {
+  clearApiCache();
   const response = await api.post("/auth/login", credentials);
   return response.data;
 }
 
 export async function logout() {
-  const response = await api.post("/auth/logout");
-  return response.data;
+  try {
+    const response = await api.post("/auth/logout");
+    return response.data;
+  } finally {
+    clearApiCache();
+  }
 }
 
 export async function getCurrentUser() {

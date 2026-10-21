@@ -1,11 +1,14 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
+from sqlalchemy.orm import joinedload, selectinload
+
 from app.extensions import db, bcrypt
 from app.models import (
     Faculty,
     CourseOffering,
     Enrollment,
+    Student,
     User,
     Department,
     AttendanceRecord,
@@ -13,6 +16,7 @@ from app.models import (
     FacultyAdjustment,
     TimetableEntry,
 )
+from app.utils.academic_year import canonical_academic_year, resolve_student_academic_info
 from app.utils.auth import faculty_required, faculty_or_admin_required
 
 
@@ -471,9 +475,30 @@ def get_faculty_courses():
 
     offerings = (
         query
+        .options(
+            joinedload(CourseOffering.course),
+            selectinload(CourseOffering.timetable_entries),
+        )
         .order_by(CourseOffering.offering_id.asc())
         .all()
     )
+
+    offering_ids = [o.offering_id for o in offerings]
+    active_student_counts = {}
+    if offering_ids:
+        active_counts = (
+            db.session.query(
+                Enrollment.offering_id,
+                db.func.count(Enrollment.enrollment_id),
+            )
+            .filter(
+                Enrollment.offering_id.in_(offering_ids),
+                Enrollment.status == "ACTIVE",
+            )
+            .group_by(Enrollment.offering_id)
+            .all()
+        )
+        active_student_counts = dict(active_counts)
 
     data = []
 
@@ -488,20 +513,10 @@ def get_faculty_courses():
     }
 
     for offering in offerings:
-        active_student_count = (
-            Enrollment.query
-            .filter_by(
-                offering_id=offering.offering_id,
-                status="ACTIVE",
-            )
-            .count()
-        )
-
-        tt_entries = (
-            TimetableEntry.query
-            .filter_by(offering_id=offering.offering_id)
-            .order_by(TimetableEntry.day_of_week, TimetableEntry.start_time)
-            .all()
+        active_student_count = active_student_counts.get(offering.offering_id, 0)
+        tt_entries = sorted(
+            offering.timetable_entries,
+            key=lambda e: (e.day_of_week or "", e.start_time or "")
         )
 
         room = offering.room
@@ -605,15 +620,18 @@ def get_faculty_course(course_id):
 
         for enrollment in active_enrollments:
             student = enrollment.student
+            acad_info = resolve_student_academic_info(student)
 
             students.append({
                 "student_id": student.student_id,
                 "enrollment_no": student.enrollment_no,
                 "name": student.user.name,
                 "email": student.user.email,
-                "semester": student.semester,
-                "section": student.section,
-                "academic_year": student.academic_year,
+                "semester": acad_info["semester"],
+                "section": acad_info["section"],
+                "academic_year": canonical_academic_year(offering.academic_year),
+                "batch_year": acad_info["batch_year"],
+                "admission_year": acad_info["admission_year"],
                 "enrollment_status": enrollment.status,
             })
 
@@ -670,6 +688,11 @@ def get_faculty_students():
     query = (
         Enrollment.query
         .join(CourseOffering, Enrollment.offering_id == CourseOffering.offering_id)
+        .options(
+            joinedload(Enrollment.student).joinedload(Student.user),
+            joinedload(Enrollment.student).joinedload(Student.department),
+            joinedload(Enrollment.student).selectinload(Student.face_profiles),
+        )
         .filter(
             CourseOffering.faculty_id == faculty.faculty_id,
             Enrollment.status == "ACTIVE",
@@ -692,15 +715,19 @@ def get_faculty_students():
                 students[student.student_id]["offering_ids"].append(enrollment.offering_id)
             continue
 
+        acad_info = resolve_student_academic_info(student)
+
         students[student.student_id] = {
             "student_id": student.student_id,
             "user_id": student.user_id,
             "name": student.user.name,
             "email": student.user.email,
             "enrollment_no": student.enrollment_no,
-            "semester": student.semester,
-            "section": student.section,
-            "academic_year": student.academic_year,
+            "semester": acad_info["semester"],
+            "section": acad_info["section"],
+            "academic_year": acad_info["academic_year"],
+            "batch_year": acad_info["batch_year"],
+            "admission_year": acad_info["admission_year"],
             "offering_id": enrollment.offering_id,
             "offering_ids": [enrollment.offering_id],
             "has_face_profile": has_face,

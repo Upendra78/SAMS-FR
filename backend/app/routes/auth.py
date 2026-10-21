@@ -12,9 +12,10 @@ from flask_jwt_extended import (
 
 from app.extensions import db
 from app.models import User
+from app.services.activity_service import record_activity
 from app.services.auth_service import authenticate_user
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/api/auth")
@@ -40,6 +41,21 @@ def login():
             "success": False,
             "message": "Invalid email or password",
         }), 401
+
+    try:
+        user.last_login = datetime.utcnow()
+        record_activity(
+            action_type="USER_LOGIN",
+            description=f"{user.name} ({user.role}) logged in",
+            actor=user,
+            entity_type="User",
+            entity_id=str(user.user_id),
+            details={"email": user.email, "role": user.role},
+            commit=False,
+        )
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
     token_options = {}
 

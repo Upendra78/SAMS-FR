@@ -13,6 +13,8 @@ from app.models.timetable_entry import TimetableEntry
 from app.models.faculty_adjustment import FacultyAdjustment
 
 from app.models.batch import Batch
+from app.models.system_setting import SystemSetting
+from app.models.activity_log import ActivityLog
 
 __all__ = [
     "User",
@@ -28,4 +30,6 @@ __all__ = [
     "TimetableEntry",
     "FacultyAdjustment",
     "Batch",
+    "SystemSetting",
+    "ActivityLog",
 ]

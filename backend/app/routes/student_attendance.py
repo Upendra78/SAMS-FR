@@ -1,10 +1,13 @@
 
+from collections import defaultdict
 from datetime import date
 from math import ceil
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
+from sqlalchemy.orm import joinedload
 
+from app.extensions import db
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -52,7 +55,12 @@ def parse_date_filter(name):
         )
 
 
-def parse_positive_int(name, default=None, minimum=1, maximum=None):
+def parse_positive_int(
+    name,
+    default=None,
+    minimum=1,
+    maximum=None,
+):
     """Parse an optional positive integer query parameter."""
     value = request.args.get(name)
 
@@ -171,6 +179,7 @@ def build_history_query(student_id):
 
 
 def serialize_record(record):
+    """Serialize an attendance record for the student API."""
     session = record.session
     offering = session.offering
     course = offering.course
@@ -198,6 +207,7 @@ def serialize_record(record):
 @student_attendance_bp.get("/report")
 @student_required
 def get_my_attendance():
+    """Return filtered and paginated attendance history."""
     student = get_current_student()
 
     if not student:
@@ -223,10 +233,19 @@ def get_my_attendance():
         return error
 
     total_records = query.count()
-    total_pages = ceil(total_records / per_page) if total_records else 0
+    total_pages = (
+        ceil(total_records / per_page)
+        if total_records
+        else 0
+    )
 
     records = (
         query
+        .options(
+            joinedload(AttendanceRecord.session)
+            .joinedload(AttendanceSession.offering)
+            .joinedload(CourseOffering.course)
+        )
         .order_by(
             AttendanceSession.session_date.desc(),
             AttendanceRecord.marked_at.desc(),
@@ -243,13 +262,17 @@ def get_my_attendance():
         "per_page": per_page,
         "total_records": total_records,
         "total_pages": total_pages,
-        "data": [serialize_record(record) for record in records],
+        "data": [
+            serialize_record(record)
+            for record in records
+        ],
     }), 200
 
 
 @student_attendance_bp.get("/summary")
 @student_required
 def get_attendance_summary():
+    """Return attendance totals for the student's active enrollments."""
     student = get_current_student()
 
     if not student:
@@ -260,6 +283,10 @@ def get_attendance_summary():
 
     enrollments = (
         Enrollment.query
+        .options(
+            joinedload(Enrollment.offering)
+            .joinedload(CourseOffering.course)
+        )
         .filter_by(
             student_id=student.student_id,
             status="ACTIVE",
@@ -267,32 +294,75 @@ def get_attendance_summary():
         .all()
     )
 
+    offering_ids = [
+        enrollment.offering_id
+        for enrollment in enrollments
+        if enrollment.offering_id
+    ]
+
+    offering_sessions_map = defaultdict(list)
+    all_closed_session_ids = set()
+
+    if offering_ids:
+        all_sessions = (
+            AttendanceSession.query
+            .filter(
+                AttendanceSession.offering_id.in_(offering_ids),
+                AttendanceSession.status == "CLOSED",
+            )
+            .all()
+        )
+
+        for session in all_sessions:
+            offering_sessions_map[
+                session.offering_id
+            ].append(session.session_id)
+
+            all_closed_session_ids.add(session.session_id)
+
+    student_present_session_ids = set()
+
+    if all_closed_session_ids:
+        present_rows = (
+            db.session.query(AttendanceRecord.session_id)
+            .filter(
+                AttendanceRecord.student_id == student.student_id,
+                AttendanceRecord.session_id.in_(
+                    all_closed_session_ids
+                ),
+                AttendanceRecord.status == "PRESENT",
+            )
+            .all()
+        )
+
+        student_present_session_ids = {
+            row[0] for row in present_rows
+        }
+
     data = []
     overall_total = 0
     overall_present = 0
 
     for enrollment in enrollments:
         offering = enrollment.offering
+
+        if not offering:
+            continue
+
         course = offering.course
 
-        total_sessions = AttendanceSession.query.filter_by(
-            offering_id=offering.offering_id,
-            status="CLOSED",
-        ).count()
+        if not course:
+            continue
 
-        present_count = (
-            AttendanceRecord.query
-            .join(AttendanceSession)
-            .filter(
-                AttendanceRecord.student_id == student.student_id,
-                AttendanceSession.offering_id == offering.offering_id,
-                AttendanceSession.status == "CLOSED",
-                AttendanceRecord.status == "PRESENT",
-            )
-            .count()
+        session_ids = offering_sessions_map[
+            offering.offering_id
+        ]
+
+        total_sessions = len(session_ids)
+        present_count = len(
+            set(session_ids) & student_present_session_ids
         )
 
-        # Avoid counting more present sessions than the denominator.
         present_count = min(present_count, total_sessions)
         absent_count = total_sessions - present_count
 
@@ -318,6 +388,7 @@ def get_attendance_summary():
         })
 
     overall_absent = overall_total - overall_present
+
     overall_percentage = (
         (overall_present / overall_total) * 100
         if overall_total
@@ -331,7 +402,8 @@ def get_attendance_summary():
             "present_sessions": overall_present,
             "absent_sessions": overall_absent,
             "attendance_percentage": round(
-                overall_percentage, 2
+                overall_percentage,
+                2,
             ),
         },
         "data": data,
