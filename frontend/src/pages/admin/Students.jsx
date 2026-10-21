@@ -119,6 +119,7 @@ function Students() {
   const [filterDepartment, setFilterDepartment] = useState("All");
   const [filterSemester, setFilterSemester] = useState("All");
   const [filterSection, setFilterSection] = useState("All");
+  const [filterBatch, setFilterBatch] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
   const [searchInput, setSearchInput] = useState("");
   const [appliedSearch, setAppliedSearch] = useState("");
@@ -151,6 +152,7 @@ function Students() {
     section: "",
     academic_year: "",
     department_id: "",
+    batch_id: "",
   });
 
   const [deletingStudentId, setDeletingStudentId] = useState(null);
@@ -332,21 +334,37 @@ function Students() {
   }, [dbFilterOptions, summary, students]);
 
   // Load database filter options on mount
+  const fetchFilterOptions = useCallback(async () => {
+    try {
+      const res = await getAdminStudentsFilterOptions();
+      if (res?.success && res.data) {
+        setDbFilterOptions(res.data);
+      }
+    } catch (err) {
+      console.error("Filter options error:", err);
+    }
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
+    let isMounted = true;
+
     const loadFilterOptions = async () => {
       try {
         const res = await getAdminStudentsFilterOptions();
-        if (res?.success && res.data && !cancelled) {
+        if (isMounted && res?.success && res.data) {
           setDbFilterOptions(res.data);
         }
       } catch (err) {
-        console.error("Filter options error:", err);
+        if (isMounted) {
+          console.error("Filter options error:", err);
+        }
       }
     };
-    loadFilterOptions();
+
+    void loadFilterOptions();
+
     return () => {
-      cancelled = true;
+      isMounted = false;
     };
   }, []);
 
@@ -392,9 +410,15 @@ function Students() {
         (filterStatus === "Active" && student?.is_active === true) ||
         (filterStatus === "Inactive" && student?.is_active === false);
 
-      return matchesSearch && matchesDept && matchesSem && matchesSec && matchesStatus;
+      const matchesBatch =
+        filterBatch === "All" ||
+        String(student?.batch_id) === String(filterBatch) ||
+        String(student?.batch_year) === String(filterBatch) ||
+        String(student?.batch_name) === String(filterBatch);
+
+      return matchesSearch && matchesDept && matchesSem && matchesSec && matchesStatus && matchesBatch;
     });
-  }, [students, appliedSearch, filterDepartment, filterSemester, filterSection, filterStatus]);
+  }, [students, appliedSearch, filterDepartment, filterSemester, filterSection, filterStatus, filterBatch]);
 
   const totalPages = Math.max(1, Math.ceil(filteredStudents.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
@@ -413,6 +437,7 @@ function Students() {
     setFilterDepartment("All");
     setFilterSemester("All");
     setFilterSection("All");
+    setFilterBatch("All");
     setFilterStatus("All");
     setSearchInput("");
     setAppliedSearch("");
@@ -430,7 +455,9 @@ function Students() {
       enrollment_no: "",
       semester: "",
       section: "",
-      academic_year: new Date().getFullYear() + "-" + (new Date().getFullYear() + 1),
+      academic_year:
+        dbFilterOptions?.current_academic_year ||
+        new Date().getFullYear() + "-" + (new Date().getFullYear() + 1),
       department_id: "",
       batch_id: "",
     });
@@ -454,19 +481,33 @@ function Students() {
 
     const userId = Number(createStudentForm.user_id);
     const departmentId = Number(createStudentForm.department_id);
-    const semester = Number(createStudentForm.semester);
+    const enrollmentNo = String(createStudentForm.enrollment_no || "").trim();
+    const academicYear = String(createStudentForm.academic_year || "").trim();
+    const semesterRaw = String(createStudentForm.semester || "").trim();
+    const section = String(createStudentForm.section || "").trim();
 
-    if (!userId || !departmentId || !semester || !createStudentForm.enrollment_no.trim()) {
+    if (!userId || !departmentId || !enrollmentNo || !academicYear || !semesterRaw || !section) {
       setCreateStudentError("Please fill in all required fields.");
+      return;
+    }
+
+    const semester = Number(semesterRaw);
+    if (!/^\d+$/.test(semesterRaw) || !Number.isInteger(semester) || semester < 1 || semester > 8) {
+      setCreateStudentError("Semester must be a valid number between 1 and 8.");
+      return;
+    }
+
+    if (section.length > 20) {
+      setCreateStudentError("Section must not exceed 20 characters.");
       return;
     }
 
     const payload = {
       user_id: userId,
-      enrollment_no: createStudentForm.enrollment_no.trim(),
+      enrollment_no: enrollmentNo,
       semester,
-      section: createStudentForm.section.trim() || "A",
-      academic_year: createStudentForm.academic_year.trim(),
+      section,
+      academic_year: academicYear,
       department_id: departmentId,
       batch_id: createStudentForm.batch_id ? Number(createStudentForm.batch_id) : null,
     };
@@ -478,7 +519,7 @@ function Students() {
         throw new Error(res?.message || "Failed to create student.");
       }
       setShowCreateStudent(false);
-      await Promise.all([fetchStudents(), fetchSummary()]);
+      await Promise.all([fetchStudents(), fetchSummary(), fetchFilterOptions()]);
     } catch (err) {
       setCreateStudentError(
         err?.response?.data?.message || err?.message || "Failed to create student."
@@ -500,6 +541,7 @@ function Students() {
       section: student.section || "",
       academic_year: student.academic_year || "",
       department_id: String(student.department_id || ""),
+      batch_id: String(student.batch_id || ""),
     });
     setEditingStudent(student);
   }
@@ -537,6 +579,7 @@ function Students() {
         section: editStudentForm.section.trim(),
         academic_year: editStudentForm.academic_year.trim(),
         department_id: departmentId,
+        batch_id: editStudentForm.batch_id ? Number(editStudentForm.batch_id) : null,
       });
 
       if (!res?.success) {
@@ -848,6 +891,25 @@ function Students() {
           </div>
 
           <div className="student-filter-select-group">
+            <label htmlFor="filter-batch">Batch Year</label>
+            <select
+              id="filter-batch"
+              value={filterBatch}
+              onChange={(e) => {
+                setFilterBatch(e.target.value);
+                setCurrentPage(1);
+              }}
+            >
+              <option value="All">All Batches</option>
+              {batchOptions.map((b) => (
+                <option key={b.batch_id} value={b.batch_id}>
+                  {b.batch_name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="student-filter-select-group">
             <label htmlFor="filter-status">Status</label>
             <select
               id="filter-status"
@@ -1024,7 +1086,10 @@ function Students() {
                         <td>
                           <div className="student-name-cell">
                             <strong>{student.name || "Unnamed Student"}</strong>
-                            <small>{student.email || "No email"}</small>
+                            <small>
+                              {student.email || "No email"}
+                              {student.batch_year ? ` • Batch ${student.batch_year}` : ""}
+                            </small>
                           </div>
                         </td>
                         <td className="student-mono-cell">
@@ -1423,22 +1488,22 @@ function Students() {
                         <strong className="panel-info-val">
                           {selectedStudent.academic_year || "—"}
                         </strong>
+                        <small className="panel-info-sub">Current Academic Session</small>
                       </div>
                     </div>
 
-                    {selectedStudent.batch_name && (
-                      <div className="panel-info-item">
-                        <div className="panel-info-icon">
-                          <FontAwesomeIcon icon={faUsers} />
-                        </div>
-                        <div className="panel-info-text">
-                          <span className="panel-info-label">Batch</span>
-                          <strong className="panel-info-val">
-                            {selectedStudent.batch_name}
-                          </strong>
-                        </div>
+                    <div className="panel-info-item">
+                      <div className="panel-info-icon">
+                        <FontAwesomeIcon icon={faUsers} />
                       </div>
-                    )}
+                      <div className="panel-info-text">
+                        <span className="panel-info-label">Batch Year</span>
+                        <strong className="panel-info-val">
+                          {selectedStudent.batch_year || selectedStudent.batch_name || "—"}
+                        </strong>
+                        <small className="panel-info-sub">Cohort Program Duration</small>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -1630,39 +1695,30 @@ function Students() {
 
                 <div>
                   <label htmlFor="create-sem">Semester *</label>
-                  <select
+                  <input
                     id="create-sem"
                     name="semester"
+                    type="text"
+                    placeholder="e.g. 1"
                     value={createStudentForm.semester}
                     onChange={handleCreateStudentChange}
                     disabled={createStudentLoading}
                     required
-                  >
-                    <option value="">Select Semester</option>
-                    {semesterOptions.map((s) => (
-                      <option key={s} value={s}>
-                        Semester {s}
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
                 <div>
-                  <label htmlFor="create-sec">Section</label>
-                  <select
+                  <label htmlFor="create-sec">Section *</label>
+                  <input
                     id="create-sec"
                     name="section"
+                    type="text"
+                    placeholder="e.g. A"
                     value={createStudentForm.section}
                     onChange={handleCreateStudentChange}
                     disabled={createStudentLoading}
-                  >
-                    <option value="">Select Section</option>
-                    {sectionOptions.map((sec) => (
-                      <option key={sec} value={sec}>
-                        Section {sec}
-                      </option>
-                    ))}
-                  </select>
+                    required
+                  />
                 </div>
 
                 <div>
@@ -1677,10 +1733,13 @@ function Students() {
                     disabled={createStudentLoading}
                     required
                   />
+                  <small style={{ fontSize: "11px", color: "#6b7280" }}>
+                    Current academic session (e.g. 2026-2027)
+                  </small>
                 </div>
 
                 <div>
-                  <label htmlFor="create-batch">Batch (Optional)</label>
+                  <label htmlFor="create-batch">Batch Year / Cohort</label>
                   <select
                     id="create-batch"
                     name="batch_id"
@@ -1688,7 +1747,7 @@ function Students() {
                     onChange={handleCreateStudentChange}
                     disabled={createStudentLoading || batchesLoading}
                   >
-                    <option value="">Select a Batch (Optional)</option>
+                    <option value="">Select Batch (e.g. 2024-2028)</option>
                     {batchOptions.map((b) => (
                       <option key={b.batch_id} value={b.batch_id}>
                         {b.batch_name}
@@ -1844,17 +1903,39 @@ function Students() {
                   </select>
                 </div>
 
-                <div className="student-field-full">
+                <div>
                   <label htmlFor="edit-year">Academic Year *</label>
                   <input
                     id="edit-year"
                     name="academic_year"
                     type="text"
+                    placeholder="e.g. 2026-2027"
                     value={editStudentForm.academic_year}
                     onChange={handleEditStudentChange}
                     disabled={editStudentLoading}
                     required
                   />
+                  <small style={{ fontSize: "11px", color: "#6b7280" }}>
+                    Current academic session (e.g. 2026-2027)
+                  </small>
+                </div>
+
+                <div>
+                  <label htmlFor="edit-batch">Batch Year / Cohort</label>
+                  <select
+                    id="edit-batch"
+                    name="batch_id"
+                    value={editStudentForm.batch_id}
+                    onChange={handleEditStudentChange}
+                    disabled={editStudentLoading || batchesLoading}
+                  >
+                    <option value="">Select Batch (e.g. 2024-2028)</option>
+                    {batchOptions.map((b) => (
+                      <option key={b.batch_id} value={b.batch_id}>
+                        {b.batch_name}
+                      </option>
+                    ))}
+                  </select>
                 </div>
               </div>
 

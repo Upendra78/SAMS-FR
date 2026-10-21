@@ -467,7 +467,7 @@ function Profile() {
 
   const deptName = profile.department?.department_name || "Computer Science Engineering";
   const deptCode = profile.department?.department_code || "CSE";
-  const batchName = profile.batch?.batch_name || "2023-2027";
+  const batchName = profile.batch_year || profile.batch?.batch_name || "—";
   const stats = profile.stats || {};
 
   const hasPhoto = Boolean(profile.photo_url && !photoLoadFailed);
@@ -1124,23 +1124,23 @@ function Profile() {
               </div>
 
               <div className="student-info-item">
-                <span className="info-label">Batch</span>
+                <span className="info-label">Batch Year</span>
                 <strong className="info-value">{batchName}</strong>
               </div>
 
               <div className="student-info-item">
                 <span className="info-label">Semester</span>
-                <strong className="info-value">Semester {profile.semester}</strong>
+                <strong className="info-value">Semester {profile.semester ?? "—"}</strong>
               </div>
 
               <div className="student-info-item">
                 <span className="info-label">Section</span>
-                <strong className="info-value">Section {profile.section}</strong>
+                <strong className="info-value">Section {profile.section || "—"}</strong>
               </div>
 
               <div className="student-info-item">
                 <span className="info-label">Academic Year</span>
-                <strong className="info-value">{profile.academic_year}</strong>
+                <strong className="info-value">{profile.academic_year || "—"}</strong>
               </div>
 
               <div className="student-info-item">

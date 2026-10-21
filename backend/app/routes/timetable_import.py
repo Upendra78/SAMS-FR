@@ -8,6 +8,7 @@ from flask_jwt_extended import get_jwt_identity
 from openpyxl import load_workbook
 
 from app.extensions import db
+from app.services.activity_service import record_activity
 from app.models import (
     Course,
     CourseOffering,
@@ -18,6 +19,13 @@ from app.models import (
     User,
 )
 from app.utils.auth import admin_required
+from app.utils.academic_year import (
+    canonical_academic_year,
+    get_available_academic_sessions,
+    get_current_academic_session,
+    is_batch_cohort,
+    is_single_academic_session,
+)
 
 timetable_import_bp = Blueprint(
     "timetable_import",
@@ -44,7 +52,7 @@ COURSE_CODE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 ROOM_PATTERN = re.compile(
-    r"\b(?:Room|Rm|Lab|Hall)[-\s]*([A-Za-z0-9\-]+)|\b([RL][-\s]*\d{2,4})\b",
+    r"\b(?:Room|Rm|Lab|Hall)[-\s]*([A-Za-z0-9\-]+)|\b([RL][-\s]*\d{2,4})\b|(?:,\s*|\s+)(\d{3,4}[A-Za-z]?)$",
     re.IGNORECASE,
 )
 FACULTY_TITLE_PATTERN = re.compile(
@@ -304,7 +312,7 @@ def extract_cell_components(raw_cell, courses, faculty_members):
     # 1. Extract Room
     room_match = ROOM_PATTERN.search(text)
     if room_match:
-        extracted_room = room_match.group(0).strip()
+        extracted_room = room_match.group(0).strip(" ,")
 
     # 2. Match Course
     # Sort courses by code length descending to ensure BCSE-513L matches before BCSE-513
@@ -367,6 +375,15 @@ def extract_cell_components(raw_cell, courses, faculty_members):
 
     if len(matched_faculty_candidates) == 1:
         extracted_faculty = matched_faculty_candidates[0]
+    elif len(matched_faculty_candidates) > 1:
+        # Check if one candidate is an exact full name match (e.g. Dr. Arpneek Kaur vs Dr. Arpneek)
+        exact_full = [
+            f for f in matched_faculty_candidates
+            if f.user.name.strip().lower() in text.lower()
+        ]
+        if len(exact_full) == 1:
+            matched_faculty_candidates = exact_full
+            extracted_faculty = exact_full[0]
 
     return {
         "raw_cell": text,
@@ -601,41 +618,11 @@ def parse_workbook_sheet(sheet, sheet_name, header_row=None):
 @admin_required
 def get_available_academic_years():
     """
-    Returns available academic years from course_offerings, students, and system calendar.
+    Returns available academic years from course_offerings, system setting, and institutional calendar.
     Normalizes formatting and avoids cohort spans (e.g. 2026-2030).
     """
-    db_offering_years = [
-        r[0] for r in db.session.query(CourseOffering.academic_year).distinct().all() if r[0]
-    ]
-
-    cleaned_years = set()
-    for y in db_offering_years:
-        cleaned = re.sub(r"\s*-\s*", "-", str(y).strip())
-        m = re.match(r"^(\d{4})-(\d{4})$", cleaned)
-        if m:
-            start_y, end_y = int(m.group(1)), int(m.group(2))
-            if end_y - start_y == 1:
-                cleaned_years.add(cleaned)
-        elif re.match(r"^\d{4}-\d{2}$", cleaned):
-            century = cleaned[:2]
-            cleaned_years.add(f"{cleaned[:4]}-{century}{cleaned[5:]}")
-
-    current_year = datetime.now().year
-    generated_years = [
-        f"{current_year}-{current_year + 1}",
-        f"{current_year - 1}-{current_year}",
-        f"{current_year + 1}-{current_year + 2}",
-        f"{current_year - 2}-{current_year - 1}",
-        f"{current_year - 3}-{current_year - 2}",
-    ]
-
-    all_years = sorted(
-        list(cleaned_years.union(generated_years)),
-        reverse=True,
-    )
-
-    current_ay = f"{current_year}-{current_year + 1}"
-    default_year = current_ay if current_ay in all_years else all_years[0]
+    all_years = get_available_academic_sessions()
+    default_year = get_current_academic_session()
 
     return jsonify({
         "success": True,
@@ -834,6 +821,7 @@ def analyze_timetable_import():
     faculty_members = Faculty.query.join(User).all()
     faculty_by_id = {f.faculty_id: f for f in faculty_members}
     faculty_by_emp = {f.employee_id.upper(): f for f in faculty_members}
+    faculty_by_full_name = {f.user.name.strip().lower(): f for f in faculty_members}
     faculty_by_clean_name = {
         re.sub(r"^(?:Dr\.|Mr\.|Ms\.|Mrs\.|Prof\.)\s*", "", f.user.name, flags=re.I).strip().lower(): f
         for f in faculty_members
@@ -887,8 +875,9 @@ def analyze_timetable_import():
                 except (ValueError, TypeError):
                     matched_faculty = faculty_by_emp.get(str(f_id).upper())
             if not matched_faculty and f_name:
+                f_name_lower = f_name.strip().lower()
                 f_clean = re.sub(r"^(?:Dr\.|Mr\.|Ms\.|Mrs\.|Prof\.)\s*", "", f_name, flags=re.I).strip().lower()
-                matched_faculty = faculty_by_clean_name.get(f_clean)
+                matched_faculty = faculty_by_full_name.get(f_name_lower) or faculty_by_clean_name.get(f_clean)
             faculty_candidates = [matched_faculty] if matched_faculty else []
 
             detected_room = raw_item.get("room") or None
@@ -1284,10 +1273,10 @@ def commit_timetable_import():
                 offering_lookup[offering_key] = offering
                 created_offerings_count += 1
             else:
-                # Update faculty or room on offering if newly provided and previously null
-                if faculty_id and not offering.faculty_id:
+                # Update faculty or room on offering when provided
+                if faculty_id:
                     offering.faculty_id = faculty_id
-                if room and not offering.room:
+                if room:
                     offering.room = room
 
             # Resolve or create TimetableEntry
@@ -1319,6 +1308,19 @@ def commit_timetable_import():
             created_entries_count += 1
 
         db.session.commit()
+
+        record_activity(
+            action_type="TIMETABLE_IMPORTED",
+            description=f"Imported timetable for {academic_year} ({created_entries_count} created, {updated_entries_count} updated)",
+            actor_id=admin_user_id,
+            actor_name=admin_name,
+            entity_type="Timetable",
+            details={
+                "academic_year": academic_year,
+                "created_entries": created_entries_count,
+                "updated_entries": updated_entries_count,
+            },
+        )
 
         current_app.logger.info(
             f"Timetable import completed by {admin_name} (ID: {admin_user_id}) for {academic_year}: "

@@ -365,6 +365,65 @@
   line-height: 1.15;
 }
 
+.academic-summary-skeleton {
+  display: inline-block;
+  width: 48px;
+  height: 24px;
+  vertical-align: middle;
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    rgba(215, 226, 242, 0.6) 25%,
+    rgba(240, 246, 255, 0.95) 50%,
+    rgba(215, 226, 242, 0.6) 75%
+  );
+  background-size: 200% 100%;
+  animation: academic-skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes academic-skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.academic-summary-stat-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 15px;
+  font-weight: 700;
+  color: #dc2626;
+}
+
+.academic-summary-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #fca5a5;
+  border-radius: 6px;
+  background: #fef2f2;
+  color: #dc2626;
+  font-size: 11px;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    background-color 180ms ease;
+}
+
+.academic-summary-retry-btn:hover {
+  border-color: #ef4444;
+  background: #fee2e2;
+  color: #b91c1c;
+  transform: rotate(45deg);
+}
+
 .academic-summary-card > span,
 .academic-summary-content > span:not(.academic-summary-link) {
   position: relative;
@@ -972,6 +1031,20 @@ button.enrollment-delete-btn:hover:not(:disabled),
   color: #fff;
   font-weight: 700;
   opacity: 1;
+}
+
+.academic-page-ellipsis {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0 4px;
+  color: #94a3b8;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  user-select: none;
 }
 
 /* ---------- Integration notice ---------- */

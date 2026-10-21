@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  AlertCircle,
   Calendar,
   Check,
   ChevronDown,
@@ -45,11 +46,69 @@ function formatPercent(num) {
   return `${Number(num).toFixed(1)}%`;
 }
 
+function formatDateDisplay(dateStr) {
+  if (!dateStr) return "";
+  try {
+    const parts = String(dateStr).split("-");
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      return d.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+    return dateStr;
+  } catch {
+    return dateStr;
+  }
+}
+
+function getStatusBadgeClass(status) {
+  const s = (status || "").toLowerCase();
+  if (s === "present") return "present";
+  if (s === "late") return "late";
+  return "absent";
+}
+
+function formatSemesterSection(semester, section, preformatted) {
+  if (preformatted) return preformatted;
+  const semVal =
+    semester !== null && semester !== undefined && semester !== ""
+      ? `Semester ${semester}`
+      : "N/A";
+  const secVal =
+    section !== null && section !== undefined && section !== ""
+      ? `Section ${section}`
+      : "N/A";
+  if (semVal === "N/A" && secVal === "N/A") return "N/A";
+  return `${semVal} / ${secVal}`;
+}
+
 // =========================================================================
 // SVG CHART: ATTENDANCE TREND (Area + Spline Line Chart)
 // =========================================================================
-function AttendanceTrendChart({ trend = [] }) {
+function AttendanceTrendChart({ trend = [], loading = false, error = null }) {
   const [hoveredPoint, setHoveredPoint] = useState(null);
+
+  if (loading) {
+    return (
+      <div className="attendance-chart-empty-state">
+        <p>Loading attendance trend...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="attendance-chart-empty-state">
+        <p style={{ color: "#dc2626" }}>Unable to load trend data</p>
+      </div>
+    );
+  }
 
   if (!trend || trend.length === 0) {
     return (
@@ -200,8 +259,24 @@ function AttendanceTrendChart({ trend = [] }) {
 // =========================================================================
 // SVG CHART: ATTENDANCE BY COURSE (Donut Chart)
 // =========================================================================
-function AttendanceCourseDonut({ courses = [], totalClasses = 0 }) {
+function AttendanceCourseDonut({ courses = [], totalClasses = 0, loading = false, error = null }) {
   const [hoveredIdx, setHoveredIdx] = useState(null);
+
+  if (loading) {
+    return (
+      <div className="attendance-chart-empty-state">
+        <p>Loading course statistics...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="attendance-chart-empty-state">
+        <p style={{ color: "#dc2626" }}>Unable to load course statistics</p>
+      </div>
+    );
+  }
 
   if (!courses || courses.length === 0) {
     return (
@@ -307,8 +382,24 @@ function AttendanceCourseDonut({ courses = [], totalClasses = 0 }) {
 // =========================================================================
 // SVG CHART: ATTENDANCE BY SECTION (Bar Chart)
 // =========================================================================
-function AttendanceSectionBarChart({ sections = [] }) {
+function AttendanceSectionBarChart({ sections = [], loading = false, error = null }) {
   const [hoveredBar, setHoveredBar] = useState(null);
+
+  if (loading) {
+    return (
+      <div className="attendance-chart-empty-state">
+        <p>Loading section statistics...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="attendance-chart-empty-state">
+        <p style={{ color: "#dc2626" }}>Unable to load section statistics</p>
+      </div>
+    );
+  }
 
   if (!sections || sections.length === 0) {
     return (
@@ -429,28 +520,41 @@ function AttendanceSectionBarChart({ sections = [] }) {
 // MAIN ATTENDANCE REPORTS COMPONENT
 // =========================================================================
 function AttendanceReports() {
-  // Filter states (clean initial states with no hardcoded fake filters)
-  const [academicYear, setAcademicYear] = useState("All");
-  const [semester, setSemester] = useState("All");
-  const [section, setSection] = useState("All");
-  const [courseId, setCourseId] = useState("All");
-  const [facultyId, setFacultyId] = useState("All");
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [period, setPeriod] = useState("Last 4 Weeks");
+  // Draft filter states (bound to visible select inputs, initialized neutral)
+  const [draftAcademicYear, setDraftAcademicYear] = useState("All");
+  const [draftSemester, setDraftSemester] = useState("All");
+  const [draftSection, setDraftSection] = useState("All");
+  const [draftCourseId, setDraftCourseId] = useState("All");
+  const [draftFacultyId, setDraftFacultyId] = useState("All");
+  const [draftFromDate, setDraftFromDate] = useState("");
+  const [draftToDate, setDraftToDate] = useState("");
+  const [dateError, setDateError] = useState(null);
+
+  // Applied filter state (only updated when initial load, Apply, or Reset is executed)
+  const [appliedFilters, setAppliedFilters] = useState({
+    academicYear: "All",
+    semester: "All",
+    section: "All",
+    courseId: "All",
+    facultyId: "All",
+    fromDate: "",
+    toDate: "",
+    period: "Last 4 Weeks",
+  });
 
   // Dynamic filter options directly from backend API
   const [filterOptions, setFilterOptions] = useState({
     academic_years: [],
     semesters: [],
     sections: [],
+    semester_sections: {},
     courses: [],
     faculty: [],
   });
 
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // Real Dashboard data directly from backend (initialized with 0s, NO fake mockup numbers)
+  // Real Dashboard data directly from backend
   const [dashboardData, setDashboardData] = useState({
     kpi: {
       total_present: 0,
@@ -479,12 +583,28 @@ function AttendanceReports() {
   // View modal state
   const [selectedRecord, setSelectedRecord] = useState(null);
 
-  // Loading & exporting states
-  const [loading, setLoading] = useState(true);
+  // Loading & error states decoupled for dashboard and records
+  const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardError, setDashboardError] = useState(null);
+  const [recordsLoading, setRecordsLoading] = useState(true);
+  const [recordsError, setRecordsError] = useState(null);
   const [exporting, setExporting] = useState(false);
-  const [fetchTrigger, setFetchTrigger] = useState(0);
 
-  // 1. Fetch Filter Options on mount directly from backend
+  // Helper to build query parameters from applied filters
+  const buildQueryParams = useCallback((filters) => {
+    return {
+      academic_year: filters.academicYear !== "All" ? filters.academicYear : undefined,
+      semester: filters.semester !== "All" ? filters.semester : undefined,
+      section: filters.section !== "All" ? filters.section : undefined,
+      course_id: filters.courseId !== "All" ? filters.courseId : undefined,
+      faculty_id: filters.facultyId !== "All" ? filters.facultyId : undefined,
+      from_date: filters.fromDate || undefined,
+      to_date: filters.toDate || undefined,
+      period: filters.period,
+    };
+  }, []);
+
+  // 1. Fetch dynamic filter options on mount (NEVER auto-select any specific academic year or dates)
   useEffect(() => {
     let ignore = false;
 
@@ -497,16 +617,12 @@ function AttendanceReports() {
             academic_years: res.academic_years || [],
             semesters: res.semesters || [],
             sections: res.sections || [],
+            semester_sections: res.semester_sections || {},
             courses: res.courses || [],
             faculty: res.faculty || [],
           });
-          if (res.academic_years && res.academic_years.length > 0) {
-            setAcademicYear(res.academic_years[0]);
-          }
-          if (res.date_range?.from_date && res.date_range?.to_date) {
-            setFromDate(res.date_range.from_date);
-            setToDate(res.date_range.to_date);
-          }
+          // Note: Intentionally do NOT prefill draftAcademicYear or dates.
+          // Neutral options remain selected: "All Academic Years", date range empty.
         }
       } catch (err) {
         if (!ignore) {
@@ -522,126 +638,223 @@ function AttendanceReports() {
     };
   }, []);
 
-  // 2. Fetch Dashboard & Records Data directly from backend
+  // 2. Fetch Dashboard & Records when appliedFilters change (or on initial mount with neutral filters)
   useEffect(() => {
     let ignore = false;
 
-    async function loadAttendanceData() {
+    async function loadReportData() {
       try {
-        const queryParams = {
-          academic_year: academicYear !== "All" ? academicYear : undefined,
-          semester: semester !== "All" ? semester : undefined,
-          section: section !== "All" ? section : undefined,
-          course_id: courseId !== "All" ? courseId : undefined,
-          faculty_id: facultyId !== "All" ? facultyId : undefined,
-          from_date: fromDate || undefined,
-          to_date: toDate || undefined,
-          period: period,
-        };
-
-        const [dashRes, recRes] = await Promise.all([
-          getAdminAttendanceDashboard(queryParams),
+        const qp = buildQueryParams(appliedFilters);
+        const [dashRes, recRes] = await Promise.allSettled([
+          getAdminAttendanceDashboard(qp),
           getAdminAttendanceRecordsList({
-            ...queryParams,
-            page,
+            ...qp,
+            page: 1,
             per_page: perPage,
           }),
         ]);
 
         if (ignore) return;
 
-        if (dashRes && dashRes.success) {
-          setDashboardData(dashRes);
+        if (dashRes.status === "fulfilled" && dashRes.value?.success) {
+          setDashboardData(dashRes.value);
+          setDashboardError(null);
+        } else {
+          const errorMsg =
+            dashRes.status === "rejected"
+              ? dashRes.reason?.response?.data?.message || dashRes.reason?.message || "Failed to load dashboard data."
+              : dashRes.value?.message || "Failed to load dashboard data.";
+          setDashboardError(errorMsg);
         }
+        setDashboardLoading(false);
 
-        if (recRes && recRes.success) {
-          setRecords(recRes.data || []);
-          setTotalRecords(recRes.total_records || 0);
-          setTotalPages(recRes.total_pages || 1);
+        if (recRes.status === "fulfilled" && recRes.value?.success) {
+          setRecords(recRes.value.data || []);
+          setTotalRecords(recRes.value.total_records || 0);
+          setTotalPages(recRes.value.total_pages || 1);
+          setRecordsError(null);
+        } else {
+          const errorMsg =
+            recRes.status === "rejected"
+              ? recRes.reason?.response?.data?.message || recRes.reason?.message || "Failed to load attendance records."
+              : recRes.value?.message || "Failed to load attendance records.";
+          setRecordsError(errorMsg);
         }
+        setRecordsLoading(false);
       } catch (err) {
         if (!ignore) {
-          console.error("Failed to load attendance data", err);
-        }
-      } finally {
-        if (!ignore) {
-          setLoading(false);
+          console.error("Attendance data fetch failed", err);
+          setDashboardError("Failed to load attendance dashboard data.");
+          setRecordsError("Failed to load attendance records.");
+          setDashboardLoading(false);
+          setRecordsLoading(false);
         }
       }
     }
 
-    loadAttendanceData();
+    loadReportData();
 
     return () => {
       ignore = true;
     };
-  }, [
-    academicYear,
-    semester,
-    section,
-    courseId,
-    facultyId,
-    fromDate,
-    toDate,
-    period,
-    page,
-    fetchTrigger,
-  ]);
+  }, [appliedFilters, buildQueryParams, perPage]);
 
+  // 3. Retry handlers
+  const handleRetryDashboard = async () => {
+    setDashboardLoading(true);
+    setDashboardError(null);
+    try {
+      const qp = buildQueryParams(appliedFilters);
+      const res = await getAdminAttendanceDashboard(qp);
+      if (res && res.success) {
+        setDashboardData(res);
+      } else {
+        setDashboardError(res?.message || "Failed to load attendance dashboard data.");
+      }
+    } catch (err) {
+      setDashboardError(
+        err?.response?.data?.message || err?.message || "Failed to load attendance dashboard data."
+      );
+    } finally {
+      setDashboardLoading(false);
+    }
+  };
+
+  const handleRetryRecords = async () => {
+    setRecordsLoading(true);
+    setRecordsError(null);
+    try {
+      const qp = {
+        ...buildQueryParams(appliedFilters),
+        page,
+        per_page: perPage,
+      };
+      const res = await getAdminAttendanceRecordsList(qp);
+      if (res && res.success) {
+        setRecords(res.data || []);
+        setTotalRecords(res.total_records || 0);
+        setTotalPages(res.total_pages || 1);
+      } else {
+        setRecordsError(res?.message || "Failed to load attendance records.");
+      }
+    } catch (err) {
+      setRecordsError(
+        err?.response?.data?.message || err?.message || "Failed to load attendance records."
+      );
+    } finally {
+      setRecordsLoading(false);
+    }
+  };
+
+  // 4. Handle page changes without refetching the entire dashboard
+  const handlePageChange = async (newPage) => {
+    setPage(newPage);
+    setRecordsLoading(true);
+    setRecordsError(null);
+    try {
+      const qp = {
+        ...buildQueryParams(appliedFilters),
+        page: newPage,
+        per_page: perPage,
+      };
+      const res = await getAdminAttendanceRecordsList(qp);
+      if (res && res.success) {
+        setRecords(res.data || []);
+        setTotalRecords(res.total_records || 0);
+        setTotalPages(res.total_pages || 1);
+      } else {
+        setRecordsError(res?.message || "Failed to load attendance records.");
+      }
+    } catch (err) {
+      setRecordsError(
+        err?.response?.data?.message || err?.message || "Failed to load attendance records."
+      );
+    } finally {
+      setRecordsLoading(false);
+    }
+  };
+
+  // 5. Validate & Apply Filters
   const handleApplyFilters = () => {
-    setLoading(true);
-    setPage(1);
-    setFetchTrigger((prev) => prev + 1);
+    if (draftFromDate && draftToDate && draftFromDate > draftToDate) {
+      setDateError("Start date cannot be after end date.");
+      setShowDatePicker(true);
+      return;
+    }
+    setDateError(null);
     setShowDatePicker(false);
+    setPage(1);
+    setDashboardLoading(true);
+    setRecordsLoading(true);
+    setAppliedFilters({
+      academicYear: draftAcademicYear,
+      semester: draftSemester,
+      section: draftSection,
+      courseId: draftCourseId,
+      facultyId: draftFacultyId,
+      fromDate: draftFromDate,
+      toDate: draftToDate,
+      period: appliedFilters.period,
+    });
   };
 
+  // 6. Reset Filters to neutral initial state
   const handleResetFilters = () => {
-    setLoading(true);
-    setAcademicYear(filterOptions.academic_years[0] || "All");
-    setSemester("All");
-    setSection("All");
-    setCourseId("All");
-    setFacultyId("All");
-    setFromDate("");
-    setToDate("");
-    setPage(1);
-    setFetchTrigger((prev) => prev + 1);
+    setDraftAcademicYear("All");
+    setDraftSemester("All");
+    setDraftSection("All");
+    setDraftCourseId("All");
+    setDraftFacultyId("All");
+    setDraftFromDate("");
+    setDraftToDate("");
+    setDateError(null);
     setShowDatePicker(false);
+    setPage(1);
+    setDashboardLoading(true);
+    setRecordsLoading(true);
+    setAppliedFilters({
+      academicYear: "All",
+      semester: "All",
+      section: "All",
+      courseId: "All",
+      facultyId: "All",
+      fromDate: "",
+      toDate: "",
+      period: "Last 4 Weeks",
+    });
   };
 
-  // Download real CSV report from backend API
+  // 7. Handle Period change for Attendance Trend
+  const handlePeriodChange = (newPeriod) => {
+    setDashboardLoading(true);
+    setAppliedFilters((prev) => ({ ...prev, period: newPeriod }));
+  };
+
+  // 7. Download real CSV report from backend API respecting applied filters
   const handleDownloadReport = async () => {
     try {
       setExporting(true);
-      const queryParams = {
-        academic_year: academicYear !== "All" ? academicYear : undefined,
-        semester: semester !== "All" ? semester : undefined,
-        section: section !== "All" ? section : undefined,
-        course_id: courseId !== "All" ? courseId : undefined,
-        faculty_id: facultyId !== "All" ? facultyId : undefined,
-        from_date: fromDate || undefined,
-        to_date: toDate || undefined,
-      };
-
+      const queryParams = buildQueryParams(appliedFilters);
       const blobData = await exportAdminAttendanceCsv(queryParams);
       const blob = new Blob([blobData], { type: "text/csv;charset=utf-8;" });
       const url = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
-      link.setAttribute("download", `Attendance_Report_${academicYear || "All"}.csv`);
+      const yearSuffix = appliedFilters.academicYear !== "All" ? `_${appliedFilters.academicYear}` : "";
+      link.setAttribute("download", `Attendance_Report${yearSuffix}.csv`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (err) {
       console.error("Export failed", err);
-      alert("Failed to export attendance report from backend.");
+      alert(err?.response?.data?.message || err?.message || "Failed to export attendance report from backend.");
     } finally {
       setExporting(false);
     }
   };
 
-  // View real record details from backend API in modal
+  // 8. View real record details from backend API in modal
   const handleViewRecord = async (record) => {
     setSelectedRecord(record);
     try {
@@ -654,31 +867,49 @@ function AttendanceReports() {
     }
   };
 
-  // Date range display text
-  const dateRangeDisplay = useMemo(() => {
-    if (!fromDate && !toDate) return "Select Date Range";
-    try {
-      const f = fromDate
-        ? new Date(fromDate).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : "Start";
-      const t = toDate
-        ? new Date(toDate).toLocaleDateString("en-US", {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : "End";
-      return `${f} - ${t}`;
-    } catch {
-      return `${fromDate} - ${toDate}`;
+  // Restrict available sections dynamically based on selected semester
+  const availableSections = useMemo(() => {
+    if (draftSemester !== "All" && filterOptions.semester_sections?.[draftSemester]) {
+      return filterOptions.semester_sections[draftSemester];
     }
-  }, [fromDate, toDate]);
+    return filterOptions.sections || [];
+  }, [draftSemester, filterOptions.semester_sections, filterOptions.sections]);
 
-  const totalAttendanceMarks = (dashboardData.kpi?.total_present || 0) + (dashboardData.kpi?.total_absent || 0);
+  const handleSemesterChange = (newSemester) => {
+    setDraftSemester(newSemester);
+    if (newSemester !== "All" && filterOptions.semester_sections?.[newSemester]) {
+      const validSections = filterOptions.semester_sections[newSemester];
+      if (draftSection !== "All" && !validSections.includes(draftSection)) {
+        setDraftSection("All");
+      }
+    }
+  };
+
+  // Date range display text for the filter button
+  const dateRangeDisplay = useMemo(() => {
+    if (!draftFromDate && !draftToDate) return "Select Date Range";
+    if (draftFromDate && draftToDate) {
+      return `${formatDateDisplay(draftFromDate)} - ${formatDateDisplay(draftToDate)}`;
+    }
+    if (draftFromDate) return `From ${formatDateDisplay(draftFromDate)}`;
+    return `Until ${formatDateDisplay(draftToDate)}`;
+  }, [draftFromDate, draftToDate]);
+
+  // Check if any filter is actively applied beyond neutral
+  const hasActiveFilters = useMemo(() => {
+    return (
+      appliedFilters.academicYear !== "All" ||
+      appliedFilters.semester !== "All" ||
+      appliedFilters.section !== "All" ||
+      appliedFilters.courseId !== "All" ||
+      appliedFilters.facultyId !== "All" ||
+      Boolean(appliedFilters.fromDate) ||
+      Boolean(appliedFilters.toDate)
+    );
+  }, [appliedFilters]);
+
+  const totalAttendanceMarks =
+    (dashboardData.kpi?.total_present || 0) + (dashboardData.kpi?.total_absent || 0);
 
   return (
     <div className="attendance-page-container">
@@ -719,10 +950,10 @@ function AttendanceReports() {
             <select
               id="academic-year-select"
               className="attendance-filter-select"
-              value={academicYear}
-              onChange={(e) => setAcademicYear(e.target.value)}
+              value={draftAcademicYear}
+              onChange={(e) => setDraftAcademicYear(e.target.value)}
             >
-              <option value="All">All Years</option>
+              <option value="All">All Academic Years</option>
               {filterOptions.academic_years.map((year) => (
                 <option key={year} value={year}>
                   {year}
@@ -742,8 +973,8 @@ function AttendanceReports() {
             <select
               id="semester-select"
               className="attendance-filter-select"
-              value={semester}
-              onChange={(e) => setSemester(e.target.value)}
+              value={draftSemester}
+              onChange={(e) => handleSemesterChange(e.target.value)}
             >
               <option value="All">All Semesters</option>
               {filterOptions.semesters.map((sem) => (
@@ -765,11 +996,11 @@ function AttendanceReports() {
             <select
               id="section-select"
               className="attendance-filter-select"
-              value={section}
-              onChange={(e) => setSection(e.target.value)}
+              value={draftSection}
+              onChange={(e) => setDraftSection(e.target.value)}
             >
               <option value="All">All Sections</option>
-              {filterOptions.sections.map((sec) => (
+              {availableSections.map((sec) => (
                 <option key={sec} value={sec}>
                   Section {sec}
                 </option>
@@ -788,8 +1019,8 @@ function AttendanceReports() {
             <select
               id="course-select"
               className="attendance-filter-select"
-              value={courseId}
-              onChange={(e) => setCourseId(e.target.value)}
+              value={draftCourseId}
+              onChange={(e) => setDraftCourseId(e.target.value)}
             >
               <option value="All">All Courses</option>
               {filterOptions.courses.map((c) => (
@@ -811,8 +1042,8 @@ function AttendanceReports() {
             <select
               id="faculty-select"
               className="attendance-filter-select"
-              value={facultyId}
-              onChange={(e) => setFacultyId(e.target.value)}
+              value={draftFacultyId}
+              onChange={(e) => setDraftFacultyId(e.target.value)}
             >
               <option value="All">All Faculty</option>
               {filterOptions.faculty.map((f) => (
@@ -843,26 +1074,70 @@ function AttendanceReports() {
                 <label>From Date</label>
                 <input
                   type="date"
-                  value={fromDate}
-                  onChange={(e) => setFromDate(e.target.value)}
+                  value={draftFromDate}
+                  onChange={(e) => {
+                    setDraftFromDate(e.target.value);
+                    setDateError(null);
+                  }}
                 />
               </div>
               <div className="attendance-date-input-field">
                 <label>To Date</label>
                 <input
                   type="date"
-                  value={toDate}
-                  onChange={(e) => setToDate(e.target.value)}
+                  value={draftToDate}
+                  onChange={(e) => {
+                    setDraftToDate(e.target.value);
+                    setDateError(null);
+                  }}
                 />
               </div>
-              <button
-                type="button"
-                className="attendance-btn-apply"
-                style={{ height: "30px", marginTop: "4px" }}
-                onClick={() => setShowDatePicker(false)}
-              >
-                Done
-              </button>
+
+              {dateError && (
+                <div
+                  style={{
+                    color: "#ef4444",
+                    fontSize: "11px",
+                    fontWeight: 500,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px",
+                  }}
+                >
+                  <AlertCircle size={12} />
+                  {dateError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "8px", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  className="attendance-btn-reset"
+                  style={{ height: "30px", flex: 1, padding: "0 8px" }}
+                  onClick={() => {
+                    setDraftFromDate("");
+                    setDraftToDate("");
+                    setDateError(null);
+                  }}
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  className="attendance-btn-apply"
+                  style={{ height: "30px", flex: 1, padding: "0 8px" }}
+                  onClick={() => {
+                    if (draftFromDate && draftToDate && draftFromDate > draftToDate) {
+                      setDateError("Start date cannot be after end date.");
+                      return;
+                    }
+                    setDateError(null);
+                    setShowDatePicker(false);
+                  }}
+                >
+                  Done
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -873,7 +1148,7 @@ function AttendanceReports() {
             type="button"
             className="attendance-btn-apply"
             onClick={handleApplyFilters}
-            disabled={loading}
+            disabled={dashboardLoading || recordsLoading}
           >
             <Filter size={14} />
             Apply Filters
@@ -882,13 +1157,74 @@ function AttendanceReports() {
             type="button"
             className="attendance-btn-reset"
             onClick={handleResetFilters}
-            disabled={loading}
+            disabled={dashboardLoading || recordsLoading}
           >
             <RotateCcw size={13} />
             Reset
           </button>
         </div>
       </section>
+
+      {/* Active Filters Display */}
+      {hasActiveFilters && (
+        <div className="attendance-active-filters-bar" style={{ marginBottom: "16px" }}>
+          <span className="attendance-active-filters-label">Active Filters:</span>
+          {appliedFilters.academicYear !== "All" && (
+            <span className="attendance-filter-tag">Academic Year: {appliedFilters.academicYear}</span>
+          )}
+          {appliedFilters.semester !== "All" && (
+            <span className="attendance-filter-tag">Semester: {appliedFilters.semester}</span>
+          )}
+          {appliedFilters.section !== "All" && (
+            <span className="attendance-filter-tag">Section: {appliedFilters.section}</span>
+          )}
+          {appliedFilters.courseId !== "All" && (
+            <span className="attendance-filter-tag">
+              Course:{" "}
+              {filterOptions.courses.find((c) => String(c.course_id) === String(appliedFilters.courseId))
+                ?.course_code || appliedFilters.courseId}
+            </span>
+          )}
+          {appliedFilters.facultyId !== "All" && (
+            <span className="attendance-filter-tag">
+              Faculty:{" "}
+              {filterOptions.faculty.find((f) => String(f.faculty_id) === String(appliedFilters.facultyId))
+                ?.name || appliedFilters.facultyId}
+            </span>
+          )}
+          {(appliedFilters.fromDate || appliedFilters.toDate) && (
+            <span className="attendance-filter-tag">
+              Date: {formatDateDisplay(appliedFilters.fromDate) || "Start"} -{" "}
+              {formatDateDisplay(appliedFilters.toDate) || "End"}
+            </span>
+          )}
+          <button
+            type="button"
+            className="attendance-clear-all-tag"
+            onClick={handleResetFilters}
+            title="Clear all filters"
+          >
+            Clear All
+          </button>
+        </div>
+      )}
+
+      {/* Dashboard Error Alert Banner */}
+      {dashboardError && (
+        <div className="attendance-error-banner" style={{ marginBottom: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <AlertCircle size={16} />
+            <span>{dashboardError}</span>
+          </div>
+          <button
+            type="button"
+            className="attendance-retry-btn"
+            onClick={handleRetryDashboard}
+          >
+            <RotateCcw size={12} /> Retry
+          </button>
+        </div>
+      )}
 
       {/* ================================================================= */}
       {/* 3. KPI STAT CARDS (4 CARDS)                                       */}
@@ -908,16 +1244,20 @@ function AttendanceReports() {
             <span className="attendance-kpi-title">Total Present</span>
             <div className="attendance-kpi-value-row">
               <span className="attendance-kpi-value">
-                {formatNumber(dashboardData.kpi?.total_present)}
+                {dashboardLoading ? "—" : dashboardError ? "—" : formatNumber(dashboardData.kpi?.total_present)}
               </span>
-              {dashboardData.kpi?.present_trend && (
+              {!dashboardLoading && !dashboardError && dashboardData.kpi?.present_trend && (
                 <span className="attendance-kpi-trend positive">
                   ↑ {dashboardData.kpi.present_trend}
                 </span>
               )}
             </div>
             <span className="attendance-kpi-subtitle">
-              {totalAttendanceMarks > 0
+              {dashboardLoading
+                ? "Loading..."
+                : dashboardError
+                ? "Data unavailable"
+                : totalAttendanceMarks > 0
                 ? `${formatPercent(dashboardData.kpi?.present_rate)} of total`
                 : "No attendance recorded"}
             </span>
@@ -938,16 +1278,20 @@ function AttendanceReports() {
             <span className="attendance-kpi-title">Total Absent</span>
             <div className="attendance-kpi-value-row">
               <span className="attendance-kpi-value">
-                {formatNumber(dashboardData.kpi?.total_absent)}
+                {dashboardLoading ? "—" : dashboardError ? "—" : formatNumber(dashboardData.kpi?.total_absent)}
               </span>
-              {dashboardData.kpi?.absent_trend && (
+              {!dashboardLoading && !dashboardError && dashboardData.kpi?.absent_trend && (
                 <span className="attendance-kpi-trend negative">
                   ↑ {dashboardData.kpi.absent_trend}
                 </span>
               )}
             </div>
             <span className="attendance-kpi-subtitle">
-              {totalAttendanceMarks > 0
+              {dashboardLoading
+                ? "Loading..."
+                : dashboardError
+                ? "Data unavailable"
+                : totalAttendanceMarks > 0
                 ? `${formatPercent(dashboardData.kpi?.absent_rate)} of total`
                 : "No attendance recorded"}
             </span>
@@ -968,15 +1312,17 @@ function AttendanceReports() {
             <span className="attendance-kpi-title">Total Classes</span>
             <div className="attendance-kpi-value-row">
               <span className="attendance-kpi-value">
-                {formatNumber(dashboardData.kpi?.total_classes)}
+                {dashboardLoading ? "—" : dashboardError ? "—" : formatNumber(dashboardData.kpi?.total_classes)}
               </span>
-              {dashboardData.kpi?.classes_trend && (
+              {!dashboardLoading && !dashboardError && dashboardData.kpi?.classes_trend && (
                 <span className="attendance-kpi-trend positive">
                   ↑ {dashboardData.kpi.classes_trend}
                 </span>
               )}
             </div>
-            <span className="attendance-kpi-subtitle">Scheduled classes</span>
+            <span className="attendance-kpi-subtitle">
+              {dashboardLoading ? "Loading..." : dashboardError ? "Data unavailable" : "Scheduled classes"}
+            </span>
           </div>
         </div>
 
@@ -994,15 +1340,17 @@ function AttendanceReports() {
             <span className="attendance-kpi-title">Attendance Rate</span>
             <div className="attendance-kpi-value-row">
               <span className="attendance-kpi-value">
-                {formatPercent(dashboardData.kpi?.attendance_rate)}
+                {dashboardLoading ? "—" : dashboardError ? "—" : formatPercent(dashboardData.kpi?.attendance_rate)}
               </span>
-              {dashboardData.kpi?.rate_trend && (
+              {!dashboardLoading && !dashboardError && dashboardData.kpi?.rate_trend && (
                 <span className="attendance-kpi-trend positive">
                   ↑ {dashboardData.kpi.rate_trend}
                 </span>
               )}
             </div>
-            <span className="attendance-kpi-subtitle">Overall attendance</span>
+            <span className="attendance-kpi-subtitle">
+              {dashboardLoading ? "Loading..." : dashboardError ? "Data unavailable" : "Overall attendance"}
+            </span>
           </div>
         </div>
       </section>
@@ -1020,11 +1368,8 @@ function AttendanceReports() {
             </div>
             <select
               className="attendance-period-select"
-              value={period}
-              onChange={(e) => {
-                setLoading(true);
-                setPeriod(e.target.value);
-              }}
+              value={appliedFilters.period}
+              onChange={(e) => handlePeriodChange(e.target.value)}
             >
               <option value="Last 4 Weeks">Last 4 Weeks</option>
               <option value="Last 7 Days">Last 7 Days</option>
@@ -1033,9 +1378,13 @@ function AttendanceReports() {
             </select>
           </div>
 
-          <AttendanceTrendChart trend={dashboardData.trend} />
+          <AttendanceTrendChart
+            trend={dashboardData.trend}
+            loading={dashboardLoading}
+            error={dashboardError}
+          />
 
-          {dashboardData.trend && dashboardData.trend.length > 0 && (
+          {!dashboardLoading && !dashboardError && dashboardData.trend && dashboardData.trend.length > 0 && (
             <div className="attendance-chart-legend-bottom">
               <span className="attendance-legend-dot" />
               <span>Attendance Rate</span>
@@ -1055,6 +1404,8 @@ function AttendanceReports() {
           <AttendanceCourseDonut
             courses={dashboardData.by_course}
             totalClasses={dashboardData.kpi?.total_classes}
+            loading={dashboardLoading}
+            error={dashboardError}
           />
         </div>
 
@@ -1067,7 +1418,11 @@ function AttendanceReports() {
             </div>
           </div>
 
-          <AttendanceSectionBarChart sections={dashboardData.by_section} />
+          <AttendanceSectionBarChart
+            sections={dashboardData.by_section}
+            loading={dashboardLoading}
+            error={dashboardError}
+          />
         </div>
       </section>
 
@@ -1101,7 +1456,7 @@ function AttendanceReports() {
                 <th>Roll No.</th>
                 <th>Course Code</th>
                 <th>Course Name</th>
-                <th>Section</th>
+                <th>Semester / Section</th>
                 <th>Status</th>
                 <th>Marked At</th>
                 <th>Method</th>
@@ -1110,49 +1465,63 @@ function AttendanceReports() {
               </tr>
             </thead>
             <tbody>
-              {records.length === 0 ? (
+              {recordsLoading ? (
                 <tr>
                   <td colSpan="11" style={{ textAlign: "center", padding: "34px", color: "#64748b" }}>
-                    {loading ? "Loading attendance records from backend..." : "No attendance records recorded yet."}
+                    Loading attendance records from backend...
+                  </td>
+                </tr>
+              ) : recordsError ? (
+                <tr>
+                  <td colSpan="11" style={{ textAlign: "center", padding: "34px", color: "#dc2626" }}>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px" }}>
+                      <span>Failed to load attendance records: {recordsError}</span>
+                      <button
+                        type="button"
+                        className="attendance-retry-btn"
+                        onClick={handleRetryRecords}
+                      >
+                        <RotateCcw size={12} /> Retry
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ) : records.length === 0 ? (
+                <tr>
+                  <td colSpan="11" style={{ textAlign: "center", padding: "34px", color: "#64748b" }}>
+                    No attendance records match the selected filters.
                   </td>
                 </tr>
               ) : (
-                records.map((rec) => {
-                  const isPresent = rec.status === "Present";
-                  return (
-                    <tr key={rec.attendance_id}>
-                      <td>{rec.date}</td>
-                      <td style={{ fontWeight: 600, color: "#0f172a" }}>
-                        {rec.student_name}
-                      </td>
-                      <td>{rec.roll_no}</td>
-                      <td>{rec.course_code}</td>
-                      <td>{rec.course_name}</td>
-                      <td>{rec.section}</td>
-                      <td>
-                        <span
-                          className={`attendance-status-badge ${
-                            isPresent ? "present" : "absent"
-                          }`}
-                        >
-                          {rec.status}
-                        </span>
-                      </td>
-                      <td>{rec.marked_at}</td>
-                      <td>{rec.method}</td>
-                      <td>{rec.confidence_score}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="attendance-btn-view"
-                          onClick={() => handleViewRecord(rec)}
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
+                records.map((rec) => (
+                  <tr key={rec.attendance_id}>
+                    <td>{rec.date}</td>
+                    <td style={{ fontWeight: 600, color: "#0f172a" }}>
+                      {rec.student_name}
+                    </td>
+                    <td>{rec.roll_no}</td>
+                    <td>{rec.course_code}</td>
+                    <td>{rec.course_name}</td>
+                    <td>{formatSemesterSection(rec.semester, rec.section, rec.semester_section)}</td>
+                    <td>
+                      <span className={`attendance-status-badge ${getStatusBadgeClass(rec.status)}`}>
+                        {rec.status}
+                      </span>
+                    </td>
+                    <td>{rec.marked_at}</td>
+                    <td>{rec.method}</td>
+                    <td>{rec.confidence_score}</td>
+                    <td>
+                      <button
+                        type="button"
+                        className="attendance-btn-view"
+                        onClick={() => handleViewRecord(rec)}
+                      >
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -1161,21 +1530,22 @@ function AttendanceReports() {
         {/* Table Footer with real pagination */}
         <div className="attendance-table-footer">
           <span>
-            {totalRecords > 0
+            {recordsLoading
+              ? "Loading records..."
+              : recordsError
+              ? "Error loading records"
+              : totalRecords > 0
               ? `Showing ${(page - 1) * perPage + 1} to ${Math.min(page * perPage, totalRecords)} of ${formatNumber(totalRecords)} records`
               : "Showing 0 records"}
           </span>
 
-          {totalRecords > 0 && (
+          {!recordsLoading && !recordsError && totalRecords > 0 && (
             <div className="attendance-pagination">
               <button
                 type="button"
                 className="attendance-page-btn"
                 disabled={page <= 1}
-                onClick={() => {
-                  setLoading(true);
-                  setPage((p) => Math.max(1, p - 1));
-                }}
+                onClick={() => handlePageChange(Math.max(1, page - 1))}
                 aria-label="Previous page"
               >
                 <ChevronLeft size={14} />
@@ -1188,10 +1558,7 @@ function AttendanceReports() {
                     key={pageNum}
                     type="button"
                     className={`attendance-page-btn ${page === pageNum ? "active" : ""}`}
-                    onClick={() => {
-                      setLoading(true);
-                      setPage(pageNum);
-                    }}
+                    onClick={() => handlePageChange(pageNum)}
                   >
                     {pageNum}
                   </button>
@@ -1204,10 +1571,7 @@ function AttendanceReports() {
                   <button
                     type="button"
                     className={`attendance-page-btn ${page === totalPages ? "active" : ""}`}
-                    onClick={() => {
-                      setLoading(true);
-                      setPage(totalPages);
-                    }}
+                    onClick={() => handlePageChange(totalPages)}
                   >
                     {totalPages}
                   </button>
@@ -1218,10 +1582,7 @@ function AttendanceReports() {
                 type="button"
                 className="attendance-page-btn"
                 disabled={page >= totalPages}
-                onClick={() => {
-                  setLoading(true);
-                  setPage((p) => Math.min(totalPages, p + 1));
-                }}
+                onClick={() => handlePageChange(Math.min(totalPages, page + 1))}
                 aria-label="Next page"
               >
                 <ChevronRight size={14} />
@@ -1279,23 +1640,20 @@ function AttendanceReports() {
                 </div>
 
                 <div className="attendance-modal-item">
-                  <span className="attendance-modal-label">Section & Semester</span>
+                  <span className="attendance-modal-label">Semester / Section</span>
                   <span className="attendance-modal-value">
-                    Section {selectedRecord.student?.section || selectedRecord.section || "N/A"} • Semester{" "}
-                    {selectedRecord.student?.semester || selectedRecord.session?.semester || "N/A"}
+                    {formatSemesterSection(
+                      selectedRecord.semester ?? selectedRecord.student?.semester ?? selectedRecord.session?.semester,
+                      selectedRecord.section ?? selectedRecord.student?.section,
+                      selectedRecord.semester_section
+                    )}
                   </span>
                 </div>
 
                 <div className="attendance-modal-item">
                   <span className="attendance-modal-label">Status</span>
                   <div>
-                    <span
-                      className={`attendance-status-badge ${
-                        (selectedRecord.status || "").toLowerCase() === "present"
-                          ? "present"
-                          : "absent"
-                      }`}
-                    >
+                    <span className={`attendance-status-badge ${getStatusBadgeClass(selectedRecord.status)}`}>
                       {selectedRecord.status}
                     </span>
                   </div>

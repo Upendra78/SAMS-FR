@@ -1,11 +1,21 @@
-from flask import Blueprint, jsonify, request
+from datetime import datetime, timezone
+
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
+def format_utc_iso(dt):
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.isoformat() + "Z"
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
 from app.extensions import bcrypt, db
 from app.models import (
+    ActivityLog,
     AttendanceRecord,
     AttendanceSession,
     Batch,
@@ -19,8 +29,20 @@ from app.models import (
     TimetableEntry,
     User,
 )
+from app.services.activity_service import record_activity, serialize_activity_log
 from app.services.auth_service import create_user
 from app.utils.auth import admin_required
+from app.utils.academic_year import (
+    canonical_academic_year,
+    extract_cohort_start_year,
+    format_batch_cohort,
+    get_available_academic_sessions,
+    get_current_academic_session,
+    is_batch_cohort,
+    is_single_academic_session,
+    resolve_student_academic_info,
+    set_current_academic_session,
+)
 
 
 admin_bp = Blueprint(
@@ -48,6 +70,15 @@ def get_admin_dashboard():
         status="ABSENT"
     ).count()
 
+    recent_logs = (
+        ActivityLog.query.order_by(
+            ActivityLog.created_at.desc(),
+            ActivityLog.id.desc(),
+        )
+        .limit(10)
+        .all()
+    )
+
     return jsonify({
         "success": True,
         "data": {
@@ -59,6 +90,79 @@ def get_admin_dashboard():
                 "absent": absent_count,
                 "total_records": total_attendance_records,
             },
+            "recent_activity": [serialize_activity_log(log) for log in recent_logs],
+        },
+    }), 200
+
+
+# RECENT ACTIVITY & AUDIT LOGS
+
+@admin_bp.get("/activity/recent")
+@admin_required
+def get_recent_activity():
+    try:
+        limit = int(request.args.get("limit", 10))
+    except (ValueError, TypeError):
+        limit = 10
+    limit = max(1, min(limit, 50))
+
+    logs = (
+        ActivityLog.query.order_by(
+            ActivityLog.created_at.desc(),
+            ActivityLog.id.desc(),
+        )
+        .limit(limit)
+        .all()
+    )
+
+    return jsonify({
+        "success": True,
+        "data": [serialize_activity_log(log) for log in logs],
+    }), 200
+
+
+@admin_bp.get("/activity")
+@admin_required
+def get_activity_logs():
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+    except (ValueError, TypeError):
+        page = 1
+
+    try:
+        limit = max(1, min(int(request.args.get("limit", 15)), 100))
+    except (ValueError, TypeError):
+        limit = 15
+
+    query = ActivityLog.query
+
+    action_type = request.args.get("action_type")
+    if action_type:
+        query = query.filter(ActivityLog.action_type == action_type.strip().upper())
+
+    entity_type = request.args.get("entity_type")
+    if entity_type:
+        query = query.filter(ActivityLog.entity_type == entity_type.strip())
+
+    total = query.count()
+    logs = (
+        query.order_by(
+            ActivityLog.created_at.desc(),
+            ActivityLog.id.desc(),
+        )
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
+
+    return jsonify({
+        "success": True,
+        "data": [serialize_activity_log(log) for log in logs],
+        "pagination": {
+            "page": page,
+            "limit": limit,
+            "total": total,
+            "pages": max(1, (total + limit - 1) // limit),
         },
     }), 200
 
@@ -74,7 +178,8 @@ def get_batches():
         "data": [
             {
                 "batch_id": batch.batch_id,
-                "batch_name": batch.batch_name,
+                "batch_name": format_batch_cohort(batch.batch_name),
+                "raw_name": batch.batch_name,
                 "is_active": batch.is_active,
             }
             for batch in batches
@@ -94,19 +199,23 @@ def create_batch():
             "message": "Batch name is required",
         }), 400
 
-    if len(batch_name) > 20:
+    cohort_name = format_batch_cohort(batch_name)
+
+    if len(cohort_name) > 20:
         return jsonify({
             "success": False,
             "message": "Batch name cannot exceed 20 characters",
         }), 400
 
-    if Batch.query.filter_by(batch_name=batch_name).first():
+    if Batch.query.filter(
+        db.or_(Batch.batch_name == cohort_name, Batch.batch_name == batch_name)
+    ).first():
         return jsonify({
             "success": False,
             "message": "This batch already exists",
         }), 409
 
-    batch = Batch(batch_name=batch_name)
+    batch = Batch(batch_name=cohort_name)
 
     try:
         db.session.add(batch)
@@ -123,10 +232,53 @@ def create_batch():
         "message": "Batch created successfully",
         "data": {
             "batch_id": batch.batch_id,
-            "batch_name": batch.batch_name,
+            "batch_name": format_batch_cohort(batch.batch_name),
             "is_active": batch.is_active,
         },
     }), 201
+
+
+# ACADEMIC SESSION CONFIGURATION
+
+@admin_bp.get("/academic-session")
+@admin_required
+def get_academic_session_config():
+    return jsonify({
+        "success": True,
+        "data": {
+            "current_academic_year": get_current_academic_session(),
+            "available_sessions": get_available_academic_sessions(),
+        },
+    }), 200
+
+
+@admin_bp.post("/academic-session")
+@admin_bp.put("/academic-session")
+@admin_required
+def update_academic_session_config():
+    data = request.get_json(silent=True) or {}
+    academic_year = data.get("academic_year")
+    if not academic_year:
+        return jsonify({
+            "success": False,
+            "message": "academic_year is required",
+        }), 400
+
+    try:
+        saved_session = set_current_academic_session(academic_year)
+        return jsonify({
+            "success": True,
+            "message": f"Institutional academic session set to {saved_session}",
+            "data": {
+                "current_academic_year": saved_session,
+                "available_sessions": get_available_academic_sessions(),
+            },
+        }), 200
+    except ValueError as err:
+        return jsonify({
+            "success": False,
+            "message": str(err),
+        }), 400
 
 
 # ADMIN PROFILE
@@ -143,6 +295,7 @@ def serialize_admin_profile(user):
         "is_active": getattr(user, "is_active", True),
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+        "last_login": format_utc_iso(getattr(user, "last_login", None)),
         "stats": {
             "total_users": User.query.count(),
             "total_students": Student.query.count(),
@@ -403,6 +556,10 @@ def get_departments():
             department_id=department.department_id
         ).count()
 
+        course_count = Course.query.filter_by(
+            department_id=department.department_id
+        ).count()
+
         head_faculty = department.head_faculty
 
         data.append({
@@ -415,6 +572,11 @@ def get_departments():
                 if head_faculty and head_faculty.user
                 else None
             ),
+            "head_email": (
+                head_faculty.user.email
+                if head_faculty and head_faculty.user
+                else None
+            ),
             "head_employee_id": (
                 head_faculty.employee_id
                 if head_faculty
@@ -422,12 +584,19 @@ def get_departments():
             ),
             "faculty_count": faculty_count,
             "student_count": student_count,
+            "course_count": course_count,
             "is_active": department.is_active,
         })
 
     return jsonify({
         "success": True,
         "data": data,
+        "summary": {
+            "total_departments": len(departments),
+            "active_departments": sum(1 for d in departments if d.is_active),
+            "total_faculty": Faculty.query.count(),
+            "total_courses": Course.query.count(),
+        },
     }), 200
 
 
@@ -490,6 +659,13 @@ def create_department():
     try:
         db.session.add(department)
         db.session.commit()
+        record_activity(
+            action_type="DEPARTMENT_CREATED",
+            description=f"Created department {department.department_name} ({department.department_code})",
+            entity_type="Department",
+            entity_id=str(department.department_id),
+            details={"name": department.department_name, "code": department.department_code},
+        )
     except IntegrityError:
         db.session.rollback()
         return jsonify({
@@ -637,6 +813,13 @@ def update_department(department_id):
 
     try:
         db.session.commit()
+        record_activity(
+            action_type="DEPARTMENT_UPDATED",
+            description=f"Updated department {department.department_name} ({department.department_code})",
+            entity_type="Department",
+            entity_id=str(department.department_id),
+            details={"name": department.department_name, "code": department.department_code},
+        )
     except IntegrityError:
         db.session.rollback()
         return jsonify({
@@ -701,9 +884,19 @@ def delete_department(department_id):
             },
         }), 409
 
+    dept_name = department.department_name
+    dept_code = department.department_code
+
     try:
         db.session.delete(department)
         db.session.commit()
+        record_activity(
+            action_type="DEPARTMENT_DELETED",
+            description=f"Deleted department {dept_name} ({dept_code})",
+            entity_type="Department",
+            entity_id=str(department_id),
+            details={"name": dept_name, "code": dept_code},
+        )
     except IntegrityError:
         db.session.rollback()
         return jsonify({
@@ -726,18 +919,32 @@ def get_users():
         User.user_id.asc()
     ).all()
 
-    data = [
-        {
+    data = []
+    for user in users:
+        dept = user.department
+        if not dept and user.student_profile and user.student_profile.department:
+            dept = user.student_profile.department.name
+        elif not dept and user.faculty_profile and user.faculty_profile.department:
+            dept = user.faculty_profile.department.name
+
+        ph = user.phone
+        if not ph and user.student_profile and user.student_profile.phone:
+            ph = user.student_profile.phone
+        elif not ph and user.faculty_profile and user.faculty_profile.phone:
+            ph = user.faculty_profile.phone
+
+        data.append({
             "user_id": user.user_id,
             "name": user.name,
             "email": user.email,
             "role": user.role,
             "is_active": user.is_active,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
-        }
-        for user in users
-    ]
+            "department": dept or "Administration",
+            "phone": ph or "—",
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+            "last_login": format_utc_iso(user.last_login),
+        })
 
     return jsonify({
         "success": True,
@@ -786,6 +993,14 @@ def create_admin_user():
         role=role,
     )
 
+    record_activity(
+        action_type="USER_CREATED",
+        description=f"Created user account {user.name} ({user.role})",
+        entity_type="User",
+        entity_id=str(user.user_id),
+        details={"name": user.name, "email": user.email, "role": user.role},
+    )
+
     return jsonify({
         "success": True,
         "message": "User created successfully",
@@ -810,6 +1025,18 @@ def get_user(user_id):
             "message": "User not found",
         }), 404
 
+    dept = user.department
+    if not dept and user.student_profile and user.student_profile.department:
+        dept = user.student_profile.department.name
+    elif not dept and user.faculty_profile and user.faculty_profile.department:
+        dept = user.faculty_profile.department.name
+
+    ph = user.phone
+    if not ph and user.student_profile and user.student_profile.phone:
+        ph = user.student_profile.phone
+    elif not ph and user.faculty_profile and user.faculty_profile.phone:
+        ph = user.faculty_profile.phone
+
     return jsonify({
         "success": True,
         "data": {
@@ -818,8 +1045,11 @@ def get_user(user_id):
             "email": user.email,
             "role": user.role,
             "is_active": user.is_active,
-            "created_at": user.created_at.isoformat(),
-            "updated_at": user.updated_at.isoformat(),
+            "department": dept or "Administration",
+            "phone": ph or "—",
+            "created_at": user.created_at.isoformat() if user.created_at else None,
+            "updated_at": user.updated_at.isoformat() if user.updated_at else None,
+            "last_login": format_utc_iso(user.last_login),
         },
     }), 200
 
@@ -957,7 +1187,13 @@ def update_user(user_id):
 
     try:
         db.session.commit()
-
+        record_activity(
+            action_type="USER_UPDATED",
+            description=f"Updated user account {user.name} ({user.role})",
+            entity_type="User",
+            entity_id=str(user.user_id),
+            details={"name": user.name, "email": user.email, "role": user.role},
+        )
     except IntegrityError:
         db.session.rollback()
 
@@ -1055,6 +1291,12 @@ def delete_user(user_id):
         if has_history:
             user.is_active = False
             db.session.commit()
+            record_activity(
+                action_type="USER_DEACTIVATED",
+                description=f"Deactivated user account {user.name} ({user.role})",
+                entity_type="User",
+                entity_id=str(user.user_id),
+            )
 
             return jsonify({
                 "success": True,
@@ -1070,6 +1312,8 @@ def delete_user(user_id):
             }), 200
 
         # No protected history exists. Remove the empty profile first.
+        deleted_name = user.name
+        deleted_role = user.role
         if student:
             db.session.delete(student)
 
@@ -1078,6 +1322,12 @@ def delete_user(user_id):
 
         db.session.delete(user)
         db.session.commit()
+        record_activity(
+            action_type="USER_DELETED",
+            description=f"Deleted user account {deleted_name} ({deleted_role})",
+            entity_type="User",
+            entity_id=str(user_id),
+        )
 
         return jsonify({
             "success": True,
@@ -1133,6 +1383,12 @@ def reactivate_user(user_id):
     try:
         user.is_active = True
         db.session.commit()
+        record_activity(
+            action_type="USER_REACTIVATED",
+            description=f"Reactivated user account {user.name} ({user.role})",
+            entity_type="User",
+            entity_id=str(user.user_id),
+        )
 
         return jsonify({
             "success": True,
@@ -1219,9 +1475,99 @@ def get_student_attendance_summary(student_id):
 # STUDENT MANAGEMENT
 # ============================================================
 
-def _serialize_student(student, include_details=False):
+def batch_get_student_attendance_summaries(student_ids):
+    if not student_ids:
+        return {}
+
+    enrollments = (
+        db.session.query(Enrollment.student_id, Enrollment.offering_id)
+        .filter(
+            Enrollment.student_id.in_(student_ids),
+            Enrollment.status == "ACTIVE",
+        )
+        .all()
+    )
+
+    from collections import defaultdict
+    student_offerings = defaultdict(set)
+    all_offering_ids = set()
+    for s_id, off_id in enrollments:
+        student_offerings[s_id].add(off_id)
+        all_offering_ids.add(off_id)
+
+    if not all_offering_ids:
+        return {
+            s_id: {
+                "total_sessions": 0,
+                "present_sessions": 0,
+                "absent_sessions": 0,
+                "attendance_percentage": 0.0,
+            }
+            for s_id in student_ids
+        }
+
+    closed_sessions = (
+        db.session.query(AttendanceSession.session_id, AttendanceSession.offering_id)
+        .filter(
+            AttendanceSession.offering_id.in_(all_offering_ids),
+            AttendanceSession.status == "CLOSED",
+        )
+        .all()
+    )
+
+    offering_sessions = defaultdict(set)
+    all_closed_session_ids = set()
+    for sess_id, off_id in closed_sessions:
+        offering_sessions[off_id].add(sess_id)
+        all_closed_session_ids.add(sess_id)
+
+    student_sessions = {}
+    for s_id in student_ids:
+        s_sess = set()
+        for off_id in student_offerings.get(s_id, ()):
+            s_sess.update(offering_sessions.get(off_id, ()))
+        student_sessions[s_id] = s_sess
+
+    student_present_counts = defaultdict(int)
+    if all_closed_session_ids:
+        present_records = (
+            db.session.query(AttendanceRecord.student_id, AttendanceRecord.session_id)
+            .filter(
+                AttendanceRecord.student_id.in_(student_ids),
+                AttendanceRecord.session_id.in_(all_closed_session_ids),
+                AttendanceRecord.status == "PRESENT",
+            )
+            .all()
+        )
+        for s_id, sess_id in present_records:
+            if sess_id in student_sessions.get(s_id, set()):
+                student_present_counts[s_id] += 1
+
+    summaries = {}
+    for s_id in student_ids:
+        sess_ids = student_sessions.get(s_id, set())
+        total = len(sess_ids)
+        present = student_present_counts.get(s_id, 0)
+        absent = total - present
+        pct = round((present / total) * 100, 2) if total > 0 else 0.0
+        summaries[s_id] = {
+            "total_sessions": total,
+            "present_sessions": present,
+            "absent_sessions": absent,
+            "attendance_percentage": pct,
+        }
+
+    return summaries
+
+
+def _serialize_student(student, include_details=False, attendance_summary=None):
     is_active = getattr(student.user, "is_active", True)
     has_face = any(fp.is_active for fp in student.face_profiles) if student.face_profiles else False
+
+    if attendance_summary is None:
+        attendance_summary = get_student_attendance_summary(student.student_id)
+
+    acad_info = resolve_student_academic_info(student)
 
     data = {
         "student_id": student.student_id,
@@ -1230,9 +1576,13 @@ def _serialize_student(student, include_details=False):
         "email": student.user.email,
         "enrollment_no": student.enrollment_no,
         "roll_no": getattr(student, "roll_no", None) or student.enrollment_no,
-        "semester": student.semester,
-        "section": student.section,
-        "academic_year": student.academic_year,
+        "semester": acad_info["semester"],
+        "section": acad_info["section"],
+        "academic_year": acad_info["academic_year"],
+        "batch_year": acad_info["batch_year"],
+        "batch_name": acad_info["batch_name"],
+        "admission_year": acad_info["admission_year"],
+        "batch_id": student.batch_id,
         "department_id": student.department.department_id if student.department else None,
         "department_name": student.department.department_name if student.department else "",
         "department_code": student.department.department_code if student.department else "",
@@ -1254,10 +1604,7 @@ def _serialize_student(student, include_details=False):
         "mother_name": student.mother_name or "",
         "blood_group": student.blood_group or "",
         "admission_date": student.admission_date or "",
-        "admission_year": student.academic_year or "",
-        "batch_id": student.batch_id,
-        "batch_name": student.batch.batch_name if student.batch else None,
-        "attendance_summary": get_student_attendance_summary(student.student_id),
+        "attendance_summary": attendance_summary,
     }
 
     if include_details and student.enrollments:
@@ -1353,6 +1700,15 @@ def get_students_filter_options():
         }
         for d in Department.query.order_by(Department.department_name.asc()).all()
     ]
+    batches = [
+        {
+            "batch_id": b.batch_id,
+            "batch_name": format_batch_cohort(b.batch_name),
+            "is_active": b.is_active,
+        }
+        for b in Batch.query.order_by(Batch.batch_name.asc()).all()
+    ]
+    academic_years = get_available_academic_sessions()
 
     return jsonify({
         "success": True,
@@ -1360,6 +1716,9 @@ def get_students_filter_options():
             "semesters": semesters,
             "sections": sections,
             "departments": departments,
+            "batches": batches,
+            "academic_years": academic_years,
+            "current_academic_year": get_current_academic_session(),
         },
     }), 200
 
@@ -1371,6 +1730,12 @@ def get_students():
         Student.query
         .join(Student.user)
         .join(Student.department)
+        .options(
+            joinedload(Student.user),
+            joinedload(Student.department),
+            joinedload(Student.batch),
+            selectinload(Student.face_profiles),
+        )
     )
 
     department_id = request.args.get("department_id", type=int)
@@ -1378,6 +1743,8 @@ def get_students():
     section = request.args.get("section")
     status = request.args.get("status")
     search = request.args.get("search", "").strip()
+    batch_id = request.args.get("batch_id", type=int)
+    academic_year = request.args.get("academic_year")
 
     if department_id:
         query = query.filter(Student.department_id == department_id)
@@ -1385,6 +1752,18 @@ def get_students():
         query = query.filter(Student.semester == semester)
     if section and section not in ["All", "all", "All Sections", ""]:
         query = query.filter(Student.section == section)
+    if batch_id:
+        query = query.filter(Student.batch_id == batch_id)
+    if academic_year and academic_year not in ["All", "all", ""]:
+        canon_ay = canonical_academic_year(academic_year)
+        query = query.filter(
+            db.or_(
+                Student.academic_year == canon_ay,
+                Student.enrollments.any(
+                    Enrollment.offering.has(CourseOffering.academic_year == canon_ay)
+                ),
+            )
+        )
     if status in ["ACTIVE", "Active"]:
         query = query.filter(User.is_active.is_(True))
     elif status in ["INACTIVE", "Inactive"]:
@@ -1401,7 +1780,16 @@ def get_students():
         )
 
     students = query.order_by(Student.student_id.asc()).all()
-    data = [_serialize_student(student) for student in students]
+    student_ids = [student.student_id for student in students]
+    summaries = batch_get_student_attendance_summaries(student_ids)
+
+    data = [
+        _serialize_student(
+            student,
+            attendance_summary=summaries.get(student.student_id),
+        )
+        for student in students
+    ]
 
     return jsonify({
         "success": True,
@@ -1504,6 +1892,18 @@ def create_student():
             "message": "Semester must be greater than 0",
         }), 400
 
+    if semester > 8:
+        return jsonify({
+            "success": False,
+            "message": "Semester must be between 1 and 8",
+        }), 400
+
+    if len(section) > 20:
+        return jsonify({
+            "success": False,
+            "message": "Section must not exceed 20 characters",
+        }), 400
+
     # -------------------------
     # Department ID validation
     # -------------------------
@@ -1600,6 +2000,16 @@ def create_student():
                 "success": False,
                 "message": "Selected batch is inactive",
             }), 400
+    elif data.get("batch_year") or data.get("batch_name"):
+        b_name = str(data.get("batch_year") or data.get("batch_name")).strip()
+        c_name = format_batch_cohort(b_name)
+        batch = Batch.query.filter(
+            db.or_(Batch.batch_name == c_name, Batch.batch_name == b_name)
+        ).first()
+        if not batch:
+            batch = Batch(batch_name=c_name)
+            db.session.add(batch)
+            db.session.flush()
 
     if not department:
         return jsonify({
@@ -1611,6 +2021,8 @@ def create_student():
     # Create Student profile
     # -------------------------
 
+    canonical_ay = canonical_academic_year(academic_year) if academic_year else get_current_academic_session()
+
     student = Student(
         user_id=user.user_id,
         department_id=department.department_id,
@@ -1618,13 +2030,19 @@ def create_student():
         enrollment_no=enrollment_no,
         semester=semester,
         section=section,
-        academic_year=academic_year,
+        academic_year=canonical_ay,
     )
 
     try:
         db.session.add(student)
         db.session.commit()
-
+        record_activity(
+            action_type="STUDENT_CREATED",
+            description=f"Created student profile for {user.name} ({student.enrollment_no})",
+            entity_type="Student",
+            entity_id=str(student.student_id),
+            details={"name": user.name, "enrollment_no": student.enrollment_no},
+        )
     except IntegrityError:
         db.session.rollback()
 
@@ -1645,6 +2063,7 @@ def create_student():
         }), 500
 
     db.session.refresh(student)
+    academic_info = resolve_student_academic_info(student)
 
     return jsonify({
         "success": True,
@@ -1656,11 +2075,13 @@ def create_student():
             "email": user.email,
             "role": user.role,
             "enrollment_no": student.enrollment_no,
-            "semester": student.semester,
-            "section": student.section,
-            "academic_year": student.academic_year,
+            "semester": academic_info["semester"],
+            "section": academic_info["section"],
+            "academic_year": academic_info["academic_year"],
+            "batch_year": academic_info["batch_year"],
+            "batch_name": academic_info["batch_name"],
             "batch_id": student.batch_id,
-            "batch_name": batch.batch_name if batch else None,
+            "admission_year": academic_info["admission_year"],
             "department_id": department.department_id,
             "department_name": department.department_name,
             "department_code": department.department_code,
@@ -1800,7 +2221,43 @@ def update_student(student_id):
                 "message": "Academic year cannot be empty",
             }), 400
 
-        student.academic_year = academic_year
+        student.academic_year = canonical_academic_year(academic_year)
+
+    # -------------------------
+    # Batch
+    # -------------------------
+
+    if "batch_id" in data:
+        raw_b_id = data.get("batch_id")
+        if raw_b_id in (None, ""):
+            student.batch_id = None
+        else:
+            try:
+                b_id = int(raw_b_id)
+                batch_obj = db.session.get(Batch, b_id)
+                if not batch_obj:
+                    return jsonify({
+                        "success": False,
+                        "message": "Batch not found",
+                    }), 404
+                student.batch_id = b_id
+            except (TypeError, ValueError):
+                return jsonify({
+                    "success": False,
+                    "message": "Batch ID must be an integer",
+                }), 400
+    elif "batch_year" in data or "batch_name" in data:
+        raw_b_name = str(data.get("batch_year") or data.get("batch_name") or "").strip()
+        if raw_b_name:
+            cohort_name = format_batch_cohort(raw_b_name)
+            batch_obj = Batch.query.filter(
+                db.or_(Batch.batch_name == cohort_name, Batch.batch_name == raw_b_name)
+            ).first()
+            if not batch_obj:
+                batch_obj = Batch(batch_name=cohort_name)
+                db.session.add(batch_obj)
+                db.session.flush()
+            student.batch_id = batch_obj.batch_id
 
     # -------------------------
     # Department
@@ -1854,6 +2311,7 @@ def update_student(student_id):
         }), 500
 
     db.session.refresh(student)
+    academic_info = resolve_student_academic_info(student)
 
     return jsonify({
         "success": True,
@@ -1864,12 +2322,16 @@ def update_student(student_id):
             "name": student.user.name,
             "email": student.user.email,
             "enrollment_no": student.enrollment_no,
-            "semester": student.semester,
-            "section": student.section,
-            "academic_year": student.academic_year,
-            "department_id": student.department.department_id,
-            "department_name": student.department.department_name,
-            "department_code": student.department.department_code,
+            "semester": academic_info["semester"],
+            "section": academic_info["section"],
+            "academic_year": academic_info["academic_year"],
+            "batch_year": academic_info["batch_year"],
+            "batch_name": academic_info["batch_name"],
+            "batch_id": student.batch_id,
+            "admission_year": academic_info["admission_year"],
+            "department_id": student.department.department_id if student.department else None,
+            "department_name": student.department.department_name if student.department else "",
+            "department_code": student.department.department_code if student.department else "",
         },
     }), 200
 
@@ -1947,6 +2409,48 @@ def delete_student(student_id):
             "student_id": student_id,
         },
     }), 200
+
+# ============================================================
+# ACADEMIC MANAGEMENT SUMMARY
+# ============================================================
+
+@admin_bp.get("/academic/summary")
+@admin_required
+def get_academic_summary():
+    try:
+        total_courses = Course.query.count()
+    except Exception as e:
+        current_app.logger.error(f"Error counting total courses: {e}")
+        total_courses = None
+
+    try:
+        active_courses = Course.query.filter(Course.is_active.is_(True)).count()
+    except Exception as e:
+        current_app.logger.error(f"Error counting active courses: {e}")
+        active_courses = None
+
+    try:
+        course_offerings = CourseOffering.query.count()
+    except Exception as e:
+        current_app.logger.error(f"Error counting course offerings: {e}")
+        course_offerings = None
+
+    try:
+        enrollments = Enrollment.query.count()
+    except Exception as e:
+        current_app.logger.error(f"Error counting enrollments: {e}")
+        enrollments = None
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_courses": total_courses,
+            "active_courses": active_courses,
+            "course_offerings": course_offerings,
+            "enrollments": enrollments,
+        },
+    }), 200
+
 
 # COURSE MANAGEMENT
 
@@ -2114,7 +2618,13 @@ def create_course():
         db.session.add(course)
         db.session.commit()
         db.session.refresh(course)
-
+        record_activity(
+            action_type="COURSE_CREATED",
+            description=f"Created course {course.course_name} ({course.course_code})",
+            entity_type="Course",
+            entity_id=str(course.course_id),
+            details={"name": course.course_name, "code": course.course_code},
+        )
     except IntegrityError:
         db.session.rollback()
         return jsonify({
@@ -2383,33 +2893,58 @@ def delete_course(course_id):
 def get_course_offerings():
     offerings = (
         CourseOffering.query
+        .options(
+            joinedload(CourseOffering.course),
+            joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+        )
         .order_by(CourseOffering.offering_id.asc())
         .all()
     )
 
-    data = [
-        {
+    enrollment_counts = dict(
+        db.session.query(
+            Enrollment.offering_id,
+            db.func.count(Enrollment.enrollment_id)
+        ).group_by(Enrollment.offering_id).all()
+    )
+
+    session_counts = dict(
+        db.session.query(
+            AttendanceSession.offering_id,
+            db.func.count(AttendanceSession.session_id)
+        ).group_by(AttendanceSession.offering_id).all()
+    )
+
+    data = []
+    for offering in offerings:
+        if offering.faculty_id:
+            if offering.faculty and offering.faculty.user and offering.faculty.user.name:
+                faculty_name = offering.faculty.user.name
+            else:
+                current_app.logger.warning(
+                    f"CourseOffering {offering.offering_id} references faculty_id {offering.faculty_id} "
+                    f"but faculty or user profile is missing or inconsistent."
+                )
+                faculty_name = f"Faculty #{offering.faculty_id}"
+        else:
+            faculty_name = "Unassigned"
+
+        data.append({
             "offering_id": offering.offering_id,
             "course_id": offering.course_id,
-            "course_code": offering.course.course_code,
-            "course_name": offering.course.course_name,
+            "course_code": offering.course.course_code if offering.course else "",
+            "course_name": offering.course.course_name if offering.course else "",
             "faculty_id": offering.faculty_id,
-            "faculty_name": (
-                offering.faculty.user.name
-                if offering.faculty and offering.faculty.user
-                else None
-            ),
+            "faculty_name": faculty_name,
             "academic_year": offering.academic_year,
             "semester": offering.semester,
             "section": offering.section,
             "room": offering.room,
-            "enrollment_count": len(offering.enrollments),
-            "attendance_session_count": len(
-                offering.attendance_sessions
+            "enrollment_count": enrollment_counts.get(offering.offering_id, 0),
+            "attendance_session_count": session_counts.get(
+                offering.offering_id, 0
             ),
-        }
-        for offering in offerings
-    ]
+        })
 
     return jsonify({
         "success": True,
@@ -2456,6 +2991,18 @@ def create_course_offering():
     academic_year = str(
         data.get("academic_year") or ""
     ).strip()
+
+    if not academic_year:
+        academic_year = get_current_academic_session()
+    else:
+        academic_year = canonical_academic_year(academic_year)
+
+    if is_batch_cohort(academic_year):
+        return jsonify({
+            "success": False,
+            "message": "Academic year for course offerings must represent a 1-year academic session (e.g. '2026-2027'), not a cohort range.",
+        }), 400
+
     section = str(data.get("section") or "").strip()
     room = str(data.get("room") or "").strip() or None
 
@@ -2594,7 +3141,13 @@ def update_course_offering(offering_id):
                 "success": False,
                 "message": "Academic year cannot be empty",
             }), 400
-        offering.academic_year = academic_year
+        canon_ay = canonical_academic_year(academic_year)
+        if is_batch_cohort(canon_ay):
+            return jsonify({
+                "success": False,
+                "message": "Academic year for course offerings must represent a 1-year academic session (e.g. '2026-2027'), not a cohort range.",
+            }), 400
+        offering.academic_year = canon_ay
 
     if "section" in data:
         section = str(data["section"] or "").strip()
@@ -3115,7 +3668,13 @@ def create_faculty():
     try:
         db.session.add(faculty)
         db.session.commit()
-
+        record_activity(
+            action_type="FACULTY_CREATED",
+            description=f"Created faculty profile for {user.name} ({faculty.employee_id})",
+            entity_type="Faculty",
+            entity_id=str(faculty.faculty_id),
+            details={"name": user.name, "employee_id": faculty.employee_id},
+        )
     except IntegrityError:
         db.session.rollback()
 

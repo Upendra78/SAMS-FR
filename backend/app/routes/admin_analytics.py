@@ -10,6 +10,7 @@ from app.models import (
     Faculty,
 )
 from app.utils.auth import admin_required
+from app.utils.academic_year import canonical_academic_year
 
 
 admin_analytics_bp = Blueprint(
@@ -208,7 +209,7 @@ def get_admin_attendance_analytics():
                 if faculty
                 else None
             ),
-            "academic_year": offering.academic_year,
+            "academic_year": canonical_academic_year(offering.academic_year),
             "semester": offering.semester,
             "section": offering.section,
             "room": offering.room,

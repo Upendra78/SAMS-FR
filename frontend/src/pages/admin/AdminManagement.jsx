@@ -1,4 +1,3 @@
-
 import {
   useCallback,
   useContext,
@@ -25,6 +24,11 @@ import {
   faRotateRight,
   faPowerOff,
   faCircleCheck,
+  faEye,
+  faEnvelope,
+  faBuilding,
+  faPhone,
+  faPenToSquare,
 } from "@fortawesome/free-solid-svg-icons";
 
 import {
@@ -35,16 +39,12 @@ import {
   reactivateUser,
 } from "../../services/adminService";
 
+import { formatDate, formatLastLogin } from "../../utils/dateUtils";
+
 import AuthContext from "../../context/authContext";
-import totalUserImage from "../../../image/Total User.png";
-import activeAccountImage from "../../../image/Active Account.png";
-import inactiveAccountImage from "../../../image/InActive Account.png";
-import studentImage from "../../../image/Student.png";
-import facultyImage from "../../../image/Faculty.png";
-import adminsImage from "../../../image/Admins.png";
 import "./AdminManagement.css";
 
-const PAGE_SIZE = 5;
+const PAGE_SIZE = 10;
 
 const initialFormData = {
   name: "",
@@ -111,8 +111,6 @@ function getApiErrorMessage(error, fallback) {
 }
 
 function isUserActive(user) {
-  // Treat only an explicit false as inactive, for compatibility
-  // with existing API responses that may omit is_active.
   return user?.is_active !== false;
 }
 
@@ -125,15 +123,16 @@ function AdminManagement() {
 
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("ALL");
+  const [departmentFilter, setDepartmentFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedUser, setSelectedUser] = useState(null);
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
 
   const [formData, setFormData] = useState(initialFormData);
-  const [editFormData, setEditFormData] = useState(
-    initialEditFormData
-  );
+  const [editFormData, setEditFormData] = useState(initialEditFormData);
 
   const [status, setStatus] = useState({
     type: "",
@@ -214,10 +213,29 @@ function AdminManagement() {
     setCurrentPage(1);
   }
 
+  function handleDepartmentFilterChange(event) {
+    setDepartmentFilter(event.target.value);
+    setCurrentPage(1);
+  }
+
   function handleStatusFilterChange(event) {
     setStatusFilter(event.target.value);
     setCurrentPage(1);
   }
+
+  function handleResetFilters() {
+    setSearchTerm("");
+    setRoleFilter("ALL");
+    setDepartmentFilter("ALL");
+    setStatusFilter("ALL");
+    setCurrentPage(1);
+  }
+
+  const hasActiveFilters =
+    searchTerm.trim() !== "" ||
+    roleFilter !== "ALL" ||
+    departmentFilter !== "ALL" ||
+    statusFilter !== "ALL";
 
   function handleCreateChange(event) {
     const { name, value } = event.target;
@@ -397,13 +415,18 @@ function AdminManagement() {
         return;
       }
 
+      const updatedData = result.data || {};
       setUsers((current) =>
         current.map((user) =>
           user.user_id === editingUser.user_id
-            ? { ...user, ...result.data }
+            ? { ...user, ...updatedData }
             : user
         )
       );
+
+      if (selectedUser?.user_id === editingUser.user_id) {
+        setSelectedUser((prev) => ({ ...prev, ...updatedData }));
+      }
 
       setEditingUser(null);
       setEditFormData(initialEditFormData);
@@ -428,8 +451,8 @@ function AdminManagement() {
 
     const confirmed = window.confirm(
       `Remove access for "${user.name}"?\n\n` +
-        "If academic or attendance history exists, the account will " +
-        "be deactivated and that history will be preserved."
+      "If academic or attendance history exists, the account will " +
+      "be deactivated and that history will be preserved."
     );
 
     if (!confirmed) return;
@@ -457,15 +480,23 @@ function AdminManagement() {
           )
         );
 
+        if (selectedUser?.user_id === user.user_id) {
+          setSelectedUser((prev) => ({ ...prev, is_active: false }));
+        }
+
         showMessage(
           "success",
           result.message ||
-            "Account deactivated. Academic and attendance history has been preserved."
+          "Account deactivated. Academic and attendance history has been preserved."
         );
       } else if (result.action === "deleted") {
         setUsers((current) =>
           current.filter((item) => item.user_id !== user.user_id)
         );
+
+        if (selectedUser?.user_id === user.user_id) {
+          setSelectedUser(null);
+        }
 
         showMessage(
           "success",
@@ -493,8 +524,8 @@ function AdminManagement() {
 
     const confirmed = window.confirm(
       `Reactivate "${user.name}"?\n\n` +
-        "This will restore login access to the existing account. " +
-        "Confirm that this person is authorized to return."
+      "This will restore login access to the existing account. " +
+      "Confirm that this person is authorized to return."
     );
 
     if (!confirmed) return;
@@ -513,22 +544,31 @@ function AdminManagement() {
         return;
       }
 
+      const updatedData = result.data || {};
       setUsers((current) =>
         current.map((item) =>
           item.user_id === user.user_id
             ? {
-                ...item,
-                ...(result.data || {}),
-                is_active: true,
-              }
+              ...item,
+              ...updatedData,
+              is_active: true,
+            }
             : item
         )
       );
 
+      if (selectedUser?.user_id === user.user_id) {
+        setSelectedUser((prev) => ({
+          ...prev,
+          ...updatedData,
+          is_active: true,
+        }));
+      }
+
       showMessage(
         "success",
         result.message ||
-          `${user.name}'s account has been reactivated. Previous academic history remains preserved.`
+        `${user.name}'s account has been reactivated. Previous academic history remains preserved.`
       );
     } catch (error) {
       showMessage(
@@ -550,16 +590,20 @@ function AdminManagement() {
       total: users.length,
       active,
       inactive: users.length - active,
-      students: users.filter(
-        (user) => user.role === "STUDENT"
-      ).length,
-      faculty: users.filter(
-        (user) => user.role === "FACULTY"
-      ).length,
-      admins: users.filter(
-        (user) => user.role === "ADMIN"
-      ).length,
+      students: users.filter((user) => user.role === "STUDENT").length,
+      faculty: users.filter((user) => user.role === "FACULTY").length,
+      admins: users.filter((user) => user.role === "ADMIN").length,
     };
+  }, [users]);
+
+  const uniqueDepartments = useMemo(() => {
+    const set = new Set();
+    users.forEach((u) => {
+      if (u.department && u.department !== "—") {
+        set.add(u.department);
+      }
+    });
+    return Array.from(set).sort();
   }, [users]);
 
   const filteredUsers = useMemo(() => {
@@ -571,10 +615,14 @@ function AdminManagement() {
         user.name?.toLowerCase().includes(searchValue) ||
         user.email?.toLowerCase().includes(searchValue) ||
         String(user.user_id).toLowerCase().includes(searchValue) ||
-        user.role?.toLowerCase().includes(searchValue);
+        user.role?.toLowerCase().includes(searchValue) ||
+        user.department?.toLowerCase().includes(searchValue);
 
       const matchesRole =
         roleFilter === "ALL" || user.role === roleFilter;
+
+      const matchesDepartment =
+        departmentFilter === "ALL" || user.department === departmentFilter;
 
       const active = isUserActive(user);
       const matchesStatus =
@@ -582,9 +630,9 @@ function AdminManagement() {
         (statusFilter === "ACTIVE" && active) ||
         (statusFilter === "INACTIVE" && !active);
 
-      return matchesSearch && matchesRole && matchesStatus;
+      return matchesSearch && matchesRole && matchesDepartment && matchesStatus;
     });
-  }, [users, searchTerm, roleFilter, statusFilter]);
+  }, [users, searchTerm, roleFilter, departmentFilter, statusFilter]);
 
   const totalPages = Math.max(
     1,
@@ -608,30 +656,66 @@ function AdminManagement() {
     filteredUsers.length
   );
 
+  const getPaginationItems = () => {
+    if (totalPages <= 5) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const pages = [];
+    pages.push(1);
+    if (safeCurrentPage > 3) {
+      pages.push("ellipsis-1");
+    }
+    const start = Math.max(2, safeCurrentPage - 1);
+    const end = Math.min(totalPages - 1, safeCurrentPage + 1);
+    for (let i = start; i <= end; i++) {
+      if (!pages.includes(i)) pages.push(i);
+    }
+    if (safeCurrentPage < totalPages - 2) {
+      pages.push("ellipsis-2");
+    }
+    if (!pages.includes(totalPages)) {
+      pages.push(totalPages);
+    }
+    return pages;
+  };
+
   return (
     <section className="admin-management">
-      <div className="admin-management-page-header">
-        <div className="admin-management-heading">
-          <div className="admin-management-title-icon">
+      {/* =====================================================
+          1. USER MANAGEMENT BANNER
+      ====================================================== */}
+      <section className="admin-banner-card">
+        <div className="admin-banner-left">
+          <div className="admin-banner-icon-box">
             <FontAwesomeIcon icon={faUsers} />
           </div>
 
-          <div>
-            <h1>Users Management</h1>
+          <div className="admin-banner-titles">
+            <h1>User Management</h1>
             <p>Manage system accounts, access, and account status.</p>
           </div>
         </div>
 
-        <button
-          type="button"
-          className="admin-add-user-button admin-add-user-header-button"
-          onClick={openCreateModal}
-        >
-          <FontAwesomeIcon icon={faPlus} />
-          <span>Add User</span>
-        </button>
-      </div>
+        <div className="admin-banner-right">
+          <div className="admin-banner-badge">
+            <strong>One Campus. Every User. Connected.</strong>
+            <span>Unified access management across all academic portals.</span>
+          </div>
 
+          <button
+            type="button"
+            className="admin-banner-add-button"
+            onClick={openCreateModal}
+          >
+            <FontAwesomeIcon icon={faPlus} />
+            <span>Add User</span>
+          </button>
+        </div>
+      </section>
+
+      {/* =====================================================
+          STATUS MESSAGES
+      ====================================================== */}
       {status.message && (
         <div
           className={`admin-form-status admin-form-status-${status.type}`}
@@ -645,363 +729,784 @@ function AdminManagement() {
         </div>
       )}
 
+      {/* =====================================================
+          2. STATISTICS SUMMARY CARDS (MATCHING SECOND IMAGE)
+      ====================================================== */}
       <section className="admin-user-summary">
-        <article
-          className="admin-summary-card admin-summary-total"
-          style={{ "--summary-bg-image": `url("${totalUserImage}")` }}
-        >
-          <div className="admin-summary-icon">
-            <FontAwesomeIcon icon={faUsers} />
+        {/* 1. Total Users */}
+        <article className="admin-summary-card card-total-users">
+          <div className="admin-summary-top">
+            <div className="admin-summary-icon icon-blue">
+              <FontAwesomeIcon icon={faUsers} />
+            </div>
+            <span className="admin-summary-label">Total Users</span>
           </div>
-          <div>
-            <span>Total Users</span>
-            <strong>{userCounts.total}</strong>
-            <small>All system accounts</small>
-          </div>
-        </article>
-
-        <article
-          className="admin-summary-card admin-summary-active"
-          style={{ "--summary-bg-image": `url("${activeAccountImage}")` }}
-        >
-          <div className="admin-summary-icon">
-            <FontAwesomeIcon icon={faCircleCheck} />
-          </div>
-          <div>
-            <span>Active Accounts</span>
-            <strong>{userCounts.active}</strong>
-            <small>Login enabled</small>
-          </div>
-        </article>
-
-        <article
-          className="admin-summary-card admin-summary-inactive"
-          style={{ "--summary-bg-image": `url("${inactiveAccountImage}")` }}
-        >
-          <div className="admin-summary-icon">
-            <FontAwesomeIcon icon={faPowerOff} />
-          </div>
-          <div>
-            <span>Inactive Accounts</span>
-            <strong>{userCounts.inactive}</strong>
-            <small>Login disabled</small>
+          <strong className="admin-summary-value">
+            {loadingUsers ? "..." : userCounts.total}
+          </strong>
+          <div className="admin-summary-bottom">
+            <div className="admin-summary-trend">
+              <span className="trend-stat trend-up">
+                ↑ 12%
+              </span>
+              <span className="trend-period">vs. last month</span>
+            </div>
+            <svg
+              className="admin-summary-sparkline"
+              viewBox="0 0 65 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 20C12 20 18 16 26 18C34 20 40 12 48 10C54 8 58 5 63 3"
+                stroke="#3b82f6"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </div>
         </article>
 
-        <article
-          className="admin-summary-card admin-summary-students"
-          style={{ "--summary-bg-image": `url("${studentImage}")` }}
-        >
-          <div className="admin-summary-icon">
-            <FontAwesomeIcon icon={faUserGraduate} />
+        {/* 2. Students */}
+        <article className="admin-summary-card card-students">
+          <div className="admin-summary-top">
+            <div className="admin-summary-icon icon-teal">
+              <FontAwesomeIcon icon={faUserGraduate} />
+            </div>
+            <span className="admin-summary-label">Students</span>
           </div>
-          <div>
-            <span>Students</span>
-            <strong>{userCounts.students}</strong>
-            <small>Student accounts</small>
+          <strong className="admin-summary-value">
+            {loadingUsers ? "..." : userCounts.students}
+          </strong>
+          <div className="admin-summary-bottom">
+            <div className="admin-summary-trend">
+              <span className="trend-stat trend-up">
+                ↑ 8%
+              </span>
+              <span className="trend-period">vs. last month</span>
+            </div>
+            <svg
+              className="admin-summary-sparkline"
+              viewBox="0 0 65 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 19C10 19 18 17 26 15C34 13 40 17 48 11C54 7 58 6 63 4"
+                stroke="#10b981"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </div>
         </article>
 
-        <article
-          className="admin-summary-card admin-summary-faculty"
-          style={{ "--summary-bg-image": `url("${facultyImage}")` }}
-        >
-          <div className="admin-summary-icon">
-            <FontAwesomeIcon icon={faUserTie} />
+        {/* 3. Faculty */}
+        <article className="admin-summary-card card-faculty">
+          <div className="admin-summary-top">
+            <div className="admin-summary-icon icon-purple">
+              <FontAwesomeIcon icon={faUserTie} />
+            </div>
+            <span className="admin-summary-label">Faculty</span>
           </div>
-          <div>
-            <span>Faculty</span>
-            <strong>{userCounts.faculty}</strong>
-            <small>Faculty accounts</small>
+          <strong className="admin-summary-value">
+            {loadingUsers ? "..." : userCounts.faculty}
+          </strong>
+          <div className="admin-summary-bottom">
+            <div className="admin-summary-trend">
+              <span className="trend-stat trend-up">
+                ↑ 6%
+              </span>
+              <span className="trend-period">vs. last month</span>
+            </div>
+            <svg
+              className="admin-summary-sparkline"
+              viewBox="0 0 65 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 21C14 21 20 19 28 17C36 15 42 16 50 12C56 9 59 7 63 5"
+                stroke="#8b5cf6"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </div>
         </article>
 
-        <article
-          className="admin-summary-card admin-summary-admins"
-          style={{ "--summary-bg-image": `url("${adminsImage}")` }}
-        >
-          <div className="admin-summary-icon">
-            <FontAwesomeIcon icon={faShieldHalved} />
+        {/* 4. Administrators */}
+        <article className="admin-summary-card card-admins">
+          <div className="admin-summary-top">
+            <div className="admin-summary-icon icon-amber">
+              <FontAwesomeIcon icon={faShieldHalved} />
+            </div>
+            <span className="admin-summary-label">Administrators</span>
           </div>
-          <div>
-            <span>Admins</span>
-            <strong>{userCounts.admins}</strong>
-            <small>Administrator accounts</small>
+          <strong className="admin-summary-value">
+            {loadingUsers ? "..." : userCounts.admins}
+          </strong>
+          <div className="admin-summary-bottom">
+            <div className="admin-summary-trend">
+              <span className="trend-stat trend-neutral">
+                → 0%
+              </span>
+              <span className="trend-period">vs. last month</span>
+            </div>
+            <svg
+              className="admin-summary-sparkline"
+              viewBox="0 0 65 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 14C12 14 22 13 32 14C42 15 52 14 63 14"
+                stroke="#f59e0b"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        </article>
+
+        {/* 5. Active Accounts */}
+        <article className="admin-summary-card card-active">
+          <div className="admin-summary-top">
+            <div className="admin-summary-icon icon-green">
+              <FontAwesomeIcon icon={faCircleCheck} />
+            </div>
+            <span className="admin-summary-label">Active Accounts</span>
+          </div>
+          <strong className="admin-summary-value">
+            {loadingUsers ? "..." : userCounts.active}
+          </strong>
+          <div className="admin-summary-bottom">
+            <div className="admin-summary-trend">
+              <span className="trend-stat trend-up">
+                ↑ 10%
+              </span>
+              <span className="trend-period">vs. last month</span>
+            </div>
+            <svg
+              className="admin-summary-sparkline"
+              viewBox="0 0 65 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 20C10 20 16 19 26 16C36 13 42 17 50 11C56 6 59 4 63 3"
+                stroke="#22c55e"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </div>
+        </article>
+
+        {/* 6. Inactive Accounts */}
+        <article className="admin-summary-card card-inactive">
+          <div className="admin-summary-top">
+            <div className="admin-summary-icon icon-red">
+              <FontAwesomeIcon icon={faPowerOff} />
+            </div>
+            <span className="admin-summary-label">Inactive Accounts</span>
+          </div>
+          <strong className="admin-summary-value">
+            {loadingUsers ? "..." : userCounts.inactive}
+          </strong>
+          <div className="admin-summary-bottom">
+            <div className="admin-summary-trend">
+              <span className="trend-stat trend-down">
+                ↓ 2%
+              </span>
+              <span className="trend-period">vs. last month</span>
+            </div>
+            <svg
+              className="admin-summary-sparkline"
+              viewBox="0 0 65 24"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+            >
+              <path
+                d="M2 10C12 10 18 12 26 14C34 16 42 12 50 16C56 19 59 20 63 21"
+                stroke="#f43f5e"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
           </div>
         </article>
       </section>
 
-      <section className="admin-users-card">
-        <div className="admin-users-toolbar">
-          <div className="admin-search-box">
-            <FontAwesomeIcon icon={faMagnifyingGlass} />
-            <input
-              type="search"
-              value={searchTerm}
-              onChange={handleSearchChange}
-              placeholder="Search by name, email, ID or role..."
-              aria-label="Search users"
-            />
+      {/* =====================================================
+          3. WORKSPACE: USERS CARD & DETAILS PANEL
+      ====================================================== */}
+      <div
+        className={`admin-workspace-layout ${selectedUser ? "with-details-panel" : "full-width-table"
+          }`}
+      >
+        <section className="admin-users-card">
+          <div className="admin-users-toolbar">
+            <div className="admin-search-box">
+              <FontAwesomeIcon icon={faMagnifyingGlass} />
+              <input
+                type="search"
+                value={searchTerm}
+                onChange={handleSearchChange}
+                placeholder="Search by name, email, ID or role..."
+                aria-label="Search users"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  className="admin-search-clear-btn"
+                  onClick={() => setSearchTerm("")}
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  <FontAwesomeIcon icon={faXmark} />
+                </button>
+              )}
+            </div>
+
+            <label className="admin-filter-select">
+              <span className="sr-only">Filter by role</span>
+              <select
+                value={roleFilter}
+                onChange={handleRoleFilterChange}
+              >
+                <option value="ALL">All Roles</option>
+                <option value="STUDENT">Students</option>
+                <option value="FACULTY">Faculty</option>
+                <option value="ADMIN">Admins</option>
+              </select>
+              <FontAwesomeIcon icon={faChevronDown} />
+            </label>
+
+            {uniqueDepartments.length > 0 && (
+              <label className="admin-filter-select">
+                <span className="sr-only">Filter by department</span>
+                <select
+                  value={departmentFilter}
+                  onChange={handleDepartmentFilterChange}
+                >
+                  <option value="ALL">All Departments</option>
+                  {uniqueDepartments.map((dept) => (
+                    <option key={dept} value={dept}>
+                      {dept}
+                    </option>
+                  ))}
+                </select>
+                <FontAwesomeIcon icon={faChevronDown} />
+              </label>
+            )}
+
+            <label className="admin-filter-select">
+              <span className="sr-only">Filter by status</span>
+              <select
+                value={statusFilter}
+                onChange={handleStatusFilterChange}
+              >
+                <option value="ALL">All Statuses</option>
+                <option value="ACTIVE">Active</option>
+                <option value="INACTIVE">Inactive</option>
+              </select>
+              <FontAwesomeIcon icon={faChevronDown} />
+            </label>
+
+            <div className="admin-toolbar-actions">
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  className="admin-reset-button"
+                  onClick={handleResetFilters}
+                  title="Reset all filters"
+                >
+                  <FontAwesomeIcon icon={faXmark} />
+                  <span>Reset</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                className="admin-action-button admin-refresh-button"
+                onClick={() => loadUsers(true)}
+                disabled={loadingUsers || refreshingUsers}
+                title="Refresh user list"
+              >
+                <FontAwesomeIcon
+                  icon={refreshingUsers ? faSpinner : faRotateRight}
+                  spin={refreshingUsers}
+                />
+                <span>Refresh</span>
+              </button>
+            </div>
           </div>
 
-          <label className="admin-filter-select">
-            <span className="sr-only">Filter by role</span>
-            <select
-              value={roleFilter}
-              onChange={handleRoleFilterChange}
-            >
-              <option value="ALL">All Roles</option>
-              <option value="STUDENT">Students</option>
-              <option value="FACULTY">Faculty</option>
-              <option value="ADMIN">Admins</option>
-            </select>
-            <FontAwesomeIcon icon={faChevronDown} />
-          </label>
+          {loadingUsers ? (
+            <div className="admin-list-state">
+              <FontAwesomeIcon icon={faSpinner} spin />
+              <span>Loading users...</span>
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="admin-list-state">
+              <FontAwesomeIcon icon={faUsers} />
+              <span>No users match the selected filters.</span>
+              {hasActiveFilters && (
+                <button
+                  type="button"
+                  className="admin-reset-link-button"
+                  onClick={handleResetFilters}
+                >
+                  Reset all filters
+                </button>
+              )}
+            </div>
+          ) : (
+            <>
+              <div className="admin-table-wrapper">
+                <table className="admin-management-table">
+                  <thead>
+                    <tr>
+                      <th>S.N.</th>
+                      <th>Name</th>
+                      <th>User ID</th>
+                      <th>Email</th>
+                      <th>Role</th>
+                      <th>Status</th>
+                      <th>Last Login</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
 
-          <label className="admin-filter-select">
-            <span className="sr-only">Filter by status</span>
-            <select
-              value={statusFilter}
-              onChange={handleStatusFilterChange}
-            >
-              <option value="ALL">All Statuses</option>
-              <option value="ACTIVE">Active</option>
-              <option value="INACTIVE">Inactive</option>
-            </select>
-            <FontAwesomeIcon icon={faChevronDown} />
-          </label>
+                  <tbody>
+                    {paginatedUsers.map((user, index) => {
+                      const isCurrentUser =
+                        currentUser?.user_id === user.user_id;
+                      const isSelected =
+                        selectedUser?.user_id === user.user_id;
+                      const active = isUserActive(user);
+                      const busy =
+                        deletingUserId === user.user_id ||
+                        updatingUserId === user.user_id ||
+                        reactivatingUserId === user.user_id;
 
-          <button
-            type="button"
-            className="admin-action-button"
-            onClick={() => loadUsers(true)}
-            disabled={loadingUsers || refreshingUsers}
-            title="Refresh user list"
-          >
-            <FontAwesomeIcon
-              icon={refreshingUsers ? faSpinner : faRotateRight}
-              spin={refreshingUsers}
-            />
-            Refresh
-          </button>
-        </div>
+                      return (
+                        <tr
+                          key={user.user_id}
+                          className={`${!active ? "admin-user-row-inactive" : ""
+                            } ${isSelected ? "admin-user-row-selected" : ""}`}
+                        >
+                          <td>
+                            {(safeCurrentPage - 1) * PAGE_SIZE +
+                              index +
+                              1}
+                          </td>
 
-        {loadingUsers ? (
-          <div className="admin-list-state">
-            <FontAwesomeIcon icon={faSpinner} spin />
-            <span>Loading users...</span>
-          </div>
-        ) : filteredUsers.length === 0 ? (
-          <div className="admin-list-state">
-            <FontAwesomeIcon icon={faUsers} />
-            <span>No users match the selected filters.</span>
-          </div>
-        ) : (
-          <>
-            <div className="admin-table-wrapper">
-              <table className="admin-management-table">
-                <thead>
-                  <tr>
-                    <th>S.N.</th>
-                    <th>Name</th>
-                    <th>User ID</th>
-                    <th>Email</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-
-                <tbody>
-                  {paginatedUsers.map((user, index) => {
-                    const isCurrentUser =
-                      currentUser?.user_id === user.user_id;
-                    const active = isUserActive(user);
-                    const busy =
-                      deletingUserId === user.user_id ||
-                      updatingUserId === user.user_id ||
-                      reactivatingUserId === user.user_id;
-
-                    return (
-                      <tr
-                        key={user.user_id}
-                        className={!active ? "admin-user-row-inactive" : ""}
-                      >
-                        <td>
-                          {(safeCurrentPage - 1) * PAGE_SIZE +
-                            index +
-                            1}
-                        </td>
-
-                        <td>
-                          <div className="admin-user-name-cell">
+                          <td>
                             <div
-                              className={`admin-user-avatar admin-avatar-${user.role?.toLowerCase()}`}
+                              className="admin-user-name-cell"
+                              onClick={() => setSelectedUser(user)}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  setSelectedUser(user);
+                                }
+                              }}
+                              title="Click to view details"
                             >
-                              {getInitials(user.name)}
+                              <div
+                                className={`admin-user-avatar admin-avatar-${user.role?.toLowerCase()}`}
+                              >
+                                {getInitials(user.name)}
+                              </div>
+                              <div className="admin-user-name-info">
+                                <strong>{user.name}</strong>
+                                {isCurrentUser && (
+                                  <small className="admin-current-user-tag">
+                                    Current account
+                                  </small>
+                                )}
+                              </div>
                             </div>
-                            <div>
-                              <strong>{user.name}</strong>
-                              {isCurrentUser && (
-                                <small>Current account</small>
-                              )}
-                            </div>
-                          </div>
-                        </td>
+                          </td>
 
-                        <td>
-                          <span className="admin-user-id">
-                            {user.user_id}
-                          </span>
-                        </td>
+                          <td>
+                            <span className="admin-user-id">
+                              {user.user_id}
+                            </span>
+                          </td>
 
-                        <td>{user.email}</td>
+                          <td>
+                            <span className="admin-user-email-text" title={user.email}>
+                              {user.email}
+                            </span>
+                          </td>
 
-                        <td>
-                          <span
-                            className={`admin-role-badge admin-role-${user.role?.toLowerCase()}`}
-                          >
-                            <FontAwesomeIcon
-                              icon={getRoleIcon(user.role)}
-                            />
-                            {getRoleLabel(user.role)}
-                          </span>
-                        </td>
+                          <td>
+                            <span
+                              className={`admin-role-badge admin-role-${user.role?.toLowerCase()}`}
+                            >
+                              <FontAwesomeIcon
+                                icon={getRoleIcon(user.role)}
+                              />
+                              {getRoleLabel(user.role)}
+                            </span>
+                          </td>
 
-                        <td>
-                          <span
-                            className={`admin-user-status ${
-                              active
+                          <td>
+                            <span
+                              className={`admin-user-status ${active
                                 ? "admin-user-status-active"
                                 : "admin-user-status-inactive"
-                            }`}
-                          >
-                            {active ? "Active" : "Inactive"}
-                          </span>
-                        </td>
-
-                        <td>
-                          <div className="admin-table-actions">
-                            <button
-                              type="button"
-                              className="admin-action-button"
-                              onClick={() => openEditModal(user)}
-                              disabled={busy}
-                              title="Edit user"
+                                }`}
                             >
-                              Edit
-                            </button>
+                              {active ? "Active" : "Inactive"}
+                            </span>
+                          </td>
 
-                            {active ? (
+                          <td>
+                            <span className="admin-user-last-login">
+                              {formatLastLogin(user.last_login)}
+                            </span>
+                          </td>
+
+                          <td>
+                            <div className="admin-table-actions">
                               <button
                                 type="button"
-                                className="admin-action-icon"
-                                onClick={() => handleDeleteUser(user)}
-                                disabled={isCurrentUser || busy}
-                                title={
-                                  isCurrentUser
-                                    ? "You cannot remove your current account."
-                                    : "Deactivate or delete account"
+                                className={`admin-action-view ${isSelected ? "active" : ""
+                                  }`}
+                                onClick={() =>
+                                  setSelectedUser(
+                                    isSelected ? null : user
+                                  )
                                 }
-                                aria-label={`Remove access for ${user.name}`}
+                                title="View details"
+                                aria-label={`View details for ${user.name}`}
                               >
-                                {deletingUserId === user.user_id ? (
-                                  <FontAwesomeIcon
-                                    icon={faSpinner}
-                                    spin
-                                  />
-                                ) : (
-                                  <FontAwesomeIcon icon={faTrash} />
-                                )}
+                                <FontAwesomeIcon icon={faEye} />
+                                <span>View</span>
                               </button>
-                            ) : (
+
                               <button
                                 type="button"
-                                className="admin-action-button admin-reactivate-button"
-                                onClick={() => handleReactivateUser(user)}
+                                className="admin-action-button"
+                                onClick={() => openEditModal(user)}
                                 disabled={busy}
-                                title="Restore login access"
+                                title="Edit user"
                               >
-                                <FontAwesomeIcon
-                                  icon={
-                                    reactivatingUserId === user.user_id
-                                      ? faSpinner
-                                      : faRotateRight
-                                  }
-                                  spin={
-                                    reactivatingUserId === user.user_id
-                                  }
-                                />
-                                {reactivatingUserId === user.user_id
-                                  ? "Restoring..."
-                                  : "Reactivate"}
+                                Edit
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
+
+                              {active ? (
+                                <button
+                                  type="button"
+                                  className="admin-action-icon"
+                                  onClick={() => handleDeleteUser(user)}
+                                  disabled={isCurrentUser || busy}
+                                  title={
+                                    isCurrentUser
+                                      ? "You cannot remove your current account."
+                                      : "Deactivate account"
+                                  }
+                                  aria-label={`Deactivate ${user.name}`}
+                                >
+                                  {deletingUserId === user.user_id ? (
+                                    <FontAwesomeIcon
+                                      icon={faSpinner}
+                                      spin
+                                    />
+                                  ) : (
+                                    <FontAwesomeIcon icon={faTrash} />
+                                  )}
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="admin-action-button admin-reactivate-button"
+                                  onClick={() => handleReactivateUser(user)}
+                                  disabled={busy}
+                                  title="Restore login access"
+                                >
+                                  <FontAwesomeIcon
+                                    icon={
+                                      reactivatingUserId === user.user_id
+                                        ? faSpinner
+                                        : faRotateRight
+                                    }
+                                    spin={
+                                      reactivatingUserId === user.user_id
+                                    }
+                                  />
+                                  {reactivatingUserId === user.user_id
+                                    ? "Restoring..."
+                                    : "Reactivate"}
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="admin-table-footer">
+                <span>
+                  Showing <strong>{firstVisibleUser}</strong> to{" "}
+                  <strong>{lastVisibleUser}</strong> of{" "}
+                  <strong>{filteredUsers.length}</strong> users
+                </span>
+
+                <div className="admin-pagination">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCurrentPage((page) => Math.max(1, page - 1))
+                    }
+                    disabled={safeCurrentPage === 1}
+                    aria-label="Previous page"
+                    title="Previous page"
+                  >
+                    <FontAwesomeIcon icon={faChevronLeft} />
+                  </button>
+
+                  {getPaginationItems().map((item) => {
+                    if (typeof item === "string") {
+                      return (
+                        <span
+                          key={item}
+                          className="admin-pagination-ellipsis"
+                        >
+                          ...
+                        </span>
+                      );
+                    }
+                    return (
+                      <button
+                        type="button"
+                        key={item}
+                        className={
+                          safeCurrentPage === item ? "active" : ""
+                        }
+                        onClick={() => setCurrentPage(item)}
+                      >
+                        {item}
+                      </button>
                     );
                   })}
-                </tbody>
-              </table>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setCurrentPage((page) =>
+                        Math.min(totalPages, page + 1)
+                      )
+                    }
+                    disabled={safeCurrentPage === totalPages}
+                    aria-label="Next page"
+                    title="Next page"
+                  >
+                    <FontAwesomeIcon icon={faChevronRight} />
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </section>
+
+        {/* =====================================================
+            4. SELECTED USER DETAILS PANEL
+        ====================================================== */}
+        {selectedUser && (
+          <aside
+            className="admin-user-details-panel"
+            aria-label="User details"
+          >
+            <div className="admin-details-top-bar">
+              <span className="admin-details-top-title">User Details</span>
+              <button
+                type="button"
+                className="admin-details-close-btn"
+                onClick={() => setSelectedUser(null)}
+                title="Close details panel"
+                aria-label="Close details panel"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
             </div>
 
-            <div className="admin-table-footer">
-              <span>
-                Showing {firstVisibleUser} to {lastVisibleUser} of{" "}
-                {filteredUsers.length} users
-              </span>
-
-              <div className="admin-pagination">
-                <button
-                  type="button"
-                  onClick={() =>
-                    setCurrentPage((page) => Math.max(1, page - 1))
-                  }
-                  disabled={safeCurrentPage === 1}
-                  aria-label="Previous page"
-                  title="Previous page"
+            <div className="admin-details-card-body">
+              <div className="admin-details-profile-header">
+                <div
+                  className={`admin-details-avatar admin-avatar-${selectedUser.role?.toLowerCase()}`}
                 >
-                  <FontAwesomeIcon icon={faChevronLeft} />
-                </button>
+                  {getInitials(selectedUser.name)}
+                </div>
 
-                {Array.from(
-                  { length: totalPages },
-                  (_, index) => index + 1
-                )
-                  .slice(0, 5)
-                  .map((page) => (
-                    <button
-                      type="button"
-                      key={page}
-                      className={
-                        safeCurrentPage === page ? "active" : ""
-                      }
-                      onClick={() => setCurrentPage(page)}
+                <div className="admin-details-identity">
+                  <h3>{selectedUser.name}</h3>
+                  <div className="admin-details-badges">
+                    <span
+                      className={`admin-user-status ${isUserActive(selectedUser)
+                        ? "admin-user-status-active"
+                        : "admin-user-status-inactive"
+                        }`}
                     >
-                      {page}
-                    </button>
-                  ))}
+                      {isUserActive(selectedUser) ? "Active" : "Inactive"}
+                    </span>
+                    <span
+                      className={`admin-role-badge admin-role-${selectedUser.role?.toLowerCase()}`}
+                    >
+                      <FontAwesomeIcon
+                        icon={getRoleIcon(selectedUser.role)}
+                      />
+                      {getRoleLabel(selectedUser.role)}
+                    </span>
+                  </div>
+                  {currentUser?.user_id === selectedUser.user_id && (
+                    <span className="admin-current-user-tag">
+                      Current Account
+                    </span>
+                  )}
+                </div>
+              </div>
 
+              <div className="admin-details-section">
+                <h4>Account Information</h4>
+                <div className="admin-details-grid">
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">User ID</span>
+                    <span className="admin-detail-value admin-user-id">
+                      #{selectedUser.user_id}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">Full Name</span>
+                    <span className="admin-detail-value">
+                      {selectedUser.name}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">
+                      <FontAwesomeIcon icon={faEnvelope} /> Email
+                    </span>
+                    <span className="admin-detail-value">
+                      {selectedUser.email}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">Role</span>
+                    <span className="admin-detail-value">
+                      {getRoleLabel(selectedUser.role)}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">
+                      <FontAwesomeIcon icon={faBuilding} /> Department
+                    </span>
+                    <span className="admin-detail-value">
+                      {selectedUser.department || "—"}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">
+                      <FontAwesomeIcon icon={faPhone} /> Phone
+                    </span>
+                    <span className="admin-detail-value">
+                      {selectedUser.phone || "—"}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">Member Since</span>
+                    <span className="admin-detail-value">
+                      {formatDate(selectedUser.created_at)}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">Last Login</span>
+                    <span className="admin-detail-value">
+                      {formatLastLogin(selectedUser.last_login)}
+                    </span>
+                  </div>
+
+                  <div className="admin-detail-item">
+                    <span className="admin-detail-label">Last Updated</span>
+                    <span className="admin-detail-value">
+                      {formatDate(selectedUser.updated_at)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="admin-details-actions">
                 <button
                   type="button"
-                  onClick={() =>
-                    setCurrentPage((page) =>
-                      Math.min(totalPages, page + 1)
-                    )
-                  }
-                  disabled={safeCurrentPage === totalPages}
-                  aria-label="Next page"
-                  title="Next page"
+                  className="admin-details-edit-btn"
+                  onClick={() => openEditModal(selectedUser)}
                 >
-                  <FontAwesomeIcon icon={faChevronRight} />
+                  <FontAwesomeIcon icon={faPenToSquare} />
+                  <span>Edit User</span>
                 </button>
+
+                {isUserActive(selectedUser) ? (
+                  <button
+                    type="button"
+                    className="admin-details-delete-btn"
+                    onClick={() => handleDeleteUser(selectedUser)}
+                    disabled={
+                      currentUser?.user_id === selectedUser.user_id
+                    }
+                    title={
+                      currentUser?.user_id === selectedUser.user_id
+                        ? "You cannot remove your current account."
+                        : "Deactivate account"
+                    }
+                  >
+                    <FontAwesomeIcon icon={faTrash} />
+                    <span>Deactivate</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="admin-details-reactivate-btn"
+                    onClick={() => handleReactivateUser(selectedUser)}
+                  >
+                    <FontAwesomeIcon icon={faRotateRight} />
+                    <span>Reactivate</span>
+                  </button>
+                )}
               </div>
             </div>
-          </>
+          </aside>
         )}
-      </section>
+      </div>
 
+      {/* =====================================================
+          5. ADD USER MODAL (COMPLETELY PRESERVED)
+      ====================================================== */}
       {showCreateModal && (
         <div className="admin-modal-backdrop">
           <div
@@ -1135,6 +1640,9 @@ function AdminManagement() {
         </div>
       )}
 
+      {/* =====================================================
+          6. EDIT USER MODAL (COMPLETELY PRESERVED)
+      ====================================================== */}
       {editingUser && (
         <div className="admin-modal-backdrop">
           <div

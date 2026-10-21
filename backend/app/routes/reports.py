@@ -8,8 +8,10 @@ from app.models import (
     CourseOffering,
     Enrollment,
     Faculty,
+    Student,
 )
 from app.utils.auth import faculty_required
+from app.utils.academic_year import canonical_academic_year, format_batch_cohort
 
 MINIMUM_ATTENDANCE_PERCENTAGE = 75.0
 
@@ -79,8 +81,13 @@ def get_attendance_report():
             offering_id=offering_id
         )
 
+    from collections import defaultdict
+    from sqlalchemy.orm import joinedload
+    from app.extensions import db
+
     offerings = (
         offering_query
+        .options(joinedload(CourseOffering.course))
         .order_by(CourseOffering.offering_id.asc())
         .all()
     )
@@ -124,6 +131,9 @@ def get_attendance_report():
 
         enrollments = (
             Enrollment.query
+            .options(
+                joinedload(Enrollment.student).joinedload(Student.user)
+            )
             .filter_by(
                 offering_id=offering.offering_id,
                 status="ACTIVE",
@@ -132,40 +142,30 @@ def get_attendance_report():
             .all()
         )
 
+        counts_map = defaultdict(lambda: {"PRESENT": 0, "ABSENT": 0})
+        if session_ids:
+            record_counts = (
+                db.session.query(
+                    AttendanceRecord.student_id,
+                    AttendanceRecord.status,
+                    db.func.count(AttendanceRecord.attendance_id)
+                )
+                .filter(
+                    AttendanceRecord.session_id.in_(session_ids),
+                )
+                .group_by(AttendanceRecord.student_id, AttendanceRecord.status)
+                .all()
+            )
+            for s_id, st, cnt in record_counts:
+                counts_map[s_id][st] = cnt
+
         students = []
 
         for enrollment in enrollments:
             student = enrollment.student
 
-            present_count = 0
-            absent_count = 0
-
-            if session_ids:
-                present_count = (
-                    AttendanceRecord.query
-                    .filter(
-                        AttendanceRecord.student_id
-                        == student.student_id,
-                        AttendanceRecord.session_id.in_(
-                            session_ids
-                        ),
-                        AttendanceRecord.status == "PRESENT",
-                    )
-                    .count()
-                )
-
-                absent_count = (
-                    AttendanceRecord.query
-                    .filter(
-                        AttendanceRecord.student_id
-                        == student.student_id,
-                        AttendanceRecord.session_id.in_(
-                            session_ids
-                        ),
-                        AttendanceRecord.status == "ABSENT",
-                    )
-                    .count()
-                )
+            present_count = counts_map[student.student_id]["PRESENT"]
+            absent_count = counts_map[student.student_id]["ABSENT"]
 
             attendance_percentage = (
                 (present_count / total_sessions) * 100
@@ -173,12 +173,12 @@ def get_attendance_report():
                 else 0
             )
 
-
             students.append({
                 "student_id": student.student_id,
                 "enrollment_no": student.enrollment_no,
                 "student_name": student.user.name,
                 "email": student.user.email,
+                "batch_year": format_batch_cohort(student.batch.batch_name if student.batch else student.academic_year),
                 "total_sessions": total_sessions,
                 "present_sessions": present_count,
                 "absent_sessions": absent_count,
@@ -196,11 +196,11 @@ def get_attendance_report():
         report.append({
             "offering_id": offering.offering_id,
             "course_id": offering.course_id,
-            "course_code": offering.course.course_code,
-            "course_name": offering.course.course_name,
+            "course_code": offering.course.course_code if offering.course else "",
+            "course_name": offering.course.course_name if offering.course else "",
             "semester": offering.semester,
             "section": offering.section,
-            "academic_year": offering.academic_year,
+            "academic_year": canonical_academic_year(offering.academic_year),
             "room": offering.room,
             "total_sessions": total_sessions,
             "minimum_attendance_percentage": (

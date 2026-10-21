@@ -26,6 +26,7 @@ import {
 } from "../../services/enrollmentService";
 
 import {
+  getAdminAcademicSummary,
   getAdminCourses,
   createAdminCourse,
   updateAdminCourse,
@@ -89,6 +90,30 @@ function formatDate(value) {
     : date.toLocaleString();
 }
 
+function getPaginationItems(currentPage, totalPages) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+
+  if (currentPage <= 2) {
+    return [1, 2, 3, "...", totalPages];
+  }
+
+  if (currentPage === 3) {
+    return [1, 2, 3, 4, "...", totalPages];
+  }
+
+  if (currentPage === totalPages - 2) {
+    return [1, "...", totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  if (currentPage >= totalPages - 1) {
+    return [1, "...", totalPages - 2, totalPages - 1, totalPages];
+  }
+
+  return [1, "...", currentPage - 1, currentPage, currentPage + 1, "...", totalPages];
+}
+
 function AcademicManagement() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -112,6 +137,21 @@ function AcademicManagement() {
 
   const activeTab = getTabFromPath();
 
+
+  // Summary card statistics
+  const [summaryStats, setSummaryStats] = useState({
+    totalCourses: null,
+    activeCourses: null,
+    courseOfferings: null,
+    enrollments: null,
+  });
+  const [summaryLoading, setSummaryLoading] = useState(true);
+  const [summaryErrors, setSummaryErrors] = useState({
+    totalCourses: null,
+    activeCourses: null,
+    courseOfferings: null,
+    enrollments: null,
+  });
 
   // Course data
   const [courses, setCourses] = useState([]);
@@ -183,13 +223,124 @@ function AcademicManagement() {
   // Assignment API has not yet been verified.
   const [assignmentNotice, setAssignmentNotice] = useState("");
 
+  const loadAcademicSummary = useCallback(async (options = {}) => {
+    setSummaryLoading(true);
+
+    try {
+      const result = await getAdminAcademicSummary(options);
+
+      if (result?.success && result?.data) {
+        setSummaryStats({
+          totalCourses: result.data.total_courses,
+          activeCourses: result.data.active_courses,
+          courseOfferings: result.data.course_offerings,
+          enrollments: result.data.enrollments,
+        });
+        setSummaryErrors({
+          totalCourses:
+            result.data.total_courses === null ? "Unable to load count" : null,
+          activeCourses:
+            result.data.active_courses === null ? "Unable to load count" : null,
+          courseOfferings:
+            result.data.course_offerings === null
+              ? "Unable to load count"
+              : null,
+          enrollments:
+            result.data.enrollments === null ? "Unable to load count" : null,
+        });
+      } else {
+        throw new Error(
+          result?.message || "Unable to load academic summary statistics."
+        );
+      }
+    } catch (error) {
+      const errorMsg = getErrorMessage(error, "Unable to load statistics.");
+      setSummaryErrors({
+        totalCourses: errorMsg,
+        activeCourses: errorMsg,
+        courseOfferings: errorMsg,
+        enrollments: errorMsg,
+      });
+    } finally {
+      setSummaryLoading(false);
+    }
+  }, []);
+
+  // Fetch all 4 statistics whenever Academic Management mounts.
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchSummary = async () => {
+      setSummaryLoading(true);
+
+      try {
+        const result = await getAdminAcademicSummary();
+        if (cancelled) return;
+
+        if (result?.success && result?.data) {
+          setSummaryStats({
+            totalCourses: result.data.total_courses,
+            activeCourses: result.data.active_courses,
+            courseOfferings: result.data.course_offerings,
+            enrollments: result.data.enrollments,
+          });
+          setSummaryErrors({
+            totalCourses:
+              result.data.total_courses === null
+                ? "Unable to load count"
+                : null,
+            activeCourses:
+              result.data.active_courses === null
+                ? "Unable to load count"
+                : null,
+            courseOfferings:
+              result.data.course_offerings === null
+                ? "Unable to load count"
+                : null,
+            enrollments:
+              result.data.enrollments === null
+                ? "Unable to load count"
+                : null,
+          });
+        } else {
+          throw new Error(
+            result?.message || "Unable to load academic summary statistics."
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          const errorMsg = getErrorMessage(error, "Unable to load statistics.");
+          setSummaryErrors({
+            totalCourses: errorMsg,
+            activeCourses: errorMsg,
+            courseOfferings: errorMsg,
+            enrollments: errorMsg,
+          });
+        }
+      } finally {
+        if (!cancelled) {
+          setSummaryLoading(false);
+        }
+      }
+    };
+
+    void fetchSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   // Load courses whenever the Courses tab is opened.
   const loadCourses = useCallback(async () => {
     setCoursesLoading(true);
     setCoursesError("");
 
     try {
-      const result = await getAdminCourses();
+      const [result] = await Promise.all([
+        getAdminCourses(),
+        loadAcademicSummary({ params: { _nocache: true } }),
+      ]);
 
       if (!result?.success || !Array.isArray(result.data)) {
         throw new Error(result?.message || "Unable to load courses.");
@@ -201,7 +352,7 @@ function AcademicManagement() {
     } finally {
       setCoursesLoading(false);
     }
-  }, []);
+  }, [loadAcademicSummary]);
 
   useEffect(() => {
     if (activeTab !== "courses") return;
@@ -257,6 +408,7 @@ function AcademicManagement() {
           getAdminCourseOfferings(),
           getAdminCourses(),
           getAdminFaculty(),
+          loadAcademicSummary({ params: { _nocache: true } }),
         ]);
 
       if (!offeringResult?.success || !Array.isArray(offeringResult.data)) {
@@ -283,7 +435,7 @@ function AcademicManagement() {
     } finally {
       setOfferingsLoading(false);
     }
-  }, []);
+  }, [loadAcademicSummary]);
 
   useEffect(() => {
     if (activeTab !== "offerings") return;
@@ -516,21 +668,49 @@ function AcademicManagement() {
     };
   }, [activeTab]);
 
-  // Summary values are calculated from successfully loaded data.
-  const metrics = useMemo(
-    () => ({
-      totalCourses: courses.length,
-      activeCourses: courses.filter(
-        (course) =>
-          course.is_active === true ||
-          course.is_active === 1 ||
-          course.status?.toLowerCase() === "active"
-      ).length,
-      offerings: offerings.length,
-      enrollments: enrollmentsLoaded ? enrollments.length : null,
-    }),
-    [courses, offerings, enrollments, enrollmentsLoaded]
-  );
+  // Summary values are derived from academic summary statistics,
+  // falling back to local table state if available.
+  const metrics = useMemo(() => {
+    const totalCourses =
+      summaryStats.totalCourses !== null
+        ? summaryStats.totalCourses
+        : courses.length > 0
+        ? courses.length
+        : null;
+
+    const activeCourses =
+      summaryStats.activeCourses !== null
+        ? summaryStats.activeCourses
+        : courses.length > 0
+        ? courses.filter(
+            (course) =>
+              course.is_active === true ||
+              course.is_active === 1 ||
+              course.status?.toLowerCase() === "active"
+          ).length
+        : null;
+
+    const offeringsCount =
+      summaryStats.courseOfferings !== null
+        ? summaryStats.courseOfferings
+        : offerings.length > 0
+        ? offerings.length
+        : null;
+
+    const enrollmentsCount =
+      summaryStats.enrollments !== null
+        ? summaryStats.enrollments
+        : enrollmentsLoaded
+        ? enrollments.length
+        : null;
+
+    return {
+      totalCourses,
+      activeCourses,
+      offerings: offeringsCount,
+      enrollments: enrollmentsCount,
+    };
+  }, [summaryStats, courses, offerings, enrollments, enrollmentsLoaded]);
 
   const handleToggleCourseStatus = async (course) => {
     const courseId = course.course_id;
@@ -566,11 +746,21 @@ function AcademicManagement() {
         )
       );
 
+      setSummaryStats((prev) => ({
+        ...prev,
+        activeCourses:
+          prev.activeCourses !== null
+            ? Math.max(0, prev.activeCourses + (nextIsActive ? 1 : -1))
+            : null,
+      }));
+
       setCourseActionMessage(
         `${course.course_code || "Course"} ${
           nextIsActive ? "activated" : "deactivated"
         } successfully.`
       );
+
+      void loadAcademicSummary({ params: { _nocache: true } });
     } catch (error) {
       setCourseActionError(
         getErrorMessage(error, "Unable to update course status.")
@@ -890,6 +1080,8 @@ function AcademicManagement() {
       setOfferingActionMessage(
         result.message || "Course offering deleted successfully."
       );
+
+      void loadAcademicSummary({ params: { _nocache: true } });
     } catch (error) {
       setOfferingActionError(
         getErrorMessage(error, "Unable to delete course offering.")
@@ -906,7 +1098,10 @@ function AcademicManagement() {
     setEnrollmentActionError("");
 
     try {
-      const result = await getAdminEnrollments();
+      const [result] = await Promise.all([
+        getAdminEnrollments(),
+        loadAcademicSummary({ params: { _nocache: true } }),
+      ]);
 
       if (!result?.success || !Array.isArray(result.data)) {
         throw new Error(result?.message || "Unable to refresh enrollments.");
@@ -1039,6 +1234,7 @@ function AcademicManagement() {
 
       // Refresh the group preview as well.
       await handlePreviewGroupEnrollment();
+      void loadAcademicSummary({ params: { _nocache: true } });
     } catch (error) {
       setEnrollmentActionError(
         getErrorMessage(error, "Unable to complete bulk enrollment.")
@@ -1083,6 +1279,8 @@ function AcademicManagement() {
       setEnrollmentActionMessage(
         result.message || "Enrollment removed successfully."
       );
+
+      void loadAcademicSummary({ params: { _nocache: true } });
     } catch (error) {
       setEnrollmentActionError(
         getErrorMessage(error, "Unable to remove enrollment.")
@@ -1253,7 +1451,34 @@ function AcademicManagement() {
               </div>
               <span className="academic-summary-badge">All Courses</span>
             </div>
-            <strong>{metrics.totalCourses}</strong>
+            <strong>
+              {summaryErrors.totalCourses && metrics.totalCourses === null ? (
+                <span
+                  className="academic-summary-stat-error"
+                  title={summaryErrors.totalCourses}
+                >
+                  Error
+                  <button
+                    type="button"
+                    className="academic-summary-retry-btn"
+                    title="Retry loading count"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void loadAcademicSummary({ params: { _nocache: true } });
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faRotate} />
+                  </button>
+                </span>
+              ) : summaryLoading && metrics.totalCourses === null ? (
+                <span
+                  className="academic-summary-skeleton"
+                  aria-label="Loading total courses"
+                />
+              ) : (
+                metrics.totalCourses ?? 0
+              )}
+            </strong>
             <span>Total Courses</span>
             <span className="academic-summary-link">
               View all courses <span aria-hidden="true">→</span>
@@ -1286,7 +1511,34 @@ function AcademicManagement() {
               </div>
               <span className="academic-summary-badge">Active</span>
             </div>
-            <strong>{metrics.activeCourses}</strong>
+            <strong>
+              {summaryErrors.activeCourses && metrics.activeCourses === null ? (
+                <span
+                  className="academic-summary-stat-error"
+                  title={summaryErrors.activeCourses}
+                >
+                  Error
+                  <button
+                    type="button"
+                    className="academic-summary-retry-btn"
+                    title="Retry loading count"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void loadAcademicSummary({ params: { _nocache: true } });
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faRotate} />
+                  </button>
+                </span>
+              ) : summaryLoading && metrics.activeCourses === null ? (
+                <span
+                  className="academic-summary-skeleton"
+                  aria-label="Loading active courses"
+                />
+              ) : (
+                metrics.activeCourses ?? 0
+              )}
+            </strong>
             <span>Active Courses</span>
             <span className="academic-summary-link">
               View active courses <span aria-hidden="true">→</span>
@@ -1319,7 +1571,34 @@ function AcademicManagement() {
               </div>
               <span className="academic-summary-badge">Schedule</span>
             </div>
-            <strong>{metrics.offerings}</strong>
+            <strong>
+              {summaryErrors.courseOfferings && metrics.offerings === null ? (
+                <span
+                  className="academic-summary-stat-error"
+                  title={summaryErrors.courseOfferings}
+                >
+                  Error
+                  <button
+                    type="button"
+                    className="academic-summary-retry-btn"
+                    title="Retry loading count"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void loadAcademicSummary({ params: { _nocache: true } });
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faRotate} />
+                  </button>
+                </span>
+              ) : summaryLoading && metrics.offerings === null ? (
+                <span
+                  className="academic-summary-skeleton"
+                  aria-label="Loading course offerings"
+                />
+              ) : (
+                metrics.offerings ?? 0
+              )}
+            </strong>
             <span>Course Offerings</span>
             <span className="academic-summary-link">
               Manage offerings <span aria-hidden="true">→</span>
@@ -1352,7 +1631,34 @@ function AcademicManagement() {
               </div>
               <span className="academic-summary-badge">Students</span>
             </div>
-            <strong>{metrics.enrollments ?? "N/A"}</strong>
+            <strong>
+              {summaryErrors.enrollments && metrics.enrollments === null ? (
+                <span
+                  className="academic-summary-stat-error"
+                  title={summaryErrors.enrollments}
+                >
+                  Error
+                  <button
+                    type="button"
+                    className="academic-summary-retry-btn"
+                    title="Retry loading count"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void loadAcademicSummary({ params: { _nocache: true } });
+                    }}
+                  >
+                    <FontAwesomeIcon icon={faRotate} />
+                  </button>
+                </span>
+              ) : summaryLoading && metrics.enrollments === null ? (
+                <span
+                  className="academic-summary-skeleton"
+                  aria-label="Loading enrollments"
+                />
+              ) : (
+                metrics.enrollments ?? 0
+              )}
+            </strong>
             <span>Enrollments</span>
             <span className="academic-summary-link">
               View enrollments <span aria-hidden="true">→</span>
@@ -1585,22 +1891,27 @@ function AcademicManagement() {
                     Previous
                   </button>
 
-                  {Array.from({ length: totalPages }, (_, index) => index + 1)
-                    .map((page) => (
+                  {getPaginationItems(safeCurrentPage, totalPages).map((item, index) =>
+                    item === "..." ? (
+                      <span key={`ellipsis-${index}`} className="academic-page-ellipsis">
+                        ...
+                      </span>
+                    ) : (
                       <button
                         type="button"
-                        key={page}
+                        key={item}
                         className={`academic-page-button ${
-                          safeCurrentPage === page ? "active" : ""
+                          safeCurrentPage === item ? "active" : ""
                         }`}
                         aria-current={
-                          safeCurrentPage === page ? "page" : undefined
+                          safeCurrentPage === item ? "page" : undefined
                         }
-                        onClick={() => setCurrentPage(page)}
+                        onClick={() => setCurrentPage(item)}
                       >
-                        {page}
+                        {item}
                       </button>
-                    ))}
+                    )
+                  )}
 
                   <button
                     type="button"
@@ -1770,24 +2081,27 @@ function AcademicManagement() {
                     Previous
                   </button>
 
-                  {Array.from(
-                    { length: totalOfferingPages },
-                    (_, index) => index + 1
-                  ).map((page) => (
-                    <button
-                      type="button"
-                      key={page}
-                      className={`academic-page-button ${
-                        safeOfferingPage === page ? "active" : ""
-                      }`}
-                      aria-current={
-                        safeOfferingPage === page ? "page" : undefined
-                      }
-                      onClick={() => setOfferingPage(page)}
-                    >
-                      {page}
-                    </button>
-                  ))}
+                  {getPaginationItems(safeOfferingPage, totalOfferingPages).map((item, index) =>
+                    item === "..." ? (
+                      <span key={`ellipsis-${index}`} className="academic-page-ellipsis">
+                        ...
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        key={item}
+                        className={`academic-page-button ${
+                          safeOfferingPage === item ? "active" : ""
+                        }`}
+                        aria-current={
+                          safeOfferingPage === item ? "page" : undefined
+                        }
+                        onClick={() => setOfferingPage(item)}
+                      >
+                        {item}
+                      </button>
+                    )
+                  )}
 
                   <button
                     type="button"
@@ -1885,7 +2199,7 @@ function AcademicManagement() {
                 </div>
 
                 <div className="academic-form-field">
-                  <label htmlFor="group-cohort">Student Batch</label>
+                  <label htmlFor="group-cohort">Batch Year / Cohort</label>
                   <select
                     id="group-cohort"
                     value={groupEnrollment.academic_year}
@@ -1894,7 +2208,7 @@ function AcademicManagement() {
                     }
                     disabled={groupPreviewLoading || studentsLoading}
                   >
-                    <option value="">Select Batch</option>
+                    <option value="">Select Batch (e.g. 2024-2028)</option>
                     {[...new Set(
                       students
                         .filter(
@@ -1902,7 +2216,7 @@ function AcademicManagement() {
                             String(student.department_id) ===
                             String(groupEnrollment.department_id)
                         )
-                        .map((student) => student.academic_year)
+                        .map((student) => student.batch_year || student.batch_name || student.academic_year)
                         .filter(Boolean)
                     )]
                       .sort()
@@ -1928,11 +2242,21 @@ function AcademicManagement() {
                     {[...new Set(
                       students
                         .filter(
-                          (student) =>
-                            String(student.department_id) ===
-                              String(groupEnrollment.department_id) &&
-                            String(student.academic_year) ===
+                          (student) => {
+                            if (
+                              String(student.department_id) !==
+                              String(groupEnrollment.department_id)
+                            )
+                              return false;
+                            const studentCohort =
+                              student.batch_year ||
+                              student.batch_name ||
+                              student.academic_year;
+                            return (
+                              String(studentCohort) ===
                               String(groupEnrollment.academic_year)
+                            );
+                          }
                         )
                         .map((student) => student.semester)
                         .filter((semester) => semester != null)
@@ -1960,13 +2284,23 @@ function AcademicManagement() {
                     {[...new Set(
                       students
                         .filter(
-                          (student) =>
-                            String(student.department_id) ===
-                              String(groupEnrollment.department_id) &&
-                            String(student.academic_year) ===
-                              String(groupEnrollment.academic_year) &&
-                            String(student.semester) ===
-                              String(groupEnrollment.semester)
+                          (student) => {
+                            if (
+                              String(student.department_id) !==
+                              String(groupEnrollment.department_id)
+                            )
+                              return false;
+                            const studentCohort =
+                              student.batch_year ||
+                              student.batch_name ||
+                              student.academic_year;
+                            return (
+                              String(studentCohort) ===
+                                String(groupEnrollment.academic_year) &&
+                              String(student.semester) ===
+                                String(groupEnrollment.semester)
+                            );
+                          }
                         )
                         .map((student) => student.section)
                         .filter(Boolean)
@@ -2013,7 +2347,7 @@ function AcademicManagement() {
                       <span className="group-preview-eyebrow">GROUP SUMMARY</span>
                       <h3>Enrollment Preview</h3>
                       <p className="group-preview-context">
-                        Cohort {groupEnrollment.academic_year}
+                        Batch {groupEnrollment.academic_year}
                         {" · Semester "}
                         {groupEnrollment.semester}
                         {" · Section "}
@@ -2268,24 +2602,27 @@ function AcademicManagement() {
                       Previous
                     </button>
 
-                    {Array.from(
-                      { length: totalEnrollmentPages },
-                      (_, index) => index + 1
-                    ).map((page) => (
-                      <button
-                        type="button"
-                        key={page}
-                        className={`academic-page-button ${
-                          safeEnrollmentPage === page ? "active" : ""
-                        }`}
-                        aria-current={
-                          safeEnrollmentPage === page ? "page" : undefined
-                        }
-                        onClick={() => setEnrollmentPage(page)}
-                      >
-                        {page}
-                      </button>
-                    ))}
+                    {getPaginationItems(safeEnrollmentPage, totalEnrollmentPages).map((item, index) =>
+                      item === "..." ? (
+                        <span key={`ellipsis-${index}`} className="academic-page-ellipsis">
+                          ...
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          key={item}
+                          className={`academic-page-button ${
+                            safeEnrollmentPage === item ? "active" : ""
+                          }`}
+                          aria-current={
+                            safeEnrollmentPage === item ? "page" : undefined
+                          }
+                          onClick={() => setEnrollmentPage(item)}
+                        >
+                          {item}
+                        </button>
+                      )
+                    )}
 
                     <button
                       type="button"
@@ -2733,6 +3070,9 @@ function AcademicManagement() {
                       required
                       disabled={savingOffering}
                     />
+                    <small style={{ fontSize: "11px", color: "#6b7280" }}>
+                      1-year academic session (e.g. 2026-2027), not student batch range
+                    </small>
                   </div>
 
                   <div className="academic-form-field">

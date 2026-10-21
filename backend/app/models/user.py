@@ -33,6 +33,12 @@ class User(db.Model):
         onupdate=datetime.utcnow,
         nullable=False,
     )
+
+    last_login = db.Column(
+        db.DateTime,
+        nullable=True,
+        default=None,
+    )
     student_profile = db.relationship(
     "Student",
     back_populates="user",
