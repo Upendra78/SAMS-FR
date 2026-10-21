@@ -155,25 +155,20 @@ class TestStudentAttendanceSummary(unittest.TestCase):
             ])
             db.session.flush()
 
-            # One PRESENT record in a closed session.
-            db.session.add(
+            db.session.add_all([
                 AttendanceRecord(
                     session_id=closed_present.session_id,
                     student_id=student.student_id,
                     status="PRESENT",
                     recognition_method="FACE",
-                )
-            )
-
-            # This record must not affect the closed-session summary.
-            db.session.add(
+                ),
                 AttendanceRecord(
                     session_id=active_session.session_id,
                     student_id=student.student_id,
                     status="PRESENT",
                     recognition_method="FACE",
-                )
-            )
+                ),
+            ])
 
             db.session.commit()
 
@@ -205,7 +200,8 @@ class TestStudentAttendanceSummary(unittest.TestCase):
         self.assertTrue(payload["success"])
 
         summary = next(
-            item for item in payload["data"]
+            item
+            for item in payload["data"]
             if item["offering_id"] == self.offering_id
         )
 
@@ -213,6 +209,237 @@ class TestStudentAttendanceSummary(unittest.TestCase):
         self.assertEqual(summary["present_sessions"], 1)
         self.assertEqual(summary["absent_sessions"], 1)
         self.assertEqual(summary["attendance_percentage"], 50.0)
+
+    def test_attendance_history_returns_student_records(self):
+        response = self.client.get(
+            "/api/student/attendance/",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertIn("data", payload)
+        self.assertIn("total_records", payload)
+        self.assertEqual(payload["total_records"], 2)
+
+        dates = {
+            item["session_date"]
+            for item in payload["data"]
+        }
+        self.assertEqual(
+            dates,
+            {"2026-10-07", "2026-10-09"},
+        )
+
+    def test_attendance_history_date_filter(self):
+        response = self.client.get(
+            "/api/student/attendance/?date_from=2026-10-08&date_to=2026-10-09",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["total_records"], 1)
+        self.assertEqual(
+            payload["data"][0]["session_date"],
+            "2026-10-09",
+        )
+
+    def test_attendance_history_rejects_invalid_date(self):
+        response = self.client.get(
+            "/api/student/attendance/?date_from=invalid-date",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.get_json()
+        self.assertFalse(payload["success"])
+
+
+
+
+    def test_attendance_history_pagination(self):
+        response = self.client.get(
+            "/api/student/attendance/?page=1&per_page=1",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.get_json()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["page"], 1)
+        self.assertEqual(result["per_page"], 1)
+        self.assertEqual(result["total_records"], 2)
+        self.assertEqual(result["total_pages"], 2)
+        self.assertEqual(len(result["data"]), 1)
+
+    def test_attendance_history_status_filter(self):
+        response = self.client.get(
+            "/api/student/attendance/?status=PRESENT",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        result = response.get_json()
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["total_records"], 2)
+        self.assertTrue(
+            all(record["status"] == "PRESENT"
+                for record in result["data"])
+        )
+
+    def test_attendance_history_rejects_invalid_status(self):
+        response = self.client.get(
+            "/api/student/attendance/?status=UNKNOWN",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.get_json()["success"])
+
+
+
+    def test_attendance_history_offering_filter(self):
+        response = self.client.get(
+            f"/api/student/attendance/?offering_id={self.offering_id}",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["total_records"], 2)
+        self.assertTrue(
+            all(
+                item["offering_id"] == self.offering_id
+                for item in payload["data"]
+            )
+        )
+
+    def test_attendance_history_course_filter(self):
+        with self.app.app_context():
+            offering = db.session.get(
+                CourseOffering,
+                self.offering_id,
+            )
+            course_id = offering.course_id
+
+        response = self.client.get(
+            f"/api/student/attendance/?course_id={course_id}",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["total_records"], 2)
+        self.assertTrue(
+            all(
+                item["course_id"] == course_id
+                for item in payload["data"]
+            )
+        )
+
+    def test_attendance_history_rejects_invalid_pagination(self):
+        response = self.client.get(
+            "/api/student/attendance/?page=0",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(response.get_json()["success"])
+
+    def test_attendance_history_only_returns_own_records(self):
+        response = self.client.get(
+            "/api/student/attendance/",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+
+        self.assertEqual(payload["total_records"], 2)
+
+        with self.app.app_context():
+            returned_ids = {
+                item["attendance_id"]
+                for item in payload["data"]
+            }
+
+            actual_ids = {
+                record.attendance_id
+                for record in AttendanceRecord.query.filter_by(
+                    student_id=db.session.query(Student.student_id)
+                    .filter_by(user_id=self.student_user_id)
+                    .scalar()
+                ).all()
+            }
+
+        self.assertEqual(returned_ids, actual_ids)
+
+
+    def test_attendance_history_requires_authentication(self):
+        response = self.client.get("/api/student/attendance/")
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_attendance_history_rejects_wrong_role(self):
+        with self.app.app_context():
+            token = create_access_token(
+                identity=str(self.student_user_id),
+                additional_claims={"role": "FACULTY"},
+            )
+
+        response = self.client.get(
+            "/api/student/attendance/",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_summary_returns_zero_percentage_without_closed_sessions(self):
+        with self.app.app_context():
+            sessions = AttendanceSession.query.filter_by(
+                offering_id=self.offering_id,
+                status="CLOSED",
+            ).all()
+
+            for session in sessions:
+                session.status = "ACTIVE"
+
+            db.session.commit()
+
+        response = self.client.get(
+            "/api/student/attendance/summary",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["overall"]["total_sessions"], 0)
+        self.assertEqual(payload["overall"]["present_sessions"], 0)
+        self.assertEqual(payload["overall"]["absent_sessions"], 0)
+        self.assertEqual(
+            payload["overall"]["attendance_percentage"], 0
+        )
+
+        summary = next(
+            item for item in payload["data"]
+            if item["offering_id"] == self.offering_id
+        )
+
+        self.assertEqual(summary["total_sessions"], 0)
+        self.assertEqual(summary["attendance_percentage"], 0)
+
+
 
 
 if __name__ == "__main__":

@@ -1,69 +1,83 @@
-import { useEffect, useState } from "react";
+
+import { useCallback, useEffect, useState } from "react";
 import DataTable from "../../components/DataTable";
 import PageState from "../../components/PageState";
 import { getStudentAttendance } from "../../services/attendanceService";
 import "./AttendanceHistory.css";
 
+const PAGE_SIZE = 20;
+
 function AttendanceHistory() {
   const [filter, setFilter] = useState("all");
   const [attendanceRecords, setAttendanceRecords] = useState([]);
+  const [page, setPage] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function loadAttendanceHistory() {
-      try {
-        setLoading(true);
-        setError("");
+  const loadAttendanceHistory = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError("");
 
-        const result = await getStudentAttendance();
+      const params = { page, per_page: PAGE_SIZE };
 
-        if (result?.success) {
-          setAttendanceRecords(result.data ?? []);
-        } else {
-          setAttendanceRecords([]);
-          setError(
-            result?.message || "Unable to load attendance records.",
-          );
-        }
-      } catch (err) {
-        setAttendanceRecords([]);
-        setError(
-          err?.response?.data?.message ||
-            "Unable to load attendance records.",
-        );
-      } finally {
-        setLoading(false);
+      if (filter !== "all") {
+        params.status = filter.toUpperCase();
       }
-    }
 
+      const result = await getStudentAttendance(params);
+
+      if (!result?.success) {
+        setAttendanceRecords([]);
+        setTotalRecords(0);
+        setTotalPages(0);
+        setError(result?.message || "Unable to load attendance records.");
+        return;
+      }
+
+      setAttendanceRecords(result.data ?? []);
+      setTotalRecords(result.total_records ?? 0);
+      setTotalPages(result.total_pages ?? 0);
+    } catch (err) {
+      setAttendanceRecords([]);
+      setTotalRecords(0);
+      setTotalPages(0);
+      setError(
+        err?.response?.data?.message ||
+          "Unable to load attendance records.",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, [page, filter]);
+
+  useEffect(() => {
     loadAttendanceHistory();
-  }, []);
+  }, [loadAttendanceHistory]);
+
+  const handleFilterChange = (event) => {
+    setFilter(event.target.value);
+    setPage(1);
+  };
 
   const formatDate = (dateValue) => {
-    if (!dateValue) {
-      return "N/A";
-    }
+    if (!dateValue) return "N/A";
 
     const date = new Date(dateValue);
 
-    if (Number.isNaN(date.getTime())) {
-      return dateValue;
-    }
+    if (Number.isNaN(date.getTime())) return dateValue;
 
     return date.toLocaleDateString();
   };
 
   const formatDateTime = (dateValue) => {
-    if (!dateValue) {
-      return "N/A";
-    }
+    if (!dateValue) return "N/A";
 
     const date = new Date(dateValue);
 
-    if (Number.isNaN(date.getTime())) {
-      return dateValue;
-    }
+    if (Number.isNaN(date.getTime())) return dateValue;
 
     return date.toLocaleString([], {
       dateStyle: "medium",
@@ -72,9 +86,7 @@ function AttendanceHistory() {
   };
 
   const formatStatus = (status) => {
-    if (!status) {
-      return "N/A";
-    }
+    if (!status) return "N/A";
 
     return String(status)
       .replace(/_/g, " ")
@@ -89,15 +101,7 @@ function AttendanceHistory() {
     { key: "markedAt", label: "Marked At" },
   ];
 
-  const filteredRecords =
-    filter === "all"
-      ? attendanceRecords
-      : attendanceRecords.filter(
-          (record) =>
-            String(record.status || "").toLowerCase() === filter,
-        );
-
-  const tableRecords = filteredRecords.map((record) => ({
+  const tableRecords = attendanceRecords.map((record) => ({
     date: formatDate(record.session_date),
     class: record.section || "N/A",
     subject: record.course_name || record.course_code || "N/A",
@@ -139,8 +143,7 @@ function AttendanceHistory() {
           </span>
 
           <strong>
-            {filteredRecords.length}{" "}
-            {filteredRecords.length === 1 ? "record" : "records"}
+            {totalRecords} {totalRecords === 1 ? "record" : "records"}
           </strong>
         </div>
 
@@ -149,12 +152,13 @@ function AttendanceHistory() {
 
           <select
             value={filter}
-            onChange={(event) => setFilter(event.target.value)}
+            onChange={handleFilterChange}
             disabled={loading || Boolean(error)}
           >
             <option value="all">All records</option>
             <option value="present">Present</option>
             <option value="absent">Absent</option>
+            <option value="late">Late</option>
           </select>
         </label>
       </div>
@@ -189,11 +193,11 @@ function AttendanceHistory() {
               title="Unable to load attendance records"
               message={error}
             />
-          ) : filteredRecords.length === 0 ? (
+          ) : attendanceRecords.length === 0 ? (
             <PageState
               title="No attendance records available"
               message={
-                attendanceRecords.length === 0
+                totalRecords === 0
                   ? "Individual attendance records will appear here when attendance data is provided by the backend."
                   : "No attendance records match the selected status filter."
               }
@@ -206,15 +210,44 @@ function AttendanceHistory() {
             />
           )}
         </div>
+
+        {!loading && !error && totalRecords > 0 && (
+          <div
+            className="attendance-history-toolbar"
+            aria-label="Attendance history pagination"
+          >
+            <span>
+              Page {page} of {Math.max(totalPages, 1)}
+            </span>
+
+            <div>
+              <button
+                type="button"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((current) => current - 1)}
+              >
+                Previous
+              </button>
+
+              <button
+                type="button"
+                disabled={page >= totalPages || loading}
+                onClick={() => setPage((current) => current + 1)}
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       <div className="attendance-history-note">
         <strong>Integration note</strong>
 
         <span>
-          Attendance history is loaded for the authenticated student from
-          the approved attendance API. Filtering is handled by the
-          frontend after records are received.
+          Attendance history and status filters are loaded from the
+          authenticated student's attendance API. Records are paginated
+          by the backend.
         </span>
       </div>
     </section>

@@ -1,7 +1,11 @@
+
 import api from "./api";
 
-export async function getStudentAttendance() {
-  const response = await api.get("/student/attendance/");
+export async function getStudentAttendance(params = {}) {
+  const response = await api.get("/student/attendance/", {
+    params,
+  });
+
   return response.data;
 }
 
