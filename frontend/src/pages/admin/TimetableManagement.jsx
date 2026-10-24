@@ -11,6 +11,8 @@ import {
   faCalendarDays,
   faCheck,
   faCheckCircle,
+  faCheckDouble,
+  faChevronLeft,
   faChevronRight,
   faCloudArrowUp,
   faDownload,
@@ -72,6 +74,27 @@ function titleCase(value) {
   return String(value || "")
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function getPageNumbers(currentPage, totalPages) {
+  if (totalPages <= 7) {
+    return Array.from({ length: totalPages }, (_, i) => i + 1);
+  }
+  if (currentPage <= 4) {
+    return [1, 2, 3, 4, 5, "...", totalPages];
+  }
+  if (currentPage >= totalPages - 3) {
+    return [
+      1,
+      "...",
+      totalPages - 4,
+      totalPages - 3,
+      totalPages - 2,
+      totalPages - 1,
+      totalPages,
+    ];
+  }
+  return [1, "...", currentPage - 1, currentPage, currentPage + 1, "...", totalPages];
 }
 
 function displayTime(value) {
@@ -162,11 +185,15 @@ function TimetableManagement() {
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
 
-  // Step 3 Map & Resolve filters
+  // Step 2 Preview pagination
+  const [previewPage, setPreviewPage] = useState(1);
+
+  // Step 3 Map & Resolve filters & pagination
   const [mappingSearch, setMappingSearch] = useState("");
   const [mappingStatusFilter, setMappingStatusFilter] = useState("All");
   const [mappingSemesterFilter, setMappingSemesterFilter] = useState("All");
   const [mappingSectionFilter, setMappingSectionFilter] = useState("All");
+  const [mappingPage, setMappingPage] = useState(1);
 
   // Faculty list for adjustment
   const [allFaculty, setAllFaculty] = useState([]);
@@ -490,6 +517,22 @@ function TimetableManagement() {
     mappingSectionFilter,
   ]);
 
+  // Step 2 Pagination
+  const totalPreviewPages = Math.max(1, Math.ceil(processedRows.length / PAGE_SIZE));
+  const safePreviewPage = Math.min(previewPage, totalPreviewPages);
+  const paginatedPreviewRows = useMemo(() => {
+    const start = (safePreviewPage - 1) * PAGE_SIZE;
+    return processedRows.slice(start, start + PAGE_SIZE);
+  }, [processedRows, safePreviewPage]);
+
+  // Step 3 Pagination
+  const totalMappingPages = Math.max(1, Math.ceil(filteredProcessedRows.length / PAGE_SIZE));
+  const safeMappingPage = Math.min(mappingPage, totalMappingPages);
+  const paginatedMappingRows = useMemo(() => {
+    const start = (safeMappingPage - 1) * PAGE_SIZE;
+    return filteredProcessedRows.slice(start, start + PAGE_SIZE);
+  }, [filteredProcessedRows, safeMappingPage]);
+
   // File validation and handling
   function processFileSelection(selectedFile) {
     if (!selectedFile) return;
@@ -503,6 +546,8 @@ function TimetableManagement() {
     setCommitError("");
     setAvailableSheets([]);
     setSelectedSheet("");
+    setPreviewPage(1);
+    setMappingPage(1);
 
     const name = selectedFile.name.toLowerCase();
 
@@ -592,6 +637,8 @@ function TimetableManagement() {
     setSelectedSheet("");
     setPreviewError("");
     setNotice("");
+    setPreviewPage(1);
+    setMappingPage(1);
     if (fileInputRef.current) fileInputRef.current.value = "";
   }
 
@@ -635,6 +682,8 @@ function TimetableManagement() {
       setSelectedRows(initialSelection);
 
       setActiveStep(2);
+      setPreviewPage(1);
+      setMappingPage(1);
       if (res.total_rows === 0) {
         const errorDetail = res.parse_errors?.length ? ` (${res.parse_errors[0]})` : "";
         setPreviewError(
@@ -702,11 +751,17 @@ function TimetableManagement() {
   }
 
   function toggleSelectAll(select) {
-    const updated = {};
-    processedRows.forEach((r) => {
-      updated[r.index] = select;
+    setSelectedRows((prev) => {
+      const updated = { ...prev };
+      const targets =
+        filteredProcessedRows.length < processedRows.length
+          ? filteredProcessedRows
+          : processedRows;
+      targets.forEach((r) => {
+        updated[r.index] = select;
+      });
+      return updated;
     });
-    setSelectedRows(updated);
   }
 
   function updateEntryOverride(index, updates) {
@@ -1311,7 +1366,7 @@ function TimetableManagement() {
                 </tr>
               </thead>
               <tbody>
-                {processedRows.slice(0, 100).map((row) => (
+                {paginatedPreviewRows.map((row) => (
                   <tr key={`${row.source_row}-${row.index}`}>
                     <td>{titleCase(row.day_of_week)}</td>
                     <td>{row.period || "—"}</td>
@@ -1333,43 +1388,95 @@ function TimetableManagement() {
               </tbody>
             </table>
           </div>
+
+          {processedRows.length > 0 && (
+            <div className="timetable-pagination-bar">
+              <span className="timetable-pagination-info">
+                Showing {(safePreviewPage - 1) * PAGE_SIZE + 1}–{Math.min(safePreviewPage * PAGE_SIZE, processedRows.length)} of {processedRows.length} entries
+              </span>
+              <div className="timetable-pagination-pages">
+                <button
+                  type="button"
+                  disabled={safePreviewPage === 1}
+                  onClick={() => setPreviewPage((p) => Math.max(1, p - 1))}
+                  className="timetable-page-nav-btn"
+                  aria-label="Previous preview page"
+                >
+                  <FontAwesomeIcon icon={faChevronLeft} /> Previous
+                </button>
+                {getPageNumbers(safePreviewPage, totalPreviewPages).map((p, idx) =>
+                  p === "..." ? (
+                    <span key={`prev-ellipsis-${idx}`} className="timetable-page-ellipsis">
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      key={p}
+                      className={`timetable-page-num-btn ${safePreviewPage === p ? "is-current" : ""}`}
+                      onClick={() => setPreviewPage(p)}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  disabled={safePreviewPage === totalPreviewPages}
+                  onClick={() => setPreviewPage((p) => Math.min(totalPreviewPages, p + 1))}
+                  className="timetable-page-nav-btn"
+                  aria-label="Next preview page"
+                >
+                  Next <FontAwesomeIcon icon={faChevronRight} />
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
       {/* STEP 3: Map & Resolve */}
       {activeStep === 3 && analysisResult && (
-        <section className="timetable-stage-card">
-          <div className="timetable-preview-toolbar">
+        <section className="timetable-stage-card timetable-mapping-card">
+          <div className="timetable-preview-toolbar timetable-mapping-header">
             <div>
               <h3>Map & Resolve Timetable Entities</h3>
               <p>
                 Review matched courses, assign ambiguous faculty or courses, and verify section assignments.
               </p>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div className="timetable-mapping-actions">
               <button
                 type="button"
-                className="timetable-outline-button"
+                className="timetable-action-btn"
                 onClick={() => toggleSelectAll(true)}
+                title="Select all matching entries for import"
               >
+                <FontAwesomeIcon icon={faCheckDouble} />
                 Select All
               </button>
               <button
                 type="button"
-                className="timetable-outline-button"
+                className="timetable-action-btn"
                 onClick={() => toggleSelectAll(false)}
+                title="Deselect all entries"
               >
+                <FontAwesomeIcon icon={faXmark} />
                 Deselect All
               </button>
             </div>
           </div>
 
-          <div className="timetable-filter-bar">
-            <label>
-              <span>Mapping Status</span>
+          <div className="timetable-mapping-filter-toolbar">
+            <div className="timetable-mapping-filter-group">
+              <label htmlFor="mapping-status-filter">Mapping Status</label>
               <select
+                id="mapping-status-filter"
                 value={mappingStatusFilter}
-                onChange={(e) => setMappingStatusFilter(e.target.value)}
+                onChange={(e) => {
+                  setMappingStatusFilter(e.target.value);
+                  setMappingPage(1);
+                }}
               >
                 <option value="All">All statuses ({processedRows.length})</option>
                 <option value="matched">Auto-matched ({mappingCounts.matched})</option>
@@ -1379,13 +1486,17 @@ function TimetableManagement() {
                 <option value="duplicate">Duplicates ({mappingCounts.duplicate})</option>
                 <option value="unmatched">Unmatched ({mappingCounts.unmatched})</option>
               </select>
-            </label>
+            </div>
 
-            <label>
-              <span>Semester</span>
+            <div className="timetable-mapping-filter-group">
+              <label htmlFor="mapping-semester-filter">Semester</label>
               <select
+                id="mapping-semester-filter"
                 value={mappingSemesterFilter}
-                onChange={(e) => setMappingSemesterFilter(e.target.value)}
+                onChange={(e) => {
+                  setMappingSemesterFilter(e.target.value);
+                  setMappingPage(1);
+                }}
               >
                 <option value="All">All semesters</option>
                 {mappingFilterOptions.semesters.map((s) => (
@@ -1394,13 +1505,17 @@ function TimetableManagement() {
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
 
-            <label>
-              <span>Section / Group</span>
+            <div className="timetable-mapping-filter-group">
+              <label htmlFor="mapping-section-filter">Section / Group</label>
               <select
+                id="mapping-section-filter"
                 value={mappingSectionFilter}
-                onChange={(e) => setMappingSectionFilter(e.target.value)}
+                onChange={(e) => {
+                  setMappingSectionFilter(e.target.value);
+                  setMappingPage(1);
+                }}
               >
                 <option value="All">All sections</option>
                 {mappingFilterOptions.sections.map((sec) => (
@@ -1409,153 +1524,266 @@ function TimetableManagement() {
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
 
-            <label className="timetable-filter-search">
-              <span>Search entries</span>
-              <div className="timetable-search-input">
-                <FontAwesomeIcon icon={faSearch} />
+            <div className="timetable-mapping-filter-group timetable-mapping-search-group">
+              <label htmlFor="mapping-search-input">Search entries</label>
+              <div className="timetable-search-input-wrapper">
+                <FontAwesomeIcon icon={faSearch} className="timetable-search-icon" />
                 <input
+                  id="mapping-search-input"
                   value={mappingSearch}
-                  onChange={(e) => setMappingSearch(e.target.value)}
+                  onChange={(e) => {
+                    setMappingSearch(e.target.value);
+                    setMappingPage(1);
+                  }}
                   placeholder="Search by course, faculty, room..."
                 />
+                {mappingSearch && (
+                  <button
+                    type="button"
+                    className="timetable-search-clear-btn"
+                    onClick={() => {
+                      setMappingSearch("");
+                      setMappingPage(1);
+                    }}
+                    title="Clear search"
+                  >
+                    <FontAwesomeIcon icon={faXmark} />
+                  </button>
+                )}
               </div>
-            </label>
+            </div>
           </div>
 
-          <div className="timetable-result-summary" style={{ marginTop: 10 }}>
-            <span>
-              {filteredProcessedRows.length} entries shown · {mappingCounts.selected} selected for import
-            </span>
+          <div className="timetable-mapping-summary-bar">
+            <div className="timetable-summary-pills">
+              <span className="timetable-summary-pill pill-total">
+                <strong>{filteredProcessedRows.length}</strong> of {processedRows.length} entries shown
+              </span>
+              <span className="timetable-summary-pill pill-selected">
+                <strong>{mappingCounts.selected}</strong> selected for import
+              </span>
+              {mappingCounts.conflict > 0 && (
+                <span className="timetable-summary-pill pill-conflict">
+                  <strong>{mappingCounts.conflict}</strong> conflicts
+                </span>
+              )}
+              {mappingCounts.warning > 0 && (
+                <span className="timetable-summary-pill pill-warning">
+                  <strong>{mappingCounts.warning}</strong> warnings
+                </span>
+              )}
+            </div>
           </div>
 
-          <div className="timetable-table-wrapper" style={{ marginTop: 10 }}>
-            <table className="timetable-table">
+          <div className="timetable-table-wrapper timetable-mapping-table-wrapper">
+            <table className="timetable-table timetable-mapping-table">
               <thead>
                 <tr>
-                  <th style={{ width: 36 }}>Import</th>
-                  <th>Day / Time</th>
-                  <th>Section</th>
-                  <th>Course Assignment</th>
-                  <th>Faculty Assignment</th>
-                  <th>Room</th>
-                  <th>Offering Action</th>
-                  <th>Status</th>
+                  <th style={{ width: 48, textAlign: "center" }}>Import</th>
+                  <th style={{ width: 120 }}>Day / Time</th>
+                  <th style={{ width: 90 }}>Section</th>
+                  <th style={{ minWidth: 260 }}>Course Assignment</th>
+                  <th style={{ minWidth: 220 }}>Faculty Assignment</th>
+                  <th style={{ width: 110 }}>Room</th>
+                  <th style={{ width: 140 }}>Offering Action</th>
+                  <th style={{ minWidth: 220 }}>Status</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredProcessedRows.map((row) => (
-                  <tr key={`${row.source_row}-${row.index}`}>
-                    <td style={{ textAlign: "center" }}>
-                      <input
-                        type="checkbox"
-                        checked={row.isSelected}
-                        onChange={() => toggleRowSelection(row.index)}
-                        aria-label={`Select row ${row.index + 1}`}
-                      />
-                    </td>
-                    <td>
-                      <strong>{titleCase(row.day_of_week)}</strong>
-                      <div>
-                        {displayTime(row.start_time)} – {displayTime(row.end_time)}
-                      </div>
-                      <small>{row.period ? `Period ${row.period}` : ""}</small>
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={row.section}
-                        onChange={(e) =>
-                          updateEntryOverride(row.index, { section: e.target.value })
-                        }
-                        style={{ width: 80, padding: "4px 6px" }}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={row.course_id || ""}
-                        onChange={(e) =>
-                          updateEntryOverride(row.index, {
-                            course_id: Number(e.target.value) || null,
-                          })
-                        }
-                      >
-                        <option value="">Select course...</option>
-                        {(analysisResult.available_courses || []).map((c) => (
-                          <option key={c.course_id} value={c.course_id}>
-                            {c.course_code} - {c.course_name} (Sem {c.semester})
-                          </option>
-                        ))}
-                      </select>
-                      <div style={{ marginTop: 2 }}>
-                        <small style={{ color: "#6681a6" }}>
-                          Raw: {row.raw_cell}
-                        </small>
-                      </div>
-                    </td>
-                    <td>
-                      <select
-                        value={row.faculty_id || ""}
-                        onChange={(e) =>
-                          updateEntryOverride(row.index, {
-                            faculty_id: Number(e.target.value) || null,
-                          })
-                        }
-                      >
-                        <option value="">Not assigned</option>
-                        {(analysisResult.available_faculty || []).map((f) => (
-                          <option key={f.faculty_id} value={f.faculty_id}>
-                            {f.name} ({f.employee_id})
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        value={row.room}
-                        onChange={(e) =>
-                          updateEntryOverride(row.index, { room: e.target.value })
-                        }
-                        placeholder="e.g. Room-302"
-                        style={{ width: 90, padding: "4px 6px" }}
-                      />
-                    </td>
-                    <td>
-                      {row.offering_id ? (
-                        <span className="timetable-offering-badge is-reuse">
-                          Reuses Offering #{row.offering_id}
-                        </span>
-                      ) : (
-                        <span className="timetable-offering-badge is-create">
-                          Will Create Offering
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <span
-                        className="timetable-status-tag"
-                        data-status={row.status}
-                      >
-                        {getMappingStatusLabel(row.status)}
-                      </span>
-                      {row.conflicts?.map((msg, i) => (
-                        <div key={i} className="timetable-row-message is-conflict">
-                          <FontAwesomeIcon icon={faTriangleExclamation} /> {msg}
-                        </div>
-                      ))}
-                      {row.warnings?.map((msg, i) => (
-                        <div key={i} className="timetable-row-message is-warning">
-                          {msg}
-                        </div>
-                      ))}
+                {paginatedMappingRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="timetable-table-empty">
+                      No timetable records match the selected filters.
                     </td>
                   </tr>
-                ))}
+                ) : (
+                  paginatedMappingRows.map((row) => (
+                    <tr
+                      key={`${row.source_row}-${row.index}`}
+                      className={row.isSelected ? "row-is-selected" : ""}
+                    >
+                      <td style={{ textAlign: "center" }}>
+                        <input
+                          type="checkbox"
+                          className="timetable-row-checkbox"
+                          checked={row.isSelected}
+                          onChange={() => toggleRowSelection(row.index)}
+                          aria-label={`Select row ${row.index + 1}`}
+                        />
+                      </td>
+                      <td>
+                        <div className="timetable-cell-day">
+                          <strong>{titleCase(row.day_of_week)}</strong>
+                          <div className="timetable-cell-time">
+                            {displayTime(row.start_time)} – {displayTime(row.end_time)}
+                          </div>
+                          {row.period && (
+                            <span className="timetable-period-pill">Period {row.period}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          className="timetable-cell-input timetable-section-input"
+                          value={row.section}
+                          onChange={(e) =>
+                            updateEntryOverride(row.index, { section: e.target.value })
+                          }
+                          aria-label={`Section for period ${row.period || row.index}`}
+                        />
+                      </td>
+                      <td>
+                        <div className="timetable-course-cell">
+                          <select
+                            className="timetable-cell-select timetable-course-select"
+                            value={row.course_id || ""}
+                            onChange={(e) =>
+                              updateEntryOverride(row.index, {
+                                course_id: Number(e.target.value) || null,
+                              })
+                            }
+                            aria-label={`Course assignment for period ${row.period || row.index}`}
+                          >
+                            <option value="">Select course...</option>
+                            {(analysisResult.available_courses || []).map((c) => (
+                              <option key={c.course_id} value={c.course_id}>
+                                {c.course_code} - {c.course_name} (Sem {c.semester})
+                              </option>
+                            ))}
+                          </select>
+                          <div
+                            className="timetable-raw-cell-hint"
+                            title={`Extracted raw cell: ${row.raw_cell}`}
+                          >
+                            <span className="raw-cell-prefix">Raw:</span> {row.raw_cell}
+                          </div>
+                        </div>
+                      </td>
+                      <td>
+                        <select
+                          className="timetable-cell-select timetable-faculty-select"
+                          value={row.faculty_id || ""}
+                          onChange={(e) =>
+                            updateEntryOverride(row.index, {
+                              faculty_id: Number(e.target.value) || null,
+                            })
+                          }
+                          aria-label={`Faculty assignment for period ${row.period || row.index}`}
+                        >
+                          <option value="">Not assigned</option>
+                          {(analysisResult.available_faculty || []).map((f) => (
+                            <option key={f.faculty_id} value={f.faculty_id}>
+                              {f.name} ({f.employee_id})
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          className="timetable-cell-input timetable-room-input"
+                          value={row.room}
+                          onChange={(e) =>
+                            updateEntryOverride(row.index, { room: e.target.value })
+                          }
+                          placeholder="e.g. Room-302"
+                          aria-label={`Room for period ${row.period || row.index}`}
+                        />
+                      </td>
+                      <td>
+                        {row.offering_id ? (
+                          <span
+                            className="timetable-offering-badge is-reuse"
+                            title={`Reuses existing offering ID ${row.offering_id}`}
+                          >
+                            Reuses Offering #{row.offering_id}
+                          </span>
+                        ) : (
+                          <span
+                            className="timetable-offering-badge is-create"
+                            title="A new course offering will be created upon commit"
+                          >
+                            Will Create Offering
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        <div className="timetable-status-cell">
+                          <span
+                            className="timetable-status-tag"
+                            data-status={row.status}
+                          >
+                            {getMappingStatusLabel(row.status)}
+                          </span>
+                          {row.conflicts?.map((msg, i) => (
+                            <div key={`conflict-${i}`} className="timetable-row-message is-conflict">
+                              <FontAwesomeIcon icon={faTriangleExclamation} /> <span>{msg}</span>
+                            </div>
+                          ))}
+                          {row.warnings?.map((msg, i) => (
+                            <div key={`warning-${i}`} className="timetable-row-message is-warning">
+                              <FontAwesomeIcon icon={faInfoCircle} /> <span>{msg}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
+
+          {filteredProcessedRows.length > 0 && (
+            <div className="timetable-pagination-bar">
+              <span className="timetable-pagination-info">
+                Showing {(safeMappingPage - 1) * PAGE_SIZE + 1}–{Math.min(safeMappingPage * PAGE_SIZE, filteredProcessedRows.length)} of {filteredProcessedRows.length} entries
+                {filteredProcessedRows.length < processedRows.length && (
+                  <span className="filtered-subset-note"> (filtered from {processedRows.length} total)</span>
+                )}
+              </span>
+
+              <div className="timetable-pagination-pages">
+                <button
+                  type="button"
+                  disabled={safeMappingPage === 1}
+                  onClick={() => setMappingPage((p) => Math.max(1, p - 1))}
+                  className="timetable-page-nav-btn"
+                  aria-label="Previous mapping page"
+                >
+                  <FontAwesomeIcon icon={faChevronLeft} /> Previous
+                </button>
+                {getPageNumbers(safeMappingPage, totalMappingPages).map((p, idx) =>
+                  p === "..." ? (
+                    <span key={`mapping-ellipsis-${idx}`} className="timetable-page-ellipsis">
+                      ...
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      key={p}
+                      className={`timetable-page-num-btn ${safeMappingPage === p ? "is-current" : ""}`}
+                      onClick={() => setMappingPage(p)}
+                    >
+                      {p}
+                    </button>
+                  )
+                )}
+                <button
+                  type="button"
+                  disabled={safeMappingPage === totalMappingPages}
+                  onClick={() => setMappingPage((p) => Math.min(totalMappingPages, p + 1))}
+                  className="timetable-page-nav-btn"
+                  aria-label="Next mapping page"
+                >
+                  Next <FontAwesomeIcon icon={faChevronRight} />
+                </button>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -2019,15 +2247,16 @@ function TimetableManagement() {
                         disabled={currentPage === 1}
                         onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                         className="timetable-page-nav-btn"
+                        aria-label="Previous page"
                       >
-                        &lt;
+                        <FontAwesomeIcon icon={faChevronLeft} />
                       </button>
-                      {Array.from({ length: totalPages }, (_, i) => i + 1)
-                        .slice(
-                          Math.max(0, currentPage - 3),
-                          Math.min(totalPages, currentPage + 2)
-                        )
-                        .map((p) => (
+                      {getPageNumbers(currentPage, totalPages).map((p, idx) =>
+                        p === "..." ? (
+                          <span key={`db-ellipsis-${idx}`} className="timetable-page-ellipsis">
+                            ...
+                          </span>
+                        ) : (
                           <button
                             type="button"
                             key={p}
@@ -2036,14 +2265,16 @@ function TimetableManagement() {
                           >
                             {p}
                           </button>
-                        ))}
+                        )
+                      )}
                       <button
                         type="button"
                         disabled={currentPage === totalPages}
                         onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                         className="timetable-page-nav-btn"
+                        aria-label="Next page"
                       >
-                        &gt;
+                        <FontAwesomeIcon icon={faChevronRight} />
                       </button>
                     </div>
                   </div>

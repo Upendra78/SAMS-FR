@@ -6,16 +6,20 @@ from datetime import date, datetime, timedelta
 from flask import Blueprint, jsonify, request, send_from_directory
 from flask_jwt_extended import get_jwt_identity
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from werkzeug.utils import secure_filename
 
 from app.extensions import bcrypt, db
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
+    CourseOffering,
     Enrollment,
+    Faculty,
     Student,
     TimetableEntry,
 )
+from app.utils.academic_year import resolve_student_academic_info
 from app.utils.auth import student_or_admin_required
 
 student_bp = Blueprint(
@@ -67,6 +71,8 @@ def serialize_student_profile(student):
         student_id=student.student_id, status="ACTIVE"
     ).count()
 
+    acad_info = resolve_student_academic_info(student)
+
     return {
         "student_id": student.student_id,
         "user_id": student.user_id,
@@ -74,9 +80,11 @@ def serialize_student_profile(student):
         "email": student.user.email,
         "phone": student.phone or getattr(student.user, "phone", "") or "",
         "enrollment_no": student.enrollment_no,
-        "semester": student.semester,
-        "section": student.section,
-        "academic_year": student.academic_year,
+        "semester": acad_info["semester"],
+        "section": acad_info["section"],
+        "academic_year": acad_info["academic_year"],
+        "batch_year": acad_info["batch_year"],
+        "admission_year": acad_info["admission_year"],
         "photo_url": student.photo_url or "",
         "signature_url": student.signature_url or "",
         "father_name": student.father_name or "",
@@ -111,7 +119,7 @@ def serialize_student_profile(student):
         },
         "batch": {
             "batch_id": student.batch.batch_id if student.batch else None,
-            "batch_name": student.batch.batch_name if student.batch else "",
+            "batch_name": acad_info["batch_year"] or (student.batch.batch_name if student.batch else ""),
         },
         "stats": {
             "total_enrolled_courses": enrollments_count,
@@ -146,15 +154,19 @@ def student_dashboard():
     dept_name = dept.department_name if dept else None
     dept_code = dept.department_code if dept else None
 
+    acad_info = resolve_student_academic_info(student)
+
     student_data = {
         "student_id": student.student_id,
         "user_id": student.user_id,
         "name": student.user.name if student.user else None,
         "email": student.user.email if student.user else None,
         "enrollment_no": student.enrollment_no,
-        "semester": student.semester,
-        "section": student.section,
-        "academic_year": student.academic_year,
+        "semester": acad_info["semester"],
+        "section": acad_info["section"],
+        "academic_year": acad_info["academic_year"],
+        "batch_year": acad_info["batch_year"],
+        "admission_year": acad_info["admission_year"],
         "department_name": dept_name,
         "department_code": dept_code,
         "photo_url": student.photo_url or "",
@@ -163,10 +175,45 @@ def student_dashboard():
     # 2. Student enrollments & offerings
     enrollments = (
         Enrollment.query
+        .options(
+            joinedload(Enrollment.offering).joinedload(CourseOffering.course),
+            joinedload(Enrollment.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+        )
         .filter_by(student_id=student.student_id, status="ACTIVE")
         .all()
     )
     offering_ids = [e.offering_id for e in enrollments]
+
+    # Pre-fetch all closed sessions and present records in batch
+    from collections import defaultdict
+    offering_sessions_map = defaultdict(list)
+    all_closed_session_ids = set()
+
+    if offering_ids:
+        all_sessions = (
+            AttendanceSession.query
+            .filter(
+                AttendanceSession.offering_id.in_(offering_ids),
+                AttendanceSession.status == "CLOSED",
+            )
+            .all()
+        )
+        for s in all_sessions:
+            offering_sessions_map[s.offering_id].append(s.session_id)
+            all_closed_session_ids.add(s.session_id)
+
+    student_present_session_ids = set()
+    if all_closed_session_ids:
+        pres_rows = (
+            db.session.query(AttendanceRecord.session_id)
+            .filter(
+                AttendanceRecord.student_id == student.student_id,
+                AttendanceRecord.session_id.in_(all_closed_session_ids),
+                AttendanceRecord.status == "PRESENT",
+            )
+            .all()
+        )
+        student_present_session_ids = {r[0] for r in pres_rows}
 
     # 3. Course-wise attendance & metrics
     courses_data = []
@@ -182,21 +229,10 @@ def student_dashboard():
         if not course:
             continue
 
-        sessions = AttendanceSession.query.filter_by(
-            offering_id=offering.offering_id,
-            status="CLOSED",
-        ).all()
-        session_ids = [s.session_id for s in sessions]
-        course_total_sessions = len(sessions)
+        session_ids = offering_sessions_map[offering.offering_id]
+        course_total_sessions = len(session_ids)
 
-        course_present = 0
-        if session_ids:
-            course_present = AttendanceRecord.query.filter(
-                AttendanceRecord.student_id == student.student_id,
-                AttendanceRecord.session_id.in_(session_ids),
-                AttendanceRecord.status == "PRESENT",
-            ).count()
-
+        course_present = len(set(session_ids) & student_present_session_ids)
         course_absent = max(0, course_total_sessions - course_present)
         course_pct = (
             round((course_present / course_total_sessions) * 100, 1)
@@ -812,6 +848,10 @@ def get_student_courses():
 
     enrollments = (
         Enrollment.query
+        .options(
+            joinedload(Enrollment.offering).joinedload(CourseOffering.course),
+            joinedload(Enrollment.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+        )
         .filter_by(
             student_id=student.student_id,
             status="ACTIVE",

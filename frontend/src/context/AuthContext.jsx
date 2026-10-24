@@ -8,8 +8,21 @@ import {
 } from "../services/authService";
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem("sams_user");
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [loading, setLoading] = useState(() => {
+    try {
+      return !sessionStorage.getItem("sams_user");
+    } catch {
+      return true;
+    }
+  });
 
   // Restore authenticated user from the backend JWT cookie.
   useEffect(() => {
@@ -19,12 +32,27 @@ export function AuthProvider({ children }) {
 
         if (result?.success && result?.data) {
           setUser(result.data);
+          try {
+            sessionStorage.setItem("sams_user", JSON.stringify(result.data));
+          } catch {
+            // Ignore storage errors
+          }
         } else {
           setUser(null);
+          try {
+            sessionStorage.removeItem("sams_user");
+          } catch {
+            // Ignore storage errors
+          }
         }
       } catch {
         // No valid session or backend unavailable.
         setUser(null);
+        try {
+          sessionStorage.removeItem("sams_user");
+        } catch {
+          // Ignore storage errors
+        }
       } finally {
         setLoading(false);
       }
@@ -41,6 +69,11 @@ export function AuthProvider({ children }) {
 
     if (result?.success && result?.data) {
       setUser(result.data);
+      try {
+        sessionStorage.setItem("sams_user", JSON.stringify(result.data));
+      } catch {
+        // Ignore storage errors
+      }
     }
 
     return result;
@@ -53,6 +86,11 @@ export function AuthProvider({ children }) {
       // Clear frontend session even if backend logout fails.
     } finally {
       setUser(null);
+      try {
+        sessionStorage.removeItem("sams_user");
+      } catch {
+        // Ignore storage errors
+      }
     }
   }
 

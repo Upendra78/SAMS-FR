@@ -132,10 +132,10 @@ function BatchManagement() {
       <div className="batch-content-grid">
         <section className="batch-panel">
           <h2>Create Batch</h2>
-          <p>Add a batch to make it available in the academic forms.</p>
+          <p>Add a degree cohort batch (e.g. 2024-2028) to make it available in academic forms.</p>
 
           <form onSubmit={handleCreateBatch}>
-            <label htmlFor="batch-name">Batch Name</label>
+            <label htmlFor="batch-name">Batch Year / Cohort</label>
 
             <input
               id="batch-name"
@@ -146,13 +146,13 @@ function BatchManagement() {
                 setError("");
                 setSuccess("");
               }}
-              placeholder="e.g. 2026"
+              placeholder="e.g. 2024-2028"
               maxLength={20}
               required
               disabled={saving}
             />
 
-            <small>Maximum 20 characters.</small>
+            <small>Degree cohort duration (e.g. 2024-2028 or cohort year 2024).</small>
 
             <button
               type="submit"

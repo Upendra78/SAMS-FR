@@ -64,6 +64,7 @@ class TestAdminStudents(unittest.TestCase):
             )
             db.session.add(self.department)
             db.session.flush()
+            self.dept_id = self.department.department_id
 
             admin = User(
                 name="Test Admin",
@@ -412,7 +413,100 @@ class TestAdminStudents(unittest.TestCase):
         self.assertIn(3, data["semesters"])
         self.assertIn("A", data["sections"])
 
+    def test_create_student_valid_semester_and_section(self):
+        with self.app.app_context():
+            u = User(name="Valid Student", email="validstu@test.local", password_hash="pw", role="STUDENT")
+            db.session.add(u)
+            db.session.commit()
+            u_id = u.user_id
+
+        payload = {
+            "user_id": u_id,
+            "department_id": self.dept_id,
+            "enrollment_no": "ENROLL-VALID-01",
+            "semester": 6,
+            "section": "  C  ",
+            "academic_year": "2026-27",
+        }
+
+        response = self.client.post(
+            "/api/admin/students",
+            json=payload,
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 201)
+        body = response.get_json()
+        self.assertTrue(body["success"])
+        self.assertEqual(body["data"]["semester"], 6)
+        self.assertEqual(body["data"]["section"], "C")
+
+    def test_create_student_invalid_semester(self):
+        with self.app.app_context():
+            u = User(name="Invalid Sem Student", email="invalidsem@test.local", password_hash="pw", role="STUDENT")
+            db.session.add(u)
+            db.session.commit()
+            u_id = u.user_id
+
+        # Semester > 8
+        payload = {
+            "user_id": u_id,
+            "department_id": self.dept_id,
+            "enrollment_no": "ENROLL-SEM-9",
+            "semester": 9,
+            "section": "A",
+            "academic_year": "2026-27",
+        }
+        response = self.client.post(
+            "/api/admin/students",
+            json=payload,
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("between 1 and 8", response.get_json()["message"])
+
+        # Semester < 1
+        payload["semester"] = 0
+        response = self.client.post(
+            "/api/admin/students",
+            json=payload,
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_create_student_invalid_section(self):
+        with self.app.app_context():
+            u = User(name="Invalid Sec Student", email="invalidsec@test.local", password_hash="pw", role="STUDENT")
+            db.session.add(u)
+            db.session.commit()
+            u_id = u.user_id
+
+        # Empty section
+        payload = {
+            "user_id": u_id,
+            "department_id": self.dept_id,
+            "enrollment_no": "ENROLL-NOSEC",
+            "semester": 2,
+            "section": "   ",
+            "academic_year": "2026-27",
+        }
+        response = self.client.post(
+            "/api/admin/students",
+            json=payload,
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
+        # Section too long (> 20 chars)
+        payload["section"] = "A" * 25
+        response = self.client.post(
+            "/api/admin/students",
+            json=payload,
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(response.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()
+
 

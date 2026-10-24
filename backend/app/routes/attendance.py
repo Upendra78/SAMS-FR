@@ -14,6 +14,7 @@ from app.models import (
     Student,
     TimetableEntry,
 )
+from app.services.activity_service import record_activity
 from app.utils.auth import faculty_required, faculty_or_admin_required
 from app.utils import schedule
 from app.services.cv.attendance_service import validate_student_attendance_eligibility
@@ -308,6 +309,14 @@ def start_attendance_session():
 
     db.session.add(session)
     db.session.commit()
+
+    record_activity(
+        action_type="ATTENDANCE_SESSION_CREATED",
+        description=f"Started attendance session for course offering {offering.offering_id}",
+        actor_id=faculty.user_id if faculty else None,
+        entity_type="AttendanceSession",
+        entity_id=str(session.session_id),
+    )
 
     return jsonify({
         "success": True,
