@@ -7,6 +7,7 @@ from flask_jwt_extended import get_jwt, get_jwt_identity
 
 from app.extensions import db
 from app.models import FaceProfile, Student
+from app.services.face_identity_service import safe_replace_face_profile
 from app.services.face_service import FaceService
 from app.utils.auth import role_required
 
@@ -153,39 +154,24 @@ def enroll_face():
 
     encoding = result["encoding"]
 
-    if encoding is None:
+    success, message, face_profile, status = safe_replace_face_profile(
+        student_id=student_id,
+        encoding=encoding,
+        model_version=FACE_MODEL_VERSION,
+        check_cross_student=True,
+    )
+
+    if not success:
+        status_code = 409 if status in ("conflict_detected", "concurrent_conflict") else 400
         return jsonify({
             "success": False,
-            "message": "Face encoding was not generated",
-        }), 400
-
-    embedding_bytes = encoding.astype(
-        np.float32
-    ).tobytes()
-
-    face_profile = FaceProfile.query.filter_by(
-        student_id=student_id,
-        is_active=True,
-    ).first()
-
-    if face_profile:
-        face_profile.embedding = embedding_bytes
-        face_profile.model_version = FACE_MODEL_VERSION
-    else:
-        face_profile = FaceProfile(
-            student_id=student_id,
-            embedding=embedding_bytes,
-            model_version=FACE_MODEL_VERSION,
-            is_active=True,
-        )
-
-        db.session.add(face_profile)
-
-    db.session.commit()
+            "message": message,
+            "status": status,
+        }), status_code
 
     return jsonify({
         "success": True,
-        "message": "Face enrolled successfully",
+        "message": message,
         "data": {
             "student_id": student.student_id,
             "face_id": face_profile.face_id,

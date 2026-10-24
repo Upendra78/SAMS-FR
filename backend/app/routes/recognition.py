@@ -2,14 +2,22 @@ import base64
 import cv2
 import numpy as np
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
 from app.extensions import db
-from app.models import Faculty, AttendanceSession, FaceProfile, Student
+from app.models import (
+    AttendanceSession,
+    FaceProfile,
+    Faculty,
+    FacultyAdjustment,
+    Student,
+    TimetableEntry,
+)
 from app.services.cv.attendance_service import mark_face_attendance
 from app.services.face_service import FaceService
 from app.utils.auth import faculty_required
+from app.utils import schedule
 
 
 recognition_bp = Blueprint(
@@ -100,7 +108,13 @@ def process_recognition_attendance():
             "message": "Attendance session not found",
         }), 404
 
-    if session.faculty_id != faculty.faculty_id:
+    is_owner = (session.faculty_id == faculty.faculty_id)
+    is_substitute = FacultyAdjustment.query.filter_by(
+        substitute_faculty_id=faculty.faculty_id,
+        status="APPROVED",
+    ).join(TimetableEntry).filter(TimetableEntry.offering_id == session.offering_id).first() is not None
+
+    if not (is_owner or is_substitute):
         return jsonify({
             "success": False,
             "message": "Access forbidden",
@@ -110,6 +124,23 @@ def process_recognition_attendance():
         return jsonify({
             "success": False,
             "message": "Attendance session is not active",
+        }), 409
+
+    now = schedule.get_current_institution_time()
+    is_eligible, status_str, details = schedule.get_session_schedule_status(session, current_dt=now)
+
+    if status_str == "UPCOMING":
+        schedule.reconcile_premature_session(session)
+        return jsonify({
+            "success": False,
+            "message": details.get("message", "Attendance cannot be recorded before scheduled start time"),
+        }), 400
+
+    if status_str == "ENDED":
+        schedule.close_expired_session(session)
+        return jsonify({
+            "success": False,
+            "message": "Attendance session has ended. New attendance recording is prevented.",
         }), 409
 
     # Load active face profiles
@@ -206,21 +237,31 @@ def process_recognition_attendance():
                 "status": record.status,
                 "confidence_score": record.confidence_score,
                 "recognition_method": record.recognition_method,
-                "marked_at": record.marked_at.isoformat(),
+                "marked_at": record.marked_at.isoformat() if record.marked_at else None,
                 "is_new": (message == "Attendance marked successfully"),
+                "is_eligible": True,
                 "message": message,
             })
         else:
+            current_app.logger.warning(
+                "Rejected attendance attempt for student %s in session %s: %s",
+                student_id,
+                session_id,
+                message,
+            )
             recognized_records.append({
+                "attendance_id": None,
+                "session_id": session.session_id,
                 "student_id": student_id,
                 "name": student_name,
                 "student_name": student_name,
                 "enrollment_no": enrollment_no,
-                "status": "NOT_ENROLLED" if "not enrolled" in message else "ERROR",
+                "status": "INELIGIBLE",
                 "confidence_score": confidence_score,
                 "recognition_method": "FACE",
                 "marked_at": None,
                 "is_new": False,
+                "is_eligible": False,
                 "message": message,
             })
 
@@ -232,7 +273,7 @@ def process_recognition_attendance():
     elif recognized_records:
         overall_message = recognized_records[0]["message"]
     else:
-        overall_message = "No enrolled student marked"
+        overall_message = "No eligible student marked"
 
     return jsonify({
         "success": True,
