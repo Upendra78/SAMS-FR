@@ -81,6 +81,46 @@ function formatTime(value) {
   }).format(date);
 }
 
+function getClassScheduleStatus(startTime, endTime) {
+  if (!startTime || !endTime) return { status: "SCHEDULED", label: "Scheduled" };
+  const now = new Date();
+  const sMatch = String(startTime).match(/^(\d{2}):(\d{2})/);
+  const eMatch = String(endTime).match(/^(\d{2}):(\d{2})/);
+  if (!sMatch || !eMatch) return { status: "SCHEDULED", label: "Scheduled" };
+
+  const start = new Date(now);
+  start.setHours(Number(sMatch[1]), Number(sMatch[2]), 0, 0);
+
+  const end = new Date(now);
+  end.setHours(Number(eMatch[1]), Number(eMatch[2]), 0, 0);
+  if (end <= start) {
+    end.setDate(end.getDate() + 1);
+  }
+
+  if (now < start) {
+    return {
+      status: "UPCOMING",
+      label: `Upcoming • Starts at ${formatTime(startTime)}`,
+      formattedStart: formatTime(startTime),
+      formattedEnd: formatTime(endTime),
+    };
+  } else if (now >= end) {
+    return {
+      status: "ENDED",
+      label: "Ended",
+      formattedStart: formatTime(startTime),
+      formattedEnd: formatTime(endTime),
+    };
+  } else {
+    return {
+      status: "ACTIVE",
+      label: "Active",
+      formattedStart: formatTime(startTime),
+      formattedEnd: formatTime(endTime),
+    };
+  }
+}
+
 function formatElapsedTimer(totalSeconds) {
   const hrs = Math.floor(totalSeconds / 3600);
   const mins = Math.floor((totalSeconds % 3600) / 60);
@@ -133,8 +173,10 @@ function FacultyDashboard() {
   // Start Session Modal
   const [showStartDialog, setShowStartDialog] = useState(false);
   const [selectedOfferingId, setSelectedOfferingId] = useState("");
+  const [selectedTimetableEntryId, setSelectedTimetableEntryId] = useState("");
   const [startingSession, setStartingSession] = useState(false);
   const [startError, setStartError] = useState("");
+
 
   // Live ticker for active session elapsed time
   useEffect(() => {
@@ -217,7 +259,7 @@ function FacultyDashboard() {
 
         if (activeRes.status === "fulfilled" && activeRes.value?.success && activeRes.value?.data) {
           const s = activeRes.value.data;
-          if (s?.session_id && String(s?.status).toUpperCase() === "ACTIVE") {
+          if (s?.session_id && String(s?.status).toUpperCase() === "ACTIVE" && s?.is_eligible_for_attendance !== false) {
             setActiveSession(s);
             setElapsedSeconds(0);
           } else {
@@ -268,6 +310,127 @@ function FacultyDashboard() {
     };
   }, []);
 
+  // Periodic active session status revalidation (every 25 seconds)
+  useEffect(() => {
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const res = await getActiveFacultyAttendanceSession();
+        if (cancelled) return;
+        if (res?.success && res.data) {
+          const s = res.data;
+          if (s?.session_id && String(s?.status).toUpperCase() === "ACTIVE" && s?.is_eligible_for_attendance !== false) {
+            setActiveSession(s);
+          } else {
+            setActiveSession(null);
+          }
+        } else {
+          setActiveSession(null);
+        }
+      } catch {
+        // preserve current state on transient network error
+      }
+    }, 25000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
+  // Revalidate session eligibility before entering live attendance page
+  const handleViewLiveAttendance = async () => {
+    try {
+      const activeRes = await getActiveFacultyAttendanceSession();
+      if (activeRes?.success && activeRes?.data && activeRes?.data?.is_eligible_for_attendance !== false) {
+        navigate("/faculty/attendance");
+      } else {
+        setActiveSession(null);
+        alert(
+          activeRes?.data?.message ||
+          "Session is not currently active or eligible for attendance. Please check the scheduled class hours."
+        );
+      }
+    } catch {
+      navigate("/faculty/attendance");
+    }
+  };
+
+  // Filter timetable for today
+  const todayWeekday = getTodayWeekday();
+  const todaysClasses = timetable.filter(
+    (entry) =>
+      String(entry.day_of_week || "").trim().toLowerCase() ===
+      todayWeekday.toLowerCase()
+  );
+
+  // Find currently active scheduled class in progress today
+  const activeScheduledClass = todaysClasses.find((entry) => {
+    const s = getClassScheduleStatus(entry.start_time, entry.end_time);
+    return s.status === "ACTIVE";
+  });
+
+  // Find next upcoming class if no session is actively running
+  const upcomingClass = todaysClasses.find((entry) => {
+    const s = getClassScheduleStatus(entry.start_time, entry.end_time);
+    return s.status === "UPCOMING";
+  });
+
+  // Open Start Attendance modal with intelligent slot pre-selection
+  const openStartDialog = (slot = null) => {
+    setStartError("");
+    if (slot) {
+      setSelectedOfferingId(String(slot.offering_id));
+      setSelectedTimetableEntryId(String(slot.timetable_entry_id));
+    } else {
+      let targetOfferingId = selectedOfferingId;
+      if (activeScheduledClass) {
+        targetOfferingId = String(activeScheduledClass.offering_id);
+      } else if (upcomingClass) {
+        targetOfferingId = String(upcomingClass.offering_id);
+      } else if (!targetOfferingId && courses.length > 0) {
+        targetOfferingId = String(courses[0].offering_id);
+      }
+      setSelectedOfferingId(targetOfferingId);
+
+      const offeringTodaySlots = timetable.filter(
+        (e) =>
+          String(e.offering_id) === String(targetOfferingId) &&
+          String(e.day_of_week || "").trim().toLowerCase() === todayWeekday.toLowerCase()
+      );
+      const activeSlot = offeringTodaySlots.find(
+        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+      );
+      const upcomingSlot = offeringTodaySlots.find(
+        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+      );
+      const bestSlot = activeSlot || upcomingSlot || offeringTodaySlots[0];
+      setSelectedTimetableEntryId(bestSlot ? String(bestSlot.timetable_entry_id) : "");
+    }
+    setShowStartDialog(true);
+  };
+
+  // Offering selection change in Start Attendance modal
+  const handleOfferingChange = (newOfferingId) => {
+    setSelectedOfferingId(newOfferingId);
+    setStartError("");
+
+    const offeringTodaySlots = timetable.filter(
+      (e) =>
+        String(e.offering_id) === String(newOfferingId) &&
+        String(e.day_of_week || "").trim().toLowerCase() === todayWeekday.toLowerCase()
+    );
+
+    const activeSlot = offeringTodaySlots.find(
+      (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+    );
+    const upcomingSlot = offeringTodaySlots.find(
+      (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+    );
+    const bestSlot = activeSlot || upcomingSlot || offeringTodaySlots[0];
+    setSelectedTimetableEntryId(bestSlot ? String(bestSlot.timetable_entry_id) : "");
+  };
+
   // Handle Starting Attendance
   const handleStartAttendance = async (e) => {
     e.preventDefault();
@@ -280,7 +443,36 @@ function FacultyDashboard() {
 
     setStartingSession(true);
     try {
-      const result = await startFacultyAttendanceSession(Number(selectedOfferingId));
+      let entryIdToSubmit = selectedTimetableEntryId;
+      if (!entryIdToSubmit && selectedOfferingId) {
+        const offeringTodaySlots = timetable.filter(
+          (e) =>
+            String(e.offering_id) === String(selectedOfferingId) &&
+            String(e.day_of_week || "").trim().toLowerCase() === todayWeekday.toLowerCase()
+        );
+        const allOfferingSlots = timetable.filter(
+          (t) => String(t.offering_id) === String(selectedOfferingId)
+        );
+        const candidateSlots = offeringTodaySlots.length > 0 ? offeringTodaySlots : allOfferingSlots;
+        const activeSlot = candidateSlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+        );
+        const upcomingSlot = candidateSlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+        );
+        const bestSlot = activeSlot || upcomingSlot || candidateSlots[0];
+        if (bestSlot) {
+          entryIdToSubmit = String(bestSlot.timetable_entry_id);
+        }
+      }
+
+      const payload = {
+        offering_id: Number(selectedOfferingId),
+      };
+      if (entryIdToSubmit) {
+        payload.timetable_entry_id = Number(entryIdToSubmit);
+      }
+      const result = await startFacultyAttendanceSession(payload);
       if (result?.success && result?.data) {
         setActiveSession(result.data);
         setShowStartDialog(false);
@@ -294,13 +486,6 @@ function FacultyDashboard() {
     }
   };
 
-  // Filter timetable for today
-  const todayWeekday = getTodayWeekday();
-  const todaysClasses = timetable.filter(
-    (entry) =>
-      String(entry.day_of_week || "").trim().toLowerCase() ===
-      todayWeekday.toLowerCase()
-  );
 
   // Metrics from real backend data (or API integration pending)
   const assignedCoursesDisplay =
@@ -319,7 +504,7 @@ function FacultyDashboard() {
 
   const activeSessionsDisplay =
     sessionStatus === "loaded"
-      ? activeSession
+      ? activeSession && activeSession.is_eligible_for_attendance !== false
         ? "1"
         : "0"
       : sessionStatus === "loading"
@@ -550,34 +735,50 @@ function FacultyDashboard() {
               </div>
             ) : (
               <div className="faculty-schedule-list">
-                {todaysClasses.map((item, index) => (
-                  <div key={item.timetable_entry_id || index} className="faculty-schedule-row">
-                    <div className="faculty-schedule-time">
-                      {formatTime(item.start_time)} – {formatTime(item.end_time)}
-                    </div>
-
-                    <div className="faculty-schedule-details">
-                      <div className="faculty-schedule-course">
-                        <strong>{item.course_code || "Course"}</strong>
-                        <span>{item.course_name || ""}</span>
+                {todaysClasses.map((item, index) => {
+                  const schedStatus = getClassScheduleStatus(item.start_time, item.end_time);
+                  return (
+                    <div
+                      key={item.timetable_entry_id || index}
+                      className="faculty-schedule-row"
+                      style={{ cursor: !activeSession ? "pointer" : "default" }}
+                      title={!activeSession ? "Click to configure or start attendance for this class" : undefined}
+                      onClick={() => {
+                        if (!activeSession) {
+                          openStartDialog(item);
+                        }
+                      }}
+                    >
+                      <div className="faculty-schedule-time">
+                        {formatTime(item.start_time)} – {formatTime(item.end_time)}
                       </div>
-                      <div className="faculty-schedule-meta">
-                        {item.section ? `Section ${item.section}` : ""}
-                        {item.semester ? ` • Sem ${item.semester}` : ""}
-                      </div>
-                    </div>
 
-                    <div className="faculty-schedule-right">
-                      {item.room && (
-                        <div className="faculty-schedule-room">
-                          <Building size={14} className="faculty-room-icon" />
-                          <span>{item.room}</span>
+                      <div className="faculty-schedule-details">
+                        <div className="faculty-schedule-course">
+                          <strong>{item.course_code || "Course"}</strong>
+                          <span>{item.course_name || ""}</span>
                         </div>
-                      )}
-                      <span className="faculty-badge faculty-badge-ongoing">Class</span>
+                        <div className="faculty-schedule-meta">
+                          {item.section ? `Section ${item.section}` : ""}
+                          {item.semester ? ` • Sem ${item.semester}` : ""}
+                        </div>
+                      </div>
+
+                      <div className="faculty-schedule-right">
+                        {item.room && (
+                          <div className="faculty-schedule-room">
+                            <Building size={14} className="faculty-room-icon" />
+                            <span>{item.room}</span>
+                          </div>
+                        )}
+                        <span className={`faculty-badge faculty-badge-${schedStatus.status.toLowerCase()}`}>
+                          {schedStatus.label}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+
+                  );
+                })}
               </div>
             )}
           </div>
@@ -762,7 +963,7 @@ function FacultyDashboard() {
                 <strong>API integration pending: Active Session API</strong>
                 <p>Attendance session status endpoint is pending backend integration.</p>
               </div>
-            ) : activeSession ? (
+            ) : activeSession && activeSession.is_eligible_for_attendance !== false ? (
               <div className="faculty-active-session-box">
                 <div className="faculty-active-cam-circle">
                   <Camera size={26} strokeWidth={2.4} />
@@ -789,11 +990,78 @@ function FacultyDashboard() {
                 <button
                   type="button"
                   className="faculty-view-live-btn"
-                  onClick={() => navigate("/faculty/attendance")}
+                  onClick={handleViewLiveAttendance}
                 >
                   <Camera size={17} />
                   <span>View Live Attendance</span>
                 </button>
+              </div>
+            ) : activeScheduledClass ? (
+              <div className="faculty-active-session-box" style={{ borderColor: "#10b981", background: "linear-gradient(135deg, rgba(236, 253, 245, 0.7) 0%, rgba(255, 255, 255, 0.95) 100%)" }}>
+                <div className="faculty-active-cam-circle" style={{ background: "rgba(16, 185, 129, 0.15)", color: "#10b981" }}>
+                  <Camera size={26} strokeWidth={2.4} />
+                </div>
+
+                <h3 className="faculty-active-course-title">
+                  {activeScheduledClass.course_code ? `${activeScheduledClass.course_code} – ${activeScheduledClass.course_name || ""}` : "Current Class in Session"}
+                </h3>
+                <p className="faculty-active-course-sub">
+                  {activeScheduledClass.section ? `Section ${activeScheduledClass.section} • ` : ""}
+                  {activeScheduledClass.room ? `Room ${activeScheduledClass.room} • ` : ""}
+                  Scheduled {formatTime(activeScheduledClass.start_time)} – {formatTime(activeScheduledClass.end_time)}
+                </p>
+
+                <div className="faculty-active-status-row">
+                  <div className="faculty-session-live-pill" style={{ background: "#ecfdf5", color: "#059669", border: "1px solid #a7f3d0" }}>
+                    <span className="faculty-pulse-dot" style={{ background: "#10b981" }} />
+                    <span>Class in Session • Attendance Ready</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="faculty-start-session-btn"
+                  style={{ width: "100%", justifyContent: "center", marginTop: "14px" }}
+                  onClick={() => openStartDialog(activeScheduledClass)}
+                >
+                  <Camera size={16} />
+                  <span>Start Attendance for this Class</span>
+                </button>
+              </div>
+            ) : upcomingClass ? (
+              <div className="faculty-upcoming-session-box">
+                <div className="faculty-upcoming-cam-circle">
+                  <Clock size={26} strokeWidth={2.2} />
+                </div>
+
+                <h3 className="faculty-active-course-title">
+                  {upcomingClass.course_code ? `${upcomingClass.course_code} – ${upcomingClass.course_name || ""}` : "Next Scheduled Class"}
+                </h3>
+                <p className="faculty-active-course-sub">
+                  {upcomingClass.section ? `Section ${upcomingClass.section} • ` : ""}
+                  {upcomingClass.room ? `Room ${upcomingClass.room} • ` : ""}
+                  Scheduled {formatTime(upcomingClass.start_time)} – {formatTime(upcomingClass.end_time)}
+                </p>
+
+                <div className="faculty-active-status-row">
+                  <div className="faculty-session-upcoming-pill">
+                    <Clock size={13} />
+                    <span>Upcoming • Starts at {formatTime(upcomingClass.start_time)}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="faculty-view-live-btn faculty-btn-disabled"
+                  disabled
+                  title={`Attendance opens at ${formatTime(upcomingClass.start_time)}`}
+                >
+                  <Clock size={16} />
+                  <span>Attendance Not Started</span>
+                </button>
+                <span className="faculty-upcoming-hint">
+                  Attendance cannot be accessed before the scheduled start time ({formatTime(upcomingClass.start_time)}).
+                </span>
               </div>
             ) : (
               <div className="faculty-no-active-box">
@@ -801,12 +1069,16 @@ function FacultyDashboard() {
                   <Camera size={26} strokeWidth={1.8} />
                 </div>
                 <h3>No active attendance session</h3>
-                <p>Choose an assigned course and start attendance when your class is ready.</p>
+                <p>
+                  {todaysClasses.length > 0 && todaysClasses.every((c) => getClassScheduleStatus(c.start_time, c.end_time).status === "ENDED")
+                    ? "All scheduled classes for today have ended."
+                    : "Choose an assigned course and start attendance when your class is scheduled."}
+                </p>
 
                 <button
                   type="button"
                   className="faculty-start-session-btn"
-                  onClick={() => setShowStartDialog(true)}
+                  onClick={() => openStartDialog()}
                   disabled={courses.length === 0}
                 >
                   <Camera size={16} />
@@ -814,6 +1086,7 @@ function FacultyDashboard() {
                 </button>
               </div>
             )}
+
           </div>
 
           {/* Card: Recent Attendance Activity */}
@@ -906,7 +1179,7 @@ function FacultyDashboard() {
               <button
                 type="button"
                 className="faculty-quick-action-row"
-                onClick={() => setShowStartDialog(true)}
+                onClick={() => openStartDialog()}
               >
                 <div className="faculty-action-icon-box bg-emerald">
                   <Camera size={18} />
@@ -1047,90 +1320,200 @@ function FacultyDashboard() {
       </div>
 
       {/* Start Attendance Dialog Modal */}
-      {showStartDialog && (
-        <div
-          className="faculty-dialog-backdrop"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !startingSession) {
-              setShowStartDialog(false);
-            }
-          }}
-        >
-          <div className="faculty-modal-card" role="dialog" aria-modal="true">
-            <div className="faculty-modal-header">
-              <div>
-                <span className="faculty-modal-eyebrow">Attendance Session</span>
-                <h3 className="faculty-modal-title">Start Attendance</h3>
-                <p className="faculty-modal-sub">Select the course offering for this session.</p>
-              </div>
+      {showStartDialog && (() => {
+        const selectedOffering = courses.find((c) => String(c.offering_id) === String(selectedOfferingId));
+        const availableSlots = timetable.filter(
+          (t) =>
+            String(t.offering_id) === String(selectedOfferingId) &&
+            String(t.day_of_week || "").trim().toLowerCase() === todayWeekday.toLowerCase()
+        );
+        const allOfferingSlots = timetable.filter(
+          (t) => String(t.offering_id) === String(selectedOfferingId)
+        );
+        const displaySlots = availableSlots.length > 0 ? availableSlots : allOfferingSlots;
+        const activeSlot = displaySlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+        );
+        const upcomingSlot = displaySlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+        );
+        const currentSlot =
+          displaySlots.find(
+            (t) => String(t.timetable_entry_id) === String(selectedTimetableEntryId)
+          ) ||
+          activeSlot ||
+          upcomingSlot ||
+          displaySlots[0];
+        const slotStatus = currentSlot ? getClassScheduleStatus(currentSlot.start_time, currentSlot.end_time) : null;
+        const isSlotEnded = slotStatus?.status === "ENDED";
+        const isSlotUpcoming = slotStatus?.status === "UPCOMING";
 
-              <button
-                type="button"
-                className="faculty-modal-close"
-                onClick={() => setShowStartDialog(false)}
-                disabled={startingSession}
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleStartAttendance}>
-              <div className="faculty-modal-field">
-                <label htmlFor="course-select-input" className="faculty-modal-label">
-                  Course offering
-                </label>
-                <select
-                  id="course-select-input"
-                  className="faculty-modal-select"
-                  value={selectedOfferingId}
-                  onChange={(e) => setSelectedOfferingId(e.target.value)}
-                  disabled={startingSession || courses.length === 0}
-                >
-                  {courses.length === 0 ? (
-                    <option value="">No assigned courses available</option>
-                  ) : (
-                    courses.map((c) => (
-                      <option key={c.offering_id} value={c.offering_id}>
-                        {c.course_code} — {c.course_name}
-                        {c.section ? ` · Section ${c.section}` : ""}
-                      </option>
-                    ))
-                  )}
-                </select>
-              </div>
-
-              {startError && (
-                <div className="faculty-modal-error">
-                  <AlertCircle size={15} />
-                  <span>{startError}</span>
+        return (
+          <div
+            className="faculty-dialog-backdrop"
+            onClick={(e) => {
+              if (e.target === e.currentTarget && !startingSession) {
+                setShowStartDialog(false);
+              }
+            }}
+          >
+            <div className="faculty-modal-card" role="dialog" aria-modal="true">
+              <div className="faculty-modal-header">
+                <div>
+                  <span className="faculty-modal-eyebrow">Attendance Session</span>
+                  <h3 className="faculty-modal-title">Start Attendance</h3>
+                  <p className="faculty-modal-sub">Select the assigned course offering and scheduled timetable slot.</p>
                 </div>
-              )}
 
-              <p className="faculty-modal-note">
-                This initializes the attendance session. Camera face recognition controls will be available on the Attendance page.
-              </p>
-
-              <div className="faculty-modal-actions">
                 <button
                   type="button"
-                  className="faculty-modal-cancel"
+                  className="faculty-modal-close"
                   onClick={() => setShowStartDialog(false)}
                   disabled={startingSession}
                 >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="faculty-modal-confirm"
-                  disabled={startingSession || courses.length === 0}
-                >
-                  {startingSession ? "Starting..." : "Confirm & Start"}
+                  <X size={18} />
                 </button>
               </div>
-            </form>
+
+              <form onSubmit={handleStartAttendance}>
+                <div className="faculty-modal-field">
+                  <label htmlFor="course-select-input" className="faculty-modal-label">
+                    Course offering
+                  </label>
+                  <select
+                    id="course-select-input"
+                    className="faculty-modal-select"
+                    value={selectedOfferingId}
+                    onChange={(e) => handleOfferingChange(e.target.value)}
+                    disabled={startingSession || courses.length === 0}
+                  >
+                    {courses.length === 0 ? (
+                      <option value="">No assigned courses available</option>
+                    ) : (
+                      courses.map((c) => (
+                        <option key={c.offering_id} value={c.offering_id}>
+                          {c.course_code} — {c.course_name}
+                          {c.section ? ` · Section ${c.section}` : ""}
+                          {c.semester ? ` (Sem ${c.semester})` : ""}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {displaySlots.length > 0 && (
+                  <div className="faculty-modal-field">
+                    <label htmlFor="slot-select-input" className="faculty-modal-label">
+                      Scheduled timetable slot
+                    </label>
+                    <select
+                      id="slot-select-input"
+                      className="faculty-modal-select"
+                      value={selectedTimetableEntryId || (currentSlot ? String(currentSlot.timetable_entry_id) : "")}
+                      onChange={(e) => {
+                        setSelectedTimetableEntryId(e.target.value);
+                        setStartError("");
+                      }}
+                      disabled={startingSession}
+                    >
+                      {displaySlots.map((slot) => {
+                        const st = getClassScheduleStatus(slot.start_time, slot.end_time);
+                        return (
+                          <option key={slot.timetable_entry_id} value={slot.timetable_entry_id}>
+                            {slot.day_of_week} {formatTime(slot.start_time)} – {formatTime(slot.end_time)}
+                            {slot.room ? ` · Room ${slot.room}` : ""} — [{st.label}]
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                )}
+
+                {currentSlot && (
+                  <div
+                    style={{
+                      background: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "10px",
+                      padding: "12px 14px",
+                      marginBottom: "14px",
+                      fontSize: "12px",
+                      color: "#334155",
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                      <strong style={{ fontSize: "13px", color: "#0f172a" }}>Scheduled Class Details</strong>
+                      <span
+                        style={{
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          padding: "2px 8px",
+                          borderRadius: "6px",
+                          background: slotStatus?.status === "ACTIVE" ? "#ecfdf5" : slotStatus?.status === "UPCOMING" ? "#fffbeb" : "#f1f5f9",
+                          color: slotStatus?.status === "ACTIVE" ? "#059669" : slotStatus?.status === "UPCOMING" ? "#d97706" : "#64748b",
+                        }}
+                      >
+                        {slotStatus?.label || "SCHEDULED"}
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+                      <div><span style={{ color: "#64748b" }}>Date:</span> Today ({todayWeekday})</div>
+                      <div><span style={{ color: "#64748b" }}>Section:</span> {selectedOffering?.section || "N/A"}</div>
+                      <div><span style={{ color: "#64748b" }}>Time:</span> {formatTime(currentSlot.start_time)} – {formatTime(currentSlot.end_time)}</div>
+                      <div><span style={{ color: "#64748b" }}>Room:</span> {currentSlot.room || selectedOffering?.room || "Not assigned"}</div>
+                    </div>
+                  </div>
+                )}
+
+                {isSlotEnded && (
+                  <div className="faculty-modal-error" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>
+                    <AlertCircle size={15} />
+                    <span>Cannot start attendance: scheduled class window ended at {formatTime(currentSlot.end_time)}.</span>
+                  </div>
+                )}
+
+                {isSlotUpcoming && (
+                  <div className="faculty-modal-error" style={{ background: "#fffbeb", borderColor: "#fde68a", color: "#92400e" }}>
+                    <Clock size={15} />
+                    <span>Cannot start attendance yet: scheduled class starts at {formatTime(currentSlot.start_time)}.</span>
+                  </div>
+                )}
+
+                {startError && (
+                  <div className="faculty-modal-error">
+                    <AlertCircle size={15} />
+                    <span>{startError}</span>
+                  </div>
+                )}
+
+                <p className="faculty-modal-note">
+                  This initializes the attendance session. Camera face recognition controls will be available on the Attendance page.
+                </p>
+
+                <div className="faculty-modal-actions">
+                  <button
+                    type="button"
+                    className="faculty-modal-cancel"
+                    onClick={() => setShowStartDialog(false)}
+                    disabled={startingSession}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="faculty-modal-confirm"
+                    disabled={startingSession || courses.length === 0 || isSlotEnded || isSlotUpcoming}
+                    title={isSlotEnded ? "Class has already ended" : isSlotUpcoming ? "Class has not started yet" : "Start session"}
+                  >
+                    {startingSession ? "Starting..." : "Confirm & Start"}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
     </div>
   );
 }

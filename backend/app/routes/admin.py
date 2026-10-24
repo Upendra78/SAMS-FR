@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, current_app, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import joinedload, selectinload
 
@@ -31,6 +32,11 @@ from app.models import (
 )
 from app.services.activity_service import record_activity, serialize_activity_log
 from app.services.auth_service import create_user
+from app.services.face_identity_service import (
+    cleanup_obsolete_face_profiles,
+    detect_suspected_duplicate_students,
+    reconcile_duplicate_students,
+)
 from app.utils.auth import admin_required
 from app.utils.academic_year import (
     canonical_academic_year,
@@ -1953,8 +1959,8 @@ def create_student():
     # Duplicate enrollment
     # -------------------------
 
-    existing_student = Student.query.filter_by(
-        enrollment_no=enrollment_no
+    existing_student = Student.query.filter(
+        func.lower(Student.enrollment_no) == enrollment_no.lower()
     ).first()
 
     if existing_student:
@@ -2410,46 +2416,114 @@ def delete_student(student_id):
         },
     }), 200
 
-# ============================================================
-# ACADEMIC MANAGEMENT SUMMARY
-# ============================================================
 
-@admin_bp.get("/academic/summary")
+@admin_bp.get("/students/duplicates")
 @admin_required
-def get_academic_summary():
-    try:
-        total_courses = Course.query.count()
-    except Exception as e:
-        current_app.logger.error(f"Error counting total courses: {e}")
-        total_courses = None
-
-    try:
-        active_courses = Course.query.filter(Course.is_active.is_(True)).count()
-    except Exception as e:
-        current_app.logger.error(f"Error counting active courses: {e}")
-        active_courses = None
-
-    try:
-        course_offerings = CourseOffering.query.count()
-    except Exception as e:
-        current_app.logger.error(f"Error counting course offerings: {e}")
-        course_offerings = None
-
-    try:
-        enrollments = Enrollment.query.count()
-    except Exception as e:
-        current_app.logger.error(f"Error counting enrollments: {e}")
-        enrollments = None
-
+def get_suspected_duplicate_students():
+    """
+    Scans the database and returns a report of suspected duplicate student records
+    and cross-student biometric collisions.
+    """
+    threshold = request.args.get("threshold", default=0.50, type=float)
+    duplicates = detect_suspected_duplicate_students(threshold=threshold)
     return jsonify({
         "success": True,
-        "data": {
-            "total_courses": total_courses,
-            "active_courses": active_courses,
-            "course_offerings": course_offerings,
-            "enrollments": enrollments,
-        },
+        "count": len(duplicates),
+        "threshold": threshold,
+        "data": duplicates,
     }), 200
+
+
+@admin_bp.post("/students/reconcile-duplicates")
+@admin_required
+def reconcile_duplicate_students_route():
+    """
+    Explicit, authorized administrative reconciliation:
+    Merges related enrollments and attendance records from duplicate to canonical,
+    invalidates duplicate's active face mappings, and deactivates duplicate user account.
+    """
+    data = request.get_json(silent=True) or {}
+    canonical_id = data.get("canonical_student_id")
+    duplicate_id = data.get("duplicate_student_id")
+    action = data.get("action", "merge_and_deactivate")
+    reason = data.get("reason", "Admin manual reconciliation")
+
+    if not canonical_id or not duplicate_id:
+        return jsonify({
+            "success": False,
+            "message": "canonical_student_id and duplicate_student_id are required",
+        }), 400
+
+    try:
+        canonical_id = int(canonical_id)
+        duplicate_id = int(duplicate_id)
+    except (ValueError, TypeError):
+        return jsonify({
+            "success": False,
+            "message": "Student IDs must be integers",
+        }), 400
+
+    admin_user_id = int(get_jwt_identity())
+
+    try:
+        result = reconcile_duplicate_students(
+            canonical_student_id=canonical_id,
+            duplicate_student_id=duplicate_id,
+            admin_user_id=admin_user_id,
+            action=action,
+            reason=reason,
+        )
+        return jsonify(result), 200
+    except ValueError as e:
+        return jsonify({
+            "success": False,
+            "message": str(e),
+        }), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": f"Reconciliation failed: {str(e)}",
+        }), 500
+
+
+@admin_bp.post("/face-profiles/cleanup-obsolete")
+@admin_required
+def cleanup_obsolete_profiles_route():
+    """
+    Safely deletes obsolete (inactive) face profiles according to retention policy.
+    Active face profiles are NEVER deleted.
+    """
+    data = request.get_json(silent=True) or {}
+    student_id = data.get("student_id")
+    retention_days = data.get("retention_days", 0)
+
+    try:
+        if student_id is not None:
+            student_id = int(student_id)
+        retention_days = int(retention_days)
+    except (ValueError, TypeError):
+        return jsonify({
+            "success": False,
+            "message": "student_id and retention_days must be integers",
+        }), 400
+
+    try:
+        purged = cleanup_obsolete_face_profiles(
+            student_id=student_id,
+            retention_days=retention_days,
+        )
+        return jsonify({
+            "success": True,
+            "message": f"Successfully purged {purged} obsolete face profile(s)",
+            "purged_count": purged,
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({
+            "success": False,
+            "message": f"Cleanup failed: {str(e)}",
+        }), 500
 
 
 # COURSE MANAGEMENT

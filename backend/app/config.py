@@ -37,3 +37,8 @@ class Config:
         "CORS_ORIGINS",
         "http://localhost:3000",
     )
+
+    INSTITUTION_TIMEZONE = os.getenv(
+        "INSTITUTION_TIMEZONE",
+        "Asia/Kolkata",
+    )

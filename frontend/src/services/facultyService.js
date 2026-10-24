@@ -59,26 +59,35 @@ export async function getFacultyAttendanceSessions(params = {}) {
   return response.data;
 }
 
-export async function getActiveFacultyAttendanceSession() {
+export async function getActiveFacultyAttendanceSession(params = {}) {
   const response = await api.get(
-    "/faculty/attendance/sessions/active"
+    "/faculty/attendance/sessions/active",
+    { params }
   );
 
   return response.data;
 }
 
 export async function startFacultyAttendanceSession(
-  offeringId
+  offeringIdOrPayload,
+  timetableEntryId = null
 ) {
+  const payload =
+    typeof offeringIdOrPayload === "object" && offeringIdOrPayload !== null
+      ? { ...offeringIdOrPayload }
+      : {
+          offering_id: offeringIdOrPayload,
+          ...(timetableEntryId ? { timetable_entry_id: timetableEntryId } : {}),
+        };
+
   const response = await api.post(
     "/faculty/attendance/sessions",
-    {
-      offering_id: offeringId,
-    }
+    payload
   );
 
   return response.data;
 }
+
 
 export async function closeFacultyAttendanceSession(
   sessionId

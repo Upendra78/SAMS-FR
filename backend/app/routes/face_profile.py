@@ -97,30 +97,15 @@ def create_face_profile():
             "message": "embedding must contain numeric values",
         }), 400
 
-    # Update existing active profile instead of creating duplicates
-    existing_profile = FaceProfile.query.filter_by(
+    # Deactivate existing active profile(s) atomically and create new active profile
+    existing_profiles = FaceProfile.query.filter_by(
         student_id=student.student_id,
         is_active=True,
-    ).first()
+    ).all()
 
-    if existing_profile:
-        existing_profile.embedding = embedding_bytes
-        existing_profile.model_version = model_version
+    for p in existing_profiles:
+        p.is_active = False
 
-        db.session.commit()
-
-        return jsonify({
-            "success": True,
-            "message": "Face profile updated successfully",
-            "data": {
-                "face_id": existing_profile.face_id,
-                "student_id": existing_profile.student_id,
-                "model_version": existing_profile.model_version,
-                "is_active": existing_profile.is_active,
-            },
-        }), 200
-
-    # Create new face profile
     face_profile = FaceProfile(
         student_id=student.student_id,
         embedding=embedding_bytes,
@@ -131,16 +116,17 @@ def create_face_profile():
     db.session.add(face_profile)
     db.session.commit()
 
+    is_update = len(existing_profiles) > 0
     return jsonify({
         "success": True,
-        "message": "Face profile created successfully",
+        "message": "Face profile updated successfully" if is_update else "Face profile created successfully",
         "data": {
             "face_id": face_profile.face_id,
             "student_id": face_profile.student_id,
             "model_version": face_profile.model_version,
             "is_active": face_profile.is_active,
         },
-    }), 201
+    }), 200 if is_update else 201
 
 
 @face_profile_bp.get("/student/face-profile")

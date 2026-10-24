@@ -540,7 +540,8 @@
   font-weight: 600;
 }
 
-.faculty-badge-ongoing {
+.faculty-badge-ongoing,
+.faculty-badge-active {
   background: #dcfce7;
   color: #15803d;
 }
@@ -548,6 +549,69 @@
 .faculty-badge-upcoming {
   background: #e0f2fe;
   color: #0369a1;
+}
+
+.faculty-badge-ended {
+  background: #f1f5f9;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+
+.faculty-badge-scheduled {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.faculty-btn-disabled {
+  background: #cbd5e1 !important;
+  color: #64748b !important;
+  cursor: not-allowed !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+.faculty-upcoming-session-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 24px 20px 20px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+}
+
+.faculty-upcoming-cam-circle {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #e0f2fe;
+  color: #0284c7;
+  margin-bottom: 12px;
+  box-shadow: 0 4px 10px rgba(2, 132, 199, 0.15);
+}
+
+.faculty-session-upcoming-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  background: #ffffff;
+  border: 1px solid #bae6fd;
+  border-radius: 9999px;
+  color: #0369a1;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.faculty-upcoming-hint {
+  display: block;
+  margin-top: 10px;
+  color: #64748b;
+  font-size: 11.5px;
+  line-height: 1.4;
 }
 
 /* ==========================================================================
