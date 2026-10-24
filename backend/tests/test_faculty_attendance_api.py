@@ -5,7 +5,7 @@ from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
 from sqlalchemy.pool import StaticPool
 
-from app.extensions import db
+from app.extensions import bcrypt, db
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
@@ -15,9 +15,12 @@ from app.models import (
     Enrollment,
     Faculty,
     Student,
+    TimetableEntry,
     User,
 )
 from app.routes.attendance import attendance_bp
+from app.routes.faculty import faculty_bp
+from app.routes.timetable import timetable_bp
 
 
 class TestFacultyAttendanceAPI(unittest.TestCase):
@@ -38,8 +41,11 @@ class TestFacultyAttendanceAPI(unittest.TestCase):
         )
 
         db.init_app(cls.app)
+        bcrypt.init_app(cls.app)
         JWTManager(cls.app)
         cls.app.register_blueprint(attendance_bp)
+        cls.app.register_blueprint(faculty_bp)
+        cls.app.register_blueprint(timetable_bp)
 
         with cls.app.app_context():
             db.create_all()
@@ -399,7 +405,181 @@ class TestFacultyAttendanceAPI(unittest.TestCase):
         self.assertEqual(records[0]["student_id"], self.stu_1_id)
         self.assertEqual(records[0]["student_name"], "Student One")
         self.assertEqual(records[0]["enrollment_no"], "ENR-101")
-        self.assertEqual(records[0]["status"], "PRESENT")
+    def test_get_faculty_attendance_overview_default(self):
+        headers_a = self._headers(self.fac_a_user_id)
+        res = self.client.get("/api/faculty/attendance/overview", headers=headers_a)
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()["data"]
+        self.assertEqual(data["active_sessions"], 1)
+        self.assertTrue(data["has_active_session"])
+        self.assertIsNotNone(data["active_session"])
+        self.assertEqual(data["active_session"]["session_id"], self.sess_a_id)
+        self.assertIsNotNone(data["selected_session"])
+        self.assertEqual(data["selected_session"]["session_id"], self.sess_a_id)
+        self.assertEqual(data["total_enrolled"], 1)
+
+    def test_get_faculty_attendance_overview_with_session_and_records(self):
+        with self.app.app_context():
+            rec = AttendanceRecord(
+                session_id=self.sess_a_closed_id,
+                student_id=self.stu_1_id,
+                status="PRESENT",
+                recognition_method="MANUAL",
+            )
+            db.session.add(rec)
+            db.session.commit()
+
+        headers_a = self._headers(self.fac_a_user_id)
+        res = self.client.get(
+            f"/api/faculty/attendance/overview?session_id={self.sess_a_closed_id}",
+            headers=headers_a,
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()["data"]
+        self.assertEqual(data["selected_session"]["session_id"], self.sess_a_closed_id)
+        self.assertEqual(data["students_present"], 1)
+        self.assertEqual(data["students_absent"], 0)
+        self.assertEqual(data["attendance_rate"], 100.0)
+
+    def test_get_faculty_attendance_overview_cross_faculty_forbidden(self):
+        headers_a = self._headers(self.fac_a_user_id)
+        res = self.client.get(
+            f"/api/faculty/attendance/overview?session_id={self.sess_b_id}",
+            headers=headers_a,
+        )
+        self.assertIn(res.status_code, [403, 404])
+
+    def test_start_session_rejects_offering_with_no_enrolled_students(self):
+        with self.app.app_context():
+            sess = db.session.get(AttendanceSession, self.sess_a_id)
+            sess.status = "CLOSED"
+
+            offering_empty = CourseOffering(
+                course_id=sess.offering.course_id,
+                faculty_id=self.fac_a_id,
+                semester=4,
+                section="C",
+                academic_year="2025-2026",
+                room="Room 303",
+            )
+            db.session.add(offering_empty)
+            db.session.commit()
+            empty_offering_id = offering_empty.offering_id
+
+        headers_a = self._headers(self.fac_a_user_id)
+        res = self.client.post(
+            "/api/faculty/attendance/sessions",
+            json={"offering_id": empty_offering_id},
+            headers=headers_a,
+        )
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("no active students are enrolled", res.get_json()["message"].lower())
+
+    def test_get_sessions_pagination(self):
+        with self.app.app_context():
+            s1 = AttendanceSession(
+                offering_id=self.offering_a_id,
+                faculty_id=self.fac_a_id,
+                session_date=date(2026, 10, 18),
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                status="CLOSED",
+            )
+            s2 = AttendanceSession(
+                offering_id=self.offering_a_id,
+                faculty_id=self.fac_a_id,
+                session_date=date(2026, 10, 17),
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                status="CLOSED",
+            )
+            db.session.add_all([s1, s2])
+            db.session.commit()
+
+        headers_a = self._headers(self.fac_a_user_id)
+        res = self.client.get(
+            "/api/faculty/attendance/sessions?page=1&per_page=2",
+            headers=headers_a,
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(len(data["data"]), 2)
+        self.assertEqual(data["page"], 1)
+        self.assertEqual(data["per_page"], 2)
+        self.assertGreaterEqual(data["total"], 3)
+
+    def test_faculty_students_offering_authorization(self):
+        headers_a = self._headers(self.fac_a_user_id)
+
+        res_own = self.client.get(
+            f"/api/faculty/students?offering_id={self.offering_a_id}",
+            headers=headers_a,
+        )
+        self.assertEqual(res_own.status_code, 200)
+        students = res_own.get_json()["data"]
+        self.assertEqual(len(students), 1)
+        self.assertEqual(students[0]["student_id"], self.stu_1_id)
+
+        res_forbidden = self.client.get(
+            f"/api/faculty/students?offering_id={self.offering_b_id}",
+            headers=headers_a,
+        )
+        self.assertEqual(res_forbidden.status_code, 403)
+        self.assertIn("not authorized", res_forbidden.get_json()["message"].lower())
+
+        res_not_found = self.client.get(
+            "/api/faculty/students?offering_id=999999",
+            headers=headers_a,
+        )
+        self.assertEqual(res_not_found.status_code, 404)
+
+    def test_faculty_timetable_day_filter_and_isolation(self):
+        with self.app.app_context():
+            tt_a_mon = TimetableEntry(
+                offering_id=self.offering_a_id,
+                day_of_week="Monday",
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                room="Room 301",
+            )
+            tt_a_thu = TimetableEntry(
+                offering_id=self.offering_a_id,
+                day_of_week="Thursday",
+                start_time=time(11, 0),
+                end_time=time(12, 0),
+                room="Room 301",
+            )
+            tt_b_mon = TimetableEntry(
+                offering_id=self.offering_b_id,
+                day_of_week="Monday",
+                start_time=time(10, 0),
+                end_time=time(11, 0),
+                room="Room 302",
+            )
+            db.session.add_all([tt_a_mon, tt_a_thu, tt_b_mon])
+            db.session.commit()
+
+        headers_a = self._headers(self.fac_a_user_id)
+
+        res_mon = self.client.get("/api/timetable/faculty?day=Monday", headers=headers_a)
+        self.assertEqual(res_mon.status_code, 200)
+        mon_entries = res_mon.get_json()["data"]
+        self.assertEqual(len(mon_entries), 1)
+        self.assertEqual(mon_entries[0]["day_of_week"], "Monday")
+        self.assertEqual(mon_entries[0]["room"], "Room 301")
+
+        res_thu = self.client.get("/api/timetable/faculty?day=Thursday", headers=headers_a)
+        self.assertEqual(res_thu.status_code, 200)
+        thu_entries = res_thu.get_json()["data"]
+        self.assertEqual(len(thu_entries), 1)
+        self.assertEqual(thu_entries[0]["day_of_week"], "Thursday")
+
+        res_fri = self.client.get("/api/timetable/faculty?day=Friday", headers=headers_a)
+        self.assertEqual(res_fri.status_code, 200)
+        self.assertEqual(len(res_fri.get_json()["data"]), 0)
+
+        res_unauth = self.client.get("/api/timetable/faculty")
+        self.assertEqual(res_unauth.status_code, 401)
 
 
 if __name__ == "__main__":

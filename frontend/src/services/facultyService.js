@@ -139,3 +139,15 @@ export async function getFacultyTimetable(params = {}) {
 
   return response.data;
 }
+
+export async function getFacultyAttendanceOverview(params = {}) {
+  const response = await api.get("/faculty/attendance/overview", { params });
+
+  return response.data;
+}
+
+export async function getSystemHealth() {
+  const response = await api.get("/db-health");
+
+  return response.data;
+}

@@ -35,11 +35,13 @@ import "./Attendance.css";
 import {
   closeFacultyAttendanceSession,
   getActiveFacultyAttendanceSession,
+  getFacultyAttendanceOverview,
   getFacultyAttendanceRecords,
   getFacultyAttendanceSessions,
   getFacultyCourses,
   getFacultyStudents,
   getFacultyTimetable,
+  getSystemHealth,
   recognizeFacultyAttendance,
   startFacultyAttendanceSession,
 } from "../../services/facultyService";
@@ -180,6 +182,12 @@ function Attendance() {
   const [students, setStudents] = useState([]);
   const [attendanceRecords, setAttendanceRecords] = useState([]);
   const [selectedSession, setSelectedSession] = useState(null);
+  const [overviewData, setOverviewData] = useState(null);
+  const [systemHealth, setSystemHealth] = useState({
+    loading: true,
+    connected: false,
+    message: "",
+  });
 
   const [loading, setLoading] = useState(true);
   const [coursesLoading, setCoursesLoading] = useState(true);
@@ -228,6 +236,7 @@ function Attendance() {
   const cameraStreamRef = useRef(null);
   const recordsRequestRef = useRef(0);
   const recognitionRequestRef = useRef(false);
+  const selectedSessionRef = useRef(null);
 
   const stopCamera = useCallback(() => {
     if (cameraStreamRef.current) {
@@ -313,38 +322,38 @@ function Attendance() {
     },
     []
   );
+
   useEffect(() => {
-    let mounted =true;
-    const loadTimetable = async() => {
-      setTimetableLoading(true);
+    let mounted = true;
+    const loadTimetable = async () => {
       setTimetableLoading(true);
       setTimetableError("");
-      try{
+      try {
         const result = await getFacultyTimetable();
-        if(!result?.success){
+        if (!result?.success) {
           throw new Error(
             result?.message || "Unable to load the faculty timetable."
           );
         }
-        if (mounted){
+        if (mounted) {
           setTimetableEntries(
             Array.isArray(result.data) ? result.data : []
           );
         }
-      } catch(error){
-        if (mounted){
+      } catch (err) {
+        if (mounted) {
           setTimetableError(
-            getErrorMessage(error, "Unable to load the timetable.")
+            getErrorMessage(err, "Unable to load the timetable.")
           );
         }
-      } finally{
+      } finally {
         if (mounted) {
           setTimetableLoading(false);
         }
       }
     };
     loadTimetable();
-    return() => {
+    return () => {
       mounted = false;
     };
   }, []);
@@ -715,14 +724,22 @@ function Attendance() {
     getSessionClassName,
   ]);
 
-  const todaySessions = useMemo(
-    () =>
-      sessions.filter(
-        (session) =>
-          String(session.session_date || "").slice(0, 10) === getTodayDate()
-      ).length,
-    [sessions]
-  );
+  const todaySessions = useMemo(() => {
+    if (overviewData?.today_sessions != null) {
+      return overviewData.today_sessions;
+    }
+    const today = getTodayDate();
+    return sessions.filter(
+      (session) => String(session.session_date || "").slice(0, 10) === today
+    ).length;
+  }, [overviewData, sessions]);
+
+  const activeSessionsCount = useMemo(() => {
+    if (overviewData?.active_sessions != null) {
+      return overviewData.active_sessions;
+    }
+    return activeSession ? 1 : 0;
+  }, [overviewData, activeSession]);
 
   const attendanceRecordMap = useMemo(
     () =>
@@ -738,44 +755,34 @@ function Attendance() {
   const displayedRecentDetections = useMemo(() => {
     if (recentDetections.length > 0) return recentDetections;
     return attendanceRecords
-      .filter((r) => r.status === "PRESENT")
+      .filter((r) => r.status === "PRESENT" || r.status === "LATE")
       .sort((a, b) => new Date(b.marked_at) - new Date(a.marked_at))
       .slice(0, 6)
       .map((r) => {
         const student = students.find((s) => isSameId(s.student_id, r.student_id));
         return {
           student_id: r.student_id,
-          name: student ? getStudentName(student) : `Student #${r.student_id}`,
+          name: student ? getStudentName(student) : (r.student_name || `Student #${r.student_id}`),
           marked_at: r.marked_at,
           recognition_method: r.recognition_method,
         };
       });
   }, [recentDetections, attendanceRecords, students]);
 
-  const studentsPresent = useMemo(
-    () =>
-      attendanceRecords.filter((record) => record.status === "PRESENT").length,
-    [attendanceRecords]
-  );
-
-  const studentsAbsent = useMemo(
-    () =>
-      attendanceRecords.filter((record) => record.status === "ABSENT").length,
-    [attendanceRecords]
-  );
-
-  const attendanceRate = useMemo(() => {
-    const total = studentsPresent + studentsAbsent;
-
-    if (!selectedSession || total === 0) return null;
-
-    return Math.round((studentsPresent / total) * 100);
-  }, [selectedSession, studentsPresent, studentsAbsent]);
+  const studentsPresent = useMemo(() => {
+    if (
+      overviewData?.students_present != null &&
+      isSameId(overviewData?.selected_session?.session_id, selectedSession?.session_id)
+    ) {
+      return overviewData.students_present;
+    }
+    return attendanceRecords.filter((record) => record.status === "PRESENT" || record.status === "LATE").length;
+  }, [overviewData, selectedSession, attendanceRecords]);
 
   const sessionStudents = useMemo(() => {
     if (!selectedSession) return [];
 
-    return students.filter(
+    const enrolled = students.filter(
       (student) =>
         (student.offering_id != null &&
           isSameId(student.offering_id, selectedSession.offering_id)) ||
@@ -784,12 +791,58 @@ function Attendance() {
             isSameId(id, selectedSession.offering_id)
           ))
     );
-  }, [students, selectedSession]);
+
+    const studentIdMap = new Map(enrolled.map((s) => [String(s.student_id), s]));
+    for (const rec of attendanceRecords) {
+      if (rec.student_id && !studentIdMap.has(String(rec.student_id))) {
+        const studentObj = students.find((s) => isSameId(s.student_id, rec.student_id)) || {
+          student_id: rec.student_id,
+          name: rec.student_name || `Student #${rec.student_id}`,
+          enrollment_no: rec.enrollment_no || "N/A",
+          offering_id: selectedSession.offering_id,
+        };
+        enrolled.push(studentObj);
+        studentIdMap.set(String(rec.student_id), studentObj);
+      }
+    }
+
+    return enrolled;
+  }, [students, selectedSession, attendanceRecords]);
 
   const unrecordedStudentsCount = useMemo(() => {
     if (!selectedSession) return 0;
     return Math.max(0, sessionStudents.length - studentsPresent);
   }, [selectedSession, sessionStudents.length, studentsPresent]);
+
+  const studentsAbsent = useMemo(() => {
+    if (
+      overviewData?.students_absent != null &&
+      isSameId(overviewData?.selected_session?.session_id, selectedSession?.session_id)
+    ) {
+      if (selectedSession?.status === "ACTIVE") {
+        return unrecordedStudentsCount;
+      }
+      return overviewData.students_absent;
+    }
+    if (selectedSession?.status === "ACTIVE") {
+      return unrecordedStudentsCount;
+    }
+    return attendanceRecords.filter((record) => record.status === "ABSENT").length;
+  }, [overviewData, selectedSession, unrecordedStudentsCount, attendanceRecords]);
+
+  const attendanceRate = useMemo(() => {
+    if (
+      overviewData?.attendance_rate != null &&
+      isSameId(overviewData?.selected_session?.session_id, selectedSession?.session_id)
+    ) {
+      return overviewData.attendance_rate;
+    }
+    const total = studentsPresent + studentsAbsent;
+
+    if (!selectedSession || total === 0) return null;
+
+    return Math.round((studentsPresent / total) * 100);
+  }, [overviewData, selectedSession, studentsPresent, studentsAbsent]);
 
   const filteredStudents = useMemo(() => {
     const query = studentSearch.trim().toLowerCase();
@@ -821,52 +874,9 @@ function Attendance() {
 
     return filteredStudents.slice(start, start + pageSize);
   }, [filteredStudents, currentPage]);
-  const loadAttendanceRecords = useCallback(async (session) => {
-    const requestId = ++recordsRequestRef.current;
-
-    if (!session?.session_id) {
-      setSelectedSession(null);
-      setAttendanceRecords([]);
-      setRecordsError("");
-      setRecordsLoading(false);
-      return;
-    }
-
-    setSelectedSession((current) =>
-      isSameId(current?.session_id, session.session_id) ? current : session
-    );
-    setRecordsLoading(true);
-    setRecordsError("");
-
-    try {
-      const result = await getFacultyAttendanceRecords(session.session_id);
-
-      if (requestId !== recordsRequestRef.current) return;
-
-      if (!result?.success) {
-        throw new Error(
-          result?.message || "Unable to load attendance records."
-        );
-      }
-
-      setAttendanceRecords(getList(result));
-    } catch (requestError) {
-      if (requestId !== recordsRequestRef.current) return;
-
-      setAttendanceRecords([]);
-      setRecordsError(
-        getErrorMessage(requestError, "Unable to load attendance records.")
-      );
-    } finally {
-      if (requestId === recordsRequestRef.current) {
-        setRecordsLoading(false);
-      }
-    }
-  }, []);
-
   const handleSessionSelect = (session) => {
-    loadAttendanceRecords(session);
-    setActiveTab("history");
+    void loadAttendanceRecords(session);
+    setActiveTab("attendance");
   };
 
   const handleStartFaceAttendance = async () => {
@@ -1002,10 +1012,14 @@ function Attendance() {
       ]);
 
       setActiveSession(newSession);
+      selectedSessionRef.current = newSession;
       setSelectedSession(newSession);
       setAttendanceRecords([]);
       setRecordsError("");
       setShowStartModal(false);
+
+      await loadAttendanceRecords(newSession);
+      void refreshSessions(newSession.session_id);
     } catch (requestError) {
       setStartError(
         getErrorMessage(requestError, "Unable to start attendance session.")
@@ -1046,11 +1060,14 @@ function Attendance() {
       );
 
       setActiveSession(null);
+      stopCamera();
+      setShowFaceAttendance(false);
 
       await loadAttendanceRecords({
         ...closedSession,
         status: "CLOSED",
       });
+      void refreshSessions(closedSession.session_id);
     } catch (requestError) {
       setCloseError(
         getErrorMessage(requestError, "Unable to close attendance session.")
@@ -1183,7 +1200,7 @@ function Attendance() {
     },
     {
       label: "Active Sessions",
-      value: loading ? "…" : activeSession ? 1 : 0,
+      value: loading ? "…" : activeSessionsCount,
       note: activeSession ? "Currently active" : "No active session",
       icon: faClock,
       tone: "purple",
@@ -2011,10 +2028,8 @@ function Attendance() {
           type="button"
           className="attendance-quick-action"
           onClick={() => {
-            setActiveTab("attendance");
-            document
-              .querySelector(".attendance-records-section")
-              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            const offeringParam = selectedSession?.offering_id || selectedOfferingId || "";
+            navigate(offeringParam ? `/faculty/students?offering_id=${offeringParam}` : "/faculty/students");
           }}
         >
           <span className="attendance-quick-icon">
@@ -2135,11 +2150,50 @@ function Attendance() {
           System Status
         </h2>
         <p>
-          Live database connected. All attendance records, facial recognitions, and sessions are persisted to MySQL in real time.
+          {systemHealth.loading
+            ? "Verifying backend and database connectivity…"
+            : systemHealth.connected
+              ? "Live database connected. All attendance records, facial recognitions, and sessions are persisted to MySQL in real time."
+              : `Connection error: ${systemHealth.message}. Check that the backend server is running.`}
         </p>
-        <span className="attendance-status-badge live">
-          <FontAwesomeIcon icon={faCircleCheck} /> Live Backend Connected
-        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
+          <span
+            className={`attendance-status-badge ${
+              systemHealth.loading
+                ? "pending"
+                : systemHealth.connected
+                  ? "live"
+                  : "error"
+            }`}
+          >
+            <FontAwesomeIcon
+              icon={
+                systemHealth.loading
+                  ? faSpinner
+                  : systemHealth.connected
+                    ? faCircleCheck
+                    : faCircleExclamation
+              }
+              spin={systemHealth.loading}
+            />{" "}
+            {systemHealth.loading
+              ? "Checking…"
+              : systemHealth.connected
+                ? "Live Backend Connected"
+                : "Backend Offline"}
+          </span>
+          {!systemHealth.connected && !systemHealth.loading && (
+            <button
+              type="button"
+              className="attendance-outline-button"
+              style={{ padding: "3px 8px", fontSize: "11px" }}
+              onClick={checkSystemHealth}
+              title="Retry connecting to backend"
+            >
+              <FontAwesomeIcon icon={faRotateRight} /> Retry
+            </button>
+          )}
+        </div>
       </section>
     </aside>
 
