@@ -96,6 +96,47 @@ const formatTime = (value) => {
       });
 };
 
+const getClassScheduleStatus = (startTime, endTime) => {
+  if (!startTime || !endTime) return { status: "SCHEDULED", label: "Scheduled" };
+  const now = new Date();
+  const sMatch = String(startTime).match(/^(\d{1,2}):(\d{2})/);
+  const eMatch = String(endTime).match(/^(\d{1,2}):(\d{2})/);
+  if (!sMatch || !eMatch) return { status: "SCHEDULED", label: "Scheduled" };
+
+  const start = new Date(now);
+  start.setHours(Number(sMatch[1]), Number(sMatch[2]), 0, 0);
+
+  const end = new Date(now);
+  end.setHours(Number(eMatch[1]), Number(eMatch[2]), 0, 0);
+  if (end <= start) {
+    end.setDate(end.getDate() + 1);
+  }
+
+  if (now < start) {
+    return {
+      status: "UPCOMING",
+      label: `Upcoming • Starts at ${formatTime(startTime)}`,
+      formattedStart: formatTime(startTime),
+      formattedEnd: formatTime(endTime),
+    };
+  } else if (now >= end) {
+    return {
+      status: "ENDED",
+      label: "Ended",
+      formattedStart: formatTime(startTime),
+      formattedEnd: formatTime(endTime),
+    };
+  } else {
+    return {
+      status: "ACTIVE",
+      label: "Active",
+      formattedStart: formatTime(startTime),
+      formattedEnd: formatTime(endTime),
+    };
+  }
+};
+
+
 const getTodayDate = () => {
   const today = new Date();
 
@@ -163,8 +204,10 @@ function Attendance() {
 
   const [showStartModal, setShowStartModal] = useState(false);
   const [selectedOfferingId, setSelectedOfferingId] = useState("");
+  const [selectedTimetableEntryId, setSelectedTimetableEntryId] = useState("");
   const [startingSession, setStartingSession] = useState(false);
   const [closingSession, setClosingSession] = useState(false);
+
 
   const [showFaceAttendance, setShowFaceAttendance] = useState(false);
   const [cameraReady, setCameraReady] = useState(false);
@@ -209,67 +252,65 @@ function Attendance() {
     setCameraReady(false);
   }, []);
 
-  const checkSystemHealth = useCallback(async () => {
-    setSystemHealth((prev) => ({ ...prev, loading: true }));
+  const refreshSessions = useCallback(async () => {
+    setLoading(true);
+    setError("");
+
     try {
-      const res = await getSystemHealth();
-      if (res?.database === "ok") {
-        setSystemHealth({
-          loading: false,
-          connected: true,
-          message: "Database & Backend Connected",
-        });
-      } else {
-        setSystemHealth({
-          loading: false,
-          connected: false,
-          message: res?.message || "Database connection degraded",
-        });
+      const [sessionsResult, activeResult] = await Promise.all([
+        getFacultyAttendanceSessions(),
+        getActiveFacultyAttendanceSession(),
+      ]);
+
+      if (!sessionsResult?.success) {
+        throw new Error(
+          sessionsResult?.message || "Unable to load attendance sessions."
+        );
       }
-    } catch (err) {
-      setSystemHealth({
-        loading: false,
-        connected: false,
-        message: getErrorMessage(err, "Backend connection failed"),
+
+      if (!activeResult?.success) {
+        throw new Error(
+          activeResult?.message || "Unable to load the active session."
+        );
+      }
+
+      const sessionList = getList(sessionsResult);
+      const active = activeResult.data || null;
+
+      setSessions(sessionList);
+      setActiveSession(active);
+
+      let targetSession = null;
+      setSelectedSession((current) => {
+        targetSession = current
+          ? sessionList.find((item) => isSameId(item.session_id, current.session_id)) || current
+          : active || sessionList[0] || null;
+        return targetSession;
       });
-    }
-  }, []);
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function loadHealth() {
-      try {
-        const res = await getSystemHealth();
-        if (isCancelled) return;
-        if (res?.database === "ok") {
-          setSystemHealth({
-            loading: false,
-            connected: true,
-            message: "Database & Backend Connected",
-          });
-        } else {
-          setSystemHealth({
-            loading: false,
-            connected: false,
-            message: res?.message || "Database connection degraded",
-          });
+      const sessionToLoad = targetSession || active;
+      if (sessionToLoad?.session_id) {
+        setRecordsLoading(true);
+        try {
+          const recordsResult = await getFacultyAttendanceRecords(
+            sessionToLoad.session_id
+          );
+          if (recordsResult?.success) {
+            setAttendanceRecords(getList(recordsResult));
+          }
+        } catch {
+          // session records load failure handled gracefully
+        } finally {
+          setRecordsLoading(false);
         }
-      } catch (err) {
-        if (isCancelled) return;
-        setSystemHealth({
-          loading: false,
-          connected: false,
-          message: getErrorMessage(err, "Backend connection failed"),
-        });
       }
+    } catch (requestError) {
+      setError(
+        getErrorMessage(requestError, "Unable to load attendance sessions.")
+      );
+    } finally {
+      setLoading(false);
     }
-
-    loadHealth();
-
-    return () => {
-      isCancelled = true;
-    };
   }, []);
 
   useEffect(
@@ -416,29 +457,49 @@ function Attendance() {
                 : [];
 
               if (recognizedList.length > 0) {
-                // Update local attendance records state
-                setAttendanceRecords((current) => {
-                  let updated = [...current];
-                  for (const rec of recognizedList) {
-                    if (rec.student_id) {
-                      const idx = updated.findIndex((item) => isSameId(item.student_id, rec.student_id));
-                      if (idx >= 0) {
-                        updated[idx] = { ...updated[idx], ...rec };
-                      } else {
-                        updated.push(rec);
+                // Filter only authorized eligible students who have a valid database attendance record
+                const eligibleRecords = recognizedList.filter(
+                  (rec) => rec.is_eligible !== false && rec.status !== "INELIGIBLE" && rec.attendance_id
+                );
+
+                if (eligibleRecords.length > 0) {
+                  setAttendanceRecords((current) => {
+                    let updated = [...current];
+                    for (const rec of eligibleRecords) {
+                      if (rec.student_id) {
+                        const idx = updated.findIndex((item) => isSameId(item.student_id, rec.student_id));
+                        if (idx >= 0) {
+                          updated[idx] = { ...updated[idx], ...rec };
+                        } else {
+                          updated.push(rec);
+                        }
                       }
                     }
-                  }
-                  return updated;
-                });
+                    return updated;
+                  });
+                }
 
                 const firstStudent = recognizedList[0];
                 setLastRecognizedStudent(firstStudent);
-                setScanStatusMessage(
-                  firstStudent.is_new
-                    ? `✅ Marked: ${firstStudent.name || firstStudent.student_name} (${firstStudent.enrollment_no})`
-                    : `ℹ️ ${firstStudent.name || firstStudent.student_name} — Already Present`
-                );
+
+                const isIneligible =
+                  firstStudent.is_eligible === false ||
+                  firstStudent.status === "INELIGIBLE" ||
+                  !firstStudent.attendance_id;
+
+                if (isIneligible) {
+                  setScanStatusMessage(
+                    `⚠️ Ineligible: ${firstStudent.name || firstStudent.student_name} (${firstStudent.message || "Section/Class Mismatch"})`
+                  );
+                } else if (firstStudent.is_new) {
+                  setScanStatusMessage(
+                    `✅ Marked: ${firstStudent.name || firstStudent.student_name} (${firstStudent.enrollment_no})`
+                  );
+                } else {
+                  setScanStatusMessage(
+                    `ℹ️ ${firstStudent.name || firstStudent.student_name} — Already Present`
+                  );
+                }
 
                 setRecentDetections((prev) => {
                   const items = [...recognizedList, ...prev];
@@ -461,7 +522,14 @@ function Attendance() {
           }
         }
       } catch (scanError) {
-        if (scanError?.response?.status === 401 || scanError?.response?.status === 403) {
+        if (scanError?.response?.status === 409 || scanError?.response?.status === 400) {
+          const msg = scanError?.response?.data?.message || "Attendance session window has ended or is not eligible.";
+          setScanStatusMessage(msg);
+          setFaceAttendanceError(msg);
+          stopCamera();
+          setShowFaceAttendance(false);
+          void refreshSessions();
+        } else if (scanError?.response?.status === 401 || scanError?.response?.status === 403) {
           setScanStatusMessage("Session expired — please refresh or log in again.");
         } else {
           console.debug("Live auto-scan error:", scanError?.message);
@@ -483,131 +551,7 @@ function Attendance() {
       recognitionRequestRef.current = false;
       setRecognizingFace(false);
     };
-  }, [showFaceAttendance, cameraReady, autoScanActive, activeSession, selectedSession]);
-
-  const loadAttendanceRecords = useCallback(async (session) => {
-    const requestId = ++recordsRequestRef.current;
-
-    if (!session?.session_id) {
-      selectedSessionRef.current = null;
-      setSelectedSession(null);
-      setAttendanceRecords([]);
-      setRecordsError("");
-      setRecordsLoading(false);
-      return;
-    }
-
-    selectedSessionRef.current = session;
-    setSelectedSession(session);
-    setRecordsLoading(true);
-    setRecordsError("");
-
-    try {
-      const [recordsResult, overviewResult, studentsResult] = await Promise.all([
-        getFacultyAttendanceRecords(session.session_id),
-        getFacultyAttendanceOverview({ session_id: session.session_id }),
-        session.offering_id
-          ? getFacultyStudents({ offering_id: session.offering_id })
-          : Promise.resolve(null),
-      ]);
-
-      if (requestId !== recordsRequestRef.current) return;
-
-      if (!recordsResult?.success) {
-        throw new Error(
-          recordsResult?.message || "Unable to load attendance records."
-        );
-      }
-
-      setAttendanceRecords(getList(recordsResult));
-
-      if (overviewResult?.success && overviewResult?.data) {
-        setOverviewData(overviewResult.data);
-      }
-
-      if (studentsResult?.success && Array.isArray(studentsResult.data)) {
-        setStudents((prev) => {
-          const incoming = studentsResult.data;
-          const map = new Map(prev.map((s) => [String(s.student_id), s]));
-          for (const s of incoming) {
-            map.set(String(s.student_id), s);
-          }
-          return Array.from(map.values());
-        });
-      }
-    } catch (requestError) {
-      if (requestId !== recordsRequestRef.current) return;
-
-      setAttendanceRecords([]);
-      setRecordsError(
-        getErrorMessage(requestError, "Unable to load attendance records.")
-      );
-    } finally {
-      if (requestId === recordsRequestRef.current) {
-        setRecordsLoading(false);
-      }
-    }
-  }, []);
-
-  const refreshSessions = useCallback(async (preserveSessionId = null) => {
-    setLoading(true);
-    setError("");
-
-    try {
-      const targetId = preserveSessionId || selectedSessionRef.current?.session_id;
-      const [sessionsResult, activeResult, overviewResult] = await Promise.all([
-        getFacultyAttendanceSessions(),
-        getActiveFacultyAttendanceSession(),
-        getFacultyAttendanceOverview(targetId ? { session_id: targetId } : {}),
-      ]);
-
-      if (!sessionsResult?.success) {
-        throw new Error(
-          sessionsResult?.message || "Unable to load attendance sessions."
-        );
-      }
-
-      if (!activeResult?.success) {
-        throw new Error(
-          activeResult?.message || "Unable to load the active session."
-        );
-      }
-
-      const sessionList = getList(sessionsResult);
-      const active = activeResult.data || null;
-
-      setSessions(sessionList);
-      setActiveSession(active);
-
-      if (overviewResult?.success && overviewResult?.data) {
-        setOverviewData(overviewResult.data);
-      }
-
-      // Determine target session synchronously
-      let target = null;
-      if (targetId) {
-        target = sessionList.find((item) => isSameId(item.session_id, targetId)) || null;
-      }
-      if (!target) {
-        target = active || sessionList[0] || null;
-      }
-
-      selectedSessionRef.current = target;
-      setSelectedSession(target);
-
-      if (target?.session_id) {
-        await loadAttendanceRecords(target);
-      } else {
-        setAttendanceRecords([]);
-      }
-    } catch (requestError) {
-      setError(
-        getErrorMessage(requestError, "Unable to load attendance sessions.")
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [loadAttendanceRecords]);
+  }, [showFaceAttendance, cameraReady, autoScanActive, activeSession, selectedSession, refreshSessions, stopCamera]);
 
   useEffect(() => {
     const timerId = setTimeout(() => {
@@ -943,9 +887,13 @@ function Attendance() {
       return;
     }
 
-    if (session.status !== "ACTIVE") {
+    if (session.status !== "ACTIVE" || session.is_eligible_for_attendance === false) {
       setFaceAttendanceError(
-        "Face attendance is available only for active sessions."
+        session.schedule_status === "UPCOMING"
+          ? (session.schedule_message || "Attendance cannot be started or recorded before the scheduled class start time.")
+          : session.schedule_status === "ENDED"
+          ? (session.schedule_message || "Class scheduled window has ended. Attendance recording is closed.")
+          : "Face attendance is available only for active sessions within scheduled class hours."
       );
       return;
     }
@@ -1007,9 +955,46 @@ function Attendance() {
     setStartError("");
 
     try {
-      const result = await startFacultyAttendanceSession(
-        Number(selectedOfferingId)
-      );
+      let entryIdToSubmit = selectedTimetableEntryId;
+      if (!entryIdToSubmit && selectedOfferingId) {
+        const dayNames = [
+          "Sunday",
+          "Monday",
+          "Tuesday",
+          "Wednesday",
+          "Thursday",
+          "Friday",
+          "Saturday",
+        ];
+        const today = dayNames[new Date().getDay()];
+        const offeringTodaySlots = timetableEntries.filter(
+          (t) =>
+            String(t.offering_id) === String(selectedOfferingId) &&
+            String(t.day_of_week || "").trim().toLowerCase() === today.toLowerCase()
+        );
+        const allOfferingSlots = timetableEntries.filter(
+          (t) => String(t.offering_id) === String(selectedOfferingId)
+        );
+        const candidateSlots = offeringTodaySlots.length > 0 ? offeringTodaySlots : allOfferingSlots;
+        const activeSlot = candidateSlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+        );
+        const upcomingSlot = candidateSlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+        );
+        const bestSlot = activeSlot || upcomingSlot || candidateSlots[0];
+        if (bestSlot) {
+          entryIdToSubmit = String(bestSlot.timetable_entry_id);
+        }
+      }
+
+      const payload = {
+        offering_id: Number(selectedOfferingId),
+      };
+      if (entryIdToSubmit) {
+        payload.timetable_entry_id = Number(entryIdToSubmit);
+      }
+      const result = await startFacultyAttendanceSession(payload);
 
       if (!result?.success || !result.data) {
         throw new Error(
@@ -1092,15 +1077,75 @@ function Attendance() {
     }
   };
 
-  const handleOpenStartModal = () => {
+  const handleOpenStartModal = (entry = null) => {
     setStartError("");
 
-    if (!selectedOfferingId && courses.length > 0) {
-      setSelectedOfferingId(String(courses[0].offering_id));
+    const dayNames = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    const today = dayNames[new Date().getDay()];
+
+    if (entry) {
+      setSelectedOfferingId(String(entry.offering_id));
+      setSelectedTimetableEntryId(String(entry.timetable_entry_id));
+    } else {
+      const initialOfferingId = selectedOfferingId || (courses.length > 0 ? String(courses[0].offering_id) : "");
+      setSelectedOfferingId(initialOfferingId);
+      if (initialOfferingId) {
+        const offeringTodaySlots = timetableEntries.filter(
+          (t) =>
+            String(t.offering_id) === String(initialOfferingId) &&
+            String(t.day_of_week || "").trim().toLowerCase() === today.toLowerCase()
+        );
+        const activeSlot = offeringTodaySlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+        );
+        const upcomingSlot = offeringTodaySlots.find(
+          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+        );
+        const bestSlot = activeSlot || upcomingSlot || offeringTodaySlots[0];
+        setSelectedTimetableEntryId(bestSlot ? String(bestSlot.timetable_entry_id) : "");
+      }
     }
 
     setShowStartModal(true);
   };
+
+  const handleModalOfferingChange = (newOfferingId) => {
+    setSelectedOfferingId(newOfferingId);
+    setStartError("");
+
+    const dayNames = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
+    const today = dayNames[new Date().getDay()];
+    const offeringTodaySlots = timetableEntries.filter(
+      (t) =>
+        String(t.offering_id) === String(newOfferingId) &&
+        String(t.day_of_week || "").trim().toLowerCase() === today.toLowerCase()
+    );
+    const activeSlot = offeringTodaySlots.find(
+      (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+    );
+    const upcomingSlot = offeringTodaySlots.find(
+      (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+    );
+    const bestSlot = activeSlot || upcomingSlot || offeringTodaySlots[0];
+    setSelectedTimetableEntryId(bestSlot ? String(bestSlot.timetable_entry_id) : "");
+  };
+
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -1272,6 +1317,21 @@ function Attendance() {
                     ? `Session #${activeSession.session_id}`
                     : "Session details"}
                 </span>
+                {activeSession.course_code && (
+                  <span>
+                    <strong>{activeSession.course_code}</strong>
+                    {activeSession.course_name ? ` – ${activeSession.course_name}` : ""}
+                  </span>
+                )}
+                {activeSession.semester && (
+                  <span>Semester {activeSession.semester}</span>
+                )}
+                {activeSession.section && (
+                  <span>Section {activeSession.section}</span>
+                )}
+                {activeSession.room && (
+                  <span>Room {activeSession.room}</span>
+                )}
               </div>
 
               {closeError && (
@@ -1325,15 +1385,32 @@ function Attendance() {
                       <span>
                         Start camera to automatically detect and mark attendance for enrolled students. No capture button required.
                       </span>
-                      <button
-                        type="button"
-                        className="attendance-primary-button"
-                        onClick={handleStartFaceAttendance}
-                        disabled={closingSession}
-                      >
-                        <FontAwesomeIcon icon={faCamera} />
-                        Start Live Attendance
-                      </button>
+                      {(() => {
+                        const sched = activeSession ? getClassScheduleStatus(activeSession.start_time, activeSession.end_time) : null;
+                        const isInactiveWindow = activeSession && (activeSession.is_eligible_for_attendance === false || sched?.status === "UPCOMING" || sched?.status === "ENDED");
+                        return (
+                          <>
+                            <button
+                              type="button"
+                              className={`attendance-primary-button ${isInactiveWindow ? "disabled-btn" : ""}`}
+                              onClick={handleStartFaceAttendance}
+                              disabled={closingSession || isInactiveWindow}
+                              title={isInactiveWindow ? "Attendance is only allowed during scheduled class hours" : undefined}
+                            >
+                              <FontAwesomeIcon icon={faCamera} />
+                              Start Live Attendance
+                            </button>
+                            {isInactiveWindow && (
+                              <p className="attendance-warning-text" style={{ color: "#d97706", marginTop: "10px", fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px" }}>
+                                <FontAwesomeIcon icon={faCircleExclamation} />
+                                {sched?.status === "UPCOMING"
+                                  ? `Class scheduled for ${sched.formattedStart || activeSession.start_time}. Attendance cannot start before scheduled time.`
+                                  : "Scheduled class window has ended. Attendance is closed."}
+                              </p>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1358,10 +1435,19 @@ function Attendance() {
                         <strong>{lastRecognizedStudent.name || lastRecognizedStudent.student_name}</strong>
                         <span>Enrollment: {lastRecognizedStudent.enrollment_no}</span>
                         <div className="attendance-recognized-tags">
-                          <span className={`attendance-tag ${lastRecognizedStudent.is_new ? "new" : "existing"}`}>
-                            <FontAwesomeIcon icon={faCircleCheck} />
-                            {lastRecognizedStudent.is_new ? "Present Marked" : "Already Marked"}
-                          </span>
+                          {lastRecognizedStudent.is_eligible === false ||
+                          lastRecognizedStudent.status === "INELIGIBLE" ||
+                          !lastRecognizedStudent.attendance_id ? (
+                            <span className="attendance-tag rejected" style={{ background: "rgba(239, 68, 68, 0.15)", color: "#dc2626", borderColor: "#fca5a5" }}>
+                              <FontAwesomeIcon icon={faCircleExclamation} />
+                              Ineligible for Class
+                            </span>
+                          ) : (
+                            <span className={`attendance-tag ${lastRecognizedStudent.is_new ? "new" : "existing"}`}>
+                              <FontAwesomeIcon icon={faCircleCheck} />
+                              {lastRecognizedStudent.is_new ? "Present Marked" : "Already Marked"}
+                            </span>
+                          )}
                           {lastRecognizedStudent.confidence_score && (
                             <span className="attendance-tag score">
                               {Math.round(lastRecognizedStudent.confidence_score * 100)}% Match
@@ -1397,22 +1483,36 @@ function Attendance() {
                     <div className="attendance-recent-stream">
                       <div className="attendance-recent-title">Recent Recognitions</div>
                       <div className="attendance-recent-chips">
-                        {displayedRecentDetections.map((item, idx) => (
-                          <div key={item.student_id || idx} className="attendance-recent-chip">
-                            <FontAwesomeIcon icon={faCircleCheck} />
-                            <span>
-                              {item.name ||
-                                item.student_name ||
-                                getStudentName(
-                                  students.find((s) =>
-                                    isSameId(s.student_id, item.student_id)
-                                  )
-                                ) ||
-                                `Student #${item.student_id}`}
-                            </span>
-                            <small>{formatTime(item.marked_at)}</small>
-                          </div>
-                        ))}
+                        {displayedRecentDetections.map((item, idx) => {
+                          const isIneligible =
+                            item.is_eligible === false ||
+                            item.status === "INELIGIBLE" ||
+                            !item.attendance_id;
+                          return (
+                            <div
+                              key={item.student_id || idx}
+                              className={`attendance-recent-chip ${isIneligible ? "ineligible" : ""}`}
+                              style={isIneligible ? { borderColor: "#fca5a5", background: "#fef2f2", color: "#991b1b" } : undefined}
+                            >
+                              <FontAwesomeIcon
+                                icon={isIneligible ? faCircleExclamation : faCircleCheck}
+                                style={{ color: isIneligible ? "#dc2626" : undefined }}
+                              />
+                              <span>
+                                {item.name ||
+                                  item.student_name ||
+                                  getStudentName(
+                                    students.find((s) =>
+                                      isSameId(s.student_id, item.student_id)
+                                    )
+                                  ) ||
+                                  `Student #${item.student_id}`}
+                                {isIneligible ? " (Ineligible)" : ""}
+                              </span>
+                              <small>{isIneligible ? "Rejected" : formatTime(item.marked_at)}</small>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -2013,16 +2113,15 @@ function Attendance() {
                         title="Click to start attendance for this class"
                         onClick={() => {
                           if (!activeSession) {
-                            setSelectedOfferingId(String(entry.offering_id));
-                            setShowStartModal(true);
+                            handleOpenStartModal(entry);
                           }
                         }}
                         onKeyDown={(e) => {
                           if ((e.key === "Enter" || e.key === " ") && !activeSession) {
-                            setSelectedOfferingId(String(entry.offering_id));
-                            setShowStartModal(true);
+                            handleOpenStartModal(entry);
                           }
                         }}
+
                       >
                         <strong>
                           {entry.course_code} - {entry.course_name}
@@ -2098,132 +2197,251 @@ function Attendance() {
       </section>
     </aside>
 
-    {showStartModal && (
-      <div
-        className="attendance-modal-backdrop"
-        role="presentation"
-        onMouseDown={(event) => {
-          if (
-            event.target === event.currentTarget &&
-            !startingSession
-          ) {
-            setShowStartModal(false);
-          }
-        }}
-      >
-        <div
-          className="attendance-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="start-attendance-title"
-          onMouseDown={(event) => event.stopPropagation()}
-        >
-          <div className="attendance-modal-header">
-            <div>
-              <span className="attendance-eyebrow">ATTENDANCE</span>
-              <h2 id="start-attendance-title">Start Attendance</h2>
-            </div>
-            <button
-              type="button"
-              className="attendance-modal-close"
-              onClick={() => setShowStartModal(false)}
-              disabled={startingSession}
-              aria-label="Close"
-            >
-              <FontAwesomeIcon icon={faXmark} />
-            </button>
-          </div>
+    {showStartModal && (() => {
+      const dayNames = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+      ];
+      const today = dayNames[new Date().getDay()];
+      const selectedOffering = courses.find((c) => String(c.offering_id) === String(selectedOfferingId));
+      const availableSlots = timetableEntries.filter(
+        (t) =>
+          String(t.offering_id) === String(selectedOfferingId) &&
+          String(t.day_of_week || "").trim().toLowerCase() === today.toLowerCase()
+      );
+      const allOfferingSlots = timetableEntries.filter(
+        (t) => String(t.offering_id) === String(selectedOfferingId)
+      );
+      const displaySlots = availableSlots.length > 0 ? availableSlots : allOfferingSlots;
+      const activeSlot = displaySlots.find(
+        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+      );
+      const upcomingSlot = displaySlots.find(
+        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+      );
+      const currentSlot =
+        displaySlots.find(
+          (t) => String(t.timetable_entry_id) === String(selectedTimetableEntryId)
+        ) ||
+        activeSlot ||
+        upcomingSlot ||
+        displaySlots[0];
+      const slotStatus = currentSlot ? getClassScheduleStatus(currentSlot.start_time, currentSlot.end_time) : null;
+      const isSlotEnded = slotStatus?.status === "ENDED";
+      const isSlotUpcoming = slotStatus?.status === "UPCOMING";
 
-          <div className="attendance-modal-body">
-            <div className="attendance-form-group">
-              <label htmlFor="start-class">Course Offering</label>
-              <select
-                id="start-class"
-                value={selectedOfferingId}
-                onChange={(event) =>
-                  setSelectedOfferingId(event.target.value)
-                }
+      return (
+        <div
+          className="attendance-modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (
+              event.target === event.currentTarget &&
+              !startingSession
+            ) {
+              setShowStartModal(false);
+            }
+          }}
+        >
+          <div
+            className="attendance-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="start-attendance-title"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="attendance-modal-header">
+              <div>
+                <span className="attendance-eyebrow">ATTENDANCE</span>
+                <h2 id="start-attendance-title">Start Attendance</h2>
+              </div>
+              <button
+                type="button"
+                className="attendance-modal-close"
+                onClick={() => setShowStartModal(false)}
+                disabled={startingSession}
+                aria-label="Close"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <div className="attendance-modal-body">
+              <div className="attendance-form-group">
+                <label htmlFor="start-class">Course Offering</label>
+                <select
+                  id="start-class"
+                  value={selectedOfferingId}
+                  onChange={(event) =>
+                    handleModalOfferingChange(event.target.value)
+                  }
+                  disabled={
+                    coursesLoading || courses.length === 0 || startingSession
+                  }
+                >
+                  {courses.length === 0 ? (
+                    <option value="">No course offerings available</option>
+                  ) : (
+                    courses.map((course) => (
+                      <option
+                        key={course.offering_id}
+                        value={course.offering_id}
+                      >
+                        {getCourseLabel(course)}
+                        {course.section ? ` · Section ${course.section}` : ""}
+                        {course.semester ? ` (Sem ${course.semester})` : ""}
+                      </option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              {displaySlots.length > 0 && (
+                <div className="attendance-form-group">
+                  <label htmlFor="start-slot">Scheduled Timetable Slot</label>
+                  <select
+                    id="start-slot"
+                    value={selectedTimetableEntryId || (currentSlot ? String(currentSlot.timetable_entry_id) : "")}
+                    onChange={(event) => {
+                      setSelectedTimetableEntryId(event.target.value);
+                      setStartError("");
+                    }}
+                    disabled={startingSession}
+                  >
+                    {displaySlots.map((slot) => {
+                      const st = getClassScheduleStatus(slot.start_time, slot.end_time);
+                      return (
+                        <option
+                          key={slot.timetable_entry_id}
+                          value={slot.timetable_entry_id}
+                        >
+                          {slot.day_of_week} {formatTime(slot.start_time)} – {formatTime(slot.end_time)}
+                          {slot.room ? ` · Room ${slot.room}` : ""} — [{st.label}]
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              )}
+
+              {currentSlot && (
+                <div
+                  style={{
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                    borderRadius: "8px",
+                    padding: "12px 14px",
+                    marginBottom: "12px",
+                    fontSize: "12.5px",
+                    color: "#334155",
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                    <strong style={{ fontSize: "13px", color: "#0f172a" }}>Scheduled Class Details</strong>
+                    <span
+                      style={{
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        padding: "2px 8px",
+                        borderRadius: "6px",
+                        background: slotStatus?.status === "ACTIVE" ? "#ecfdf5" : slotStatus?.status === "UPCOMING" ? "#fffbeb" : "#f1f5f9",
+                        color: slotStatus?.status === "ACTIVE" ? "#059669" : slotStatus?.status === "UPCOMING" ? "#d97706" : "#64748b",
+                      }}
+                    >
+                      {slotStatus?.label || "SCHEDULED"}
+                    </span>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
+                    <div><span style={{ color: "#64748b" }}>Date:</span> Today ({today})</div>
+                    <div><span style={{ color: "#64748b" }}>Section:</span> {selectedOffering?.section || "N/A"}</div>
+                    <div><span style={{ color: "#64748b" }}>Time:</span> {formatTime(currentSlot.start_time)} – {formatTime(currentSlot.end_time)}</div>
+                    <div><span style={{ color: "#64748b" }}>Room:</span> {currentSlot.room || selectedOffering?.room || "Not assigned"}</div>
+                  </div>
+                </div>
+              )}
+
+              {isSlotEnded && (
+                <div className="attendance-session-pending" role="alert" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>
+                  <div className="attendance-pending-dot">
+                    <FontAwesomeIcon icon={faCircleExclamation} style={{ color: "#dc2626" }} />
+                  </div>
+                  <div>
+                    <strong>Scheduled window ended</strong>
+                    <p>Cannot start attendance after the scheduled class window has ended ({formatTime(currentSlot.end_time)}).</p>
+                  </div>
+                </div>
+              )}
+
+              {isSlotUpcoming && (
+                <div className="attendance-session-pending" role="alert" style={{ background: "#fffbeb", borderColor: "#fde68a", color: "#92400e" }}>
+                  <div className="attendance-pending-dot">
+                    <FontAwesomeIcon icon={faClock} style={{ color: "#d97706" }} />
+                  </div>
+                  <div>
+                    <strong>Upcoming class slot</strong>
+                    <p>Cannot start attendance before the scheduled start time ({formatTime(currentSlot.start_time)}).</p>
+                  </div>
+                </div>
+              )}
+
+              {startError && (
+                <div className="attendance-session-pending" role="alert">
+                  <div className="attendance-pending-dot">
+                    <FontAwesomeIcon icon={faCircleExclamation} />
+                  </div>
+                  <div>
+                    <strong>Unable to start session</strong>
+                    <p>{startError}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="attendance-modal-footer">
+              <button
+                type="button"
+                className="attendance-secondary-button"
+                onClick={() => setShowStartModal(false)}
+                disabled={startingSession}
+              >
+                <FontAwesomeIcon icon={faXmark} />
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="attendance-primary-button"
+                onClick={handleStartAttendance}
                 disabled={
-                  coursesLoading || courses.length === 0 || startingSession
+                  startingSession ||
+                  !selectedOfferingId ||
+                  courses.length === 0 ||
+                  isSlotEnded ||
+                  isSlotUpcoming
                 }
               >
-                {courses.length === 0 ? (
-                  <option value="">No course offerings available</option>
+                {startingSession ? (
+                  <>
+                    <FontAwesomeIcon icon={faSpinner} spin />
+                    Starting…
+                  </>
                 ) : (
-                  courses.map((course) => (
-                    <option
-                      key={course.offering_id}
-                      value={course.offering_id}
-                    >
-                      {getCourseLabel(course)}
-                    </option>
-                  ))
+                  <>
+                    <FontAwesomeIcon icon={faCalendar} />
+                    Start Attendance
+                  </>
                 )}
-              </select>
+              </button>
             </div>
-
-            <div className="attendance-session-pending">
-              <div className="attendance-pending-dot">
-                <FontAwesomeIcon icon={faCircleInfo} />
-              </div>
-              <div>
-                <strong>Session will start immediately</strong>
-                <p>
-                  The selected course offering will receive a new active
-                  attendance session.
-                </p>
-              </div>
-            </div>
-
-            {startError && (
-              <div className="attendance-session-pending" role="alert">
-                <div className="attendance-pending-dot">
-                  <FontAwesomeIcon icon={faCircleExclamation} />
-                </div>
-                <div>
-                  <strong>Unable to start session</strong>
-                  <p>{startError}</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div className="attendance-modal-footer">
-            <button
-              type="button"
-              className="attendance-secondary-button"
-              onClick={() => setShowStartModal(false)}
-              disabled={startingSession}
-            >
-              <FontAwesomeIcon icon={faXmark} />
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="attendance-primary-button"
-              onClick={handleStartAttendance}
-              disabled={
-                startingSession ||
-                !selectedOfferingId ||
-                courses.length === 0
-              }
-            >
-              {startingSession ? (
-                <>
-                  <FontAwesomeIcon icon={faSpinner} spin />
-                  Starting…
-                </>
-              ) : (
-                <>
-                  <FontAwesomeIcon icon={faCalendar} />
-                  Start Attendance
-                </>
-              )}
-            </button>
           </div>
         </div>
-      </div>
-    )}
+      );
+    })()}
+
   </div>
   );
 }

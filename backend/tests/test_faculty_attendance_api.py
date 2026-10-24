@@ -184,13 +184,13 @@ class TestFacultyAttendanceAPI(unittest.TestCase):
             )
             db.session.add_all([enr_1, enr_2])
 
-            # Session for offering_a
+            # Session for offering_a (active within window for test execution)
             sess_a = AttendanceSession(
                 offering_id=offering_a.offering_id,
                 faculty_id=fac_a.faculty_id,
-                session_date=date(2026, 10, 20),
-                start_time=time(9, 0),
-                end_time=time(10, 0),
+                session_date=date.today(),
+                start_time=time(0, 0),
+                end_time=time(23, 59, 59),
                 status="ACTIVE",
             )
             # Closed session for offering_a
@@ -206,9 +206,9 @@ class TestFacultyAttendanceAPI(unittest.TestCase):
             sess_b = AttendanceSession(
                 offering_id=offering_b.offering_id,
                 faculty_id=fac_b.faculty_id,
-                session_date=date(2026, 10, 20),
-                start_time=time(11, 0),
-                end_time=time(12, 0),
+                session_date=date.today(),
+                start_time=time(0, 0),
+                end_time=time(23, 59, 59),
                 status="ACTIVE",
             )
             db.session.add_all([sess_a, sess_a_closed, sess_b])

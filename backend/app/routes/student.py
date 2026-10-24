@@ -638,8 +638,10 @@ def upload_student_photo():
             "message": f"Passport-size photo must be strictly less than 50 KB. (Selected file: {size_kb:.1f} KB)",
         }), 400
 
+    old_photo_url = student.photo_url
+
     # Save to disk
-    save_filename = f"student_photo_{student.student_id}_{int(time.time())}.{ext}"
+    save_filename = f"student_photo_{student.student_id}_{int(time.time() * 1000)}.{ext}"
     filepath = os.path.join(PHOTOS_DIR, save_filename)
 
     with open(filepath, "wb") as f:
@@ -649,6 +651,16 @@ def upload_student_photo():
     photo_url = f"/api/student/uploads/photos/{save_filename}"
     student.photo_url = photo_url
     db.session.commit()
+
+    # Safely clean up previous photo file from disk if it exists and differs from new file
+    if old_photo_url and old_photo_url.startswith("/api/student/uploads/photos/"):
+        old_filename = os.path.basename(old_photo_url)
+        old_filepath = os.path.join(PHOTOS_DIR, old_filename)
+        if os.path.exists(old_filepath) and os.path.abspath(old_filepath) != os.path.abspath(filepath):
+            try:
+                os.remove(old_filepath)
+            except OSError:
+                pass
 
     return jsonify({
         "success": True,

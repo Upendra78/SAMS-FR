@@ -10,11 +10,14 @@ from app.models import (
     CourseOffering,
     Enrollment,
     Faculty,
+    FacultyAdjustment,
     Student,
     TimetableEntry,
 )
 from app.services.activity_service import record_activity
 from app.utils.auth import faculty_required, faculty_or_admin_required
+from app.utils import schedule
+from app.services.cv.attendance_service import validate_student_attendance_eligibility
 
 
 attendance_bp = Blueprint(
@@ -64,27 +67,11 @@ def serialize_session(session):
     offering = session.offering
     course = offering.course if offering else None
 
-    today_day = (
-        session.session_date.strftime("%A")
-        if session.session_date
-        else datetime.now().strftime("%A")
+    timetable_entry = schedule.get_offering_authoritative_entry(
+        session.offering_id,
+        session.session_date,
+        target_time=session.start_time,
     )
-    timetable_entry = (
-        TimetableEntry.query
-        .filter(
-            TimetableEntry.offering_id == session.offering_id,
-            db.func.lower(TimetableEntry.day_of_week) == today_day.lower(),
-        )
-        .first()
-    ) if session.offering_id else None
-
-    if not timetable_entry and session.offering_id:
-        timetable_entry = (
-            TimetableEntry.query
-            .filter_by(offering_id=session.offering_id)
-            .order_by(TimetableEntry.timetable_entry_id.asc())
-            .first()
-        )
 
     room = (
         (timetable_entry.room if timetable_entry and timetable_entry.room else None)
@@ -100,19 +87,28 @@ def serialize_session(session):
         or (timetable_entry.end_time if timetable_entry else None)
     )
 
+    now = schedule.get_current_institution_time()
+    is_eligible, status_str, _ = schedule.get_session_schedule_status(session, current_dt=now)
+
     return {
         "session_id": session.session_id,
         "offering_id": session.offering_id,
+        "timetable_entry_id": timetable_entry.timetable_entry_id if timetable_entry else None,
         "faculty_id": session.faculty_id,
         "session_date": session.session_date.isoformat() if session.session_date else None,
         "start_time": start_time_val.isoformat() if start_time_val else None,
         "end_time": end_time_val.isoformat() if end_time_val else None,
         "status": session.status,
+        "is_eligible_for_attendance": is_eligible,
+        "schedule_status": status_str,
         "room": room,
         "course_code": course.course_code if course else None,
         "course_name": course.course_name if course else None,
         "section": offering.section if offering else None,
+        "semester": offering.semester if offering else None,
+        "academic_year": offering.academic_year if offering else None,
     }
+
 
 
 # ============================================================
@@ -151,88 +147,161 @@ def start_attendance_session():
             "message": "Course offering not found",
         }), 404
 
-    if offering.faculty_id != faculty.faculty_id:
+    is_owner = (offering.faculty_id == faculty.faculty_id)
+    is_substitute = FacultyAdjustment.query.filter_by(
+        substitute_faculty_id=faculty.faculty_id,
+        status="APPROVED",
+    ).join(TimetableEntry).filter(TimetableEntry.offering_id == offering.offering_id).first() is not None
+
+    if not (is_owner or is_substitute):
         return jsonify({
             "success": False,
             "message": "You are not authorized for this course offering",
         }), 403
 
-    # Verify the offering has eligible active enrollments.
-    active_enrollments_count = (
-        Enrollment.query
-        .filter_by(
-            offering_id=offering.offering_id,
-            status="ACTIVE",
-        )
-        .count()
-    )
+    now = schedule.get_current_institution_time()
+    today_date = now.date()
+    today_day = now.strftime("%A")
 
-    if active_enrollments_count == 0:
-        return jsonify({
-            "success": False,
-            "message": "Cannot start attendance session: No active students are enrolled in this course offering",
-        }), 400
-
-    # Prevent multiple active sessions for the same faculty member.
-    active_session = (
+    # Reconcile any existing active sessions for this faculty member
+    existing_active_sessions = (
         AttendanceSession.query
         .filter_by(
             faculty_id=faculty.faculty_id,
             status="ACTIVE",
         )
-        .order_by(
-            AttendanceSession.session_id.desc()
-        )
-        .first()
+        .order_by(AttendanceSession.session_id.desc())
+        .all()
     )
 
-    if active_session:
-        return jsonify({
-            "success": False,
-            "message": "An active attendance session already exists",
-            "data": serialize_session(active_session),
-        }), 409
-
-    local_now = datetime.now()
-    today_day = local_now.strftime("%A")
+    for existing in existing_active_sessions:
+        is_elig, st_str, _ = schedule.get_session_schedule_status(existing, current_dt=now)
+        if st_str == "ENDED":
+            schedule.close_expired_session(existing)
+        elif st_str == "UPCOMING":
+            schedule.reconcile_premature_session(existing)
+        elif is_elig:
+            return jsonify({
+                "success": False,
+                "message": "An active attendance session already exists",
+                "data": serialize_session(existing),
+            }), 409
 
     # Extract faculty assigned session time from the timetable
     timetable_entry_id = data.get("timetable_entry_id")
     timetable_entry = None
-    if timetable_entry_id:
-        timetable_entry = db.session.get(TimetableEntry, timetable_entry_id)
-        if timetable_entry and timetable_entry.offering_id != offering.offering_id:
-            timetable_entry = None
 
-    if not timetable_entry:
-        timetable_entry = (
+    if timetable_entry_id is not None:
+        try:
+            timetable_entry_id = int(timetable_entry_id)
+        except (ValueError, TypeError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid timetable_entry_id format",
+            }), 400
+
+        timetable_entry = db.session.get(TimetableEntry, timetable_entry_id)
+        if not timetable_entry:
+            return jsonify({
+                "success": False,
+                "message": "Timetable entry not found",
+            }), 404
+
+        if timetable_entry.offering_id != offering.offering_id:
+            return jsonify({
+                "success": False,
+                "message": "The selected timetable entry does not belong to this course offering",
+            }), 400
+
+        # Check authorization on this specific timetable entry if substitute
+        if not is_owner:
+            adj_sub = FacultyAdjustment.query.filter_by(
+                substitute_faculty_id=faculty.faculty_id,
+                timetable_entry_id=timetable_entry.timetable_entry_id,
+                status="APPROVED",
+            ).first()
+            if not adj_sub:
+                return jsonify({
+                    "success": False,
+                    "message": "You are not authorized for this specific timetable slot",
+                }), 403
+
+        # Verify scheduled day
+        if timetable_entry.day_of_week.strip().lower() != today_day.lower():
+            return jsonify({
+                "success": False,
+                "message": f"The selected timetable slot is scheduled for {timetable_entry.day_of_week}, not today ({today_day}).",
+            }), 400
+    else:
+        # Resolve from assigned timetable entries for today
+        today_entries = (
             TimetableEntry.query
             .filter(
                 TimetableEntry.offering_id == offering.offering_id,
                 db.func.lower(TimetableEntry.day_of_week) == today_day.lower(),
             )
-            .first()
+            .order_by(TimetableEntry.start_time.asc())
+            .all()
         )
 
-    if not timetable_entry:
-        timetable_entry = (
-            TimetableEntry.query
-            .filter_by(offering_id=offering.offering_id)
-            .order_by(TimetableEntry.timetable_entry_id.asc())
-            .first()
-        )
+        if not today_entries:
+            return jsonify({
+                "success": False,
+                "message": f"No scheduled timetable slots found for today ({today_day}) for this course offering.",
+            }), 400
 
-    if timetable_entry:
-        session_start = timetable_entry.start_time
-        session_end = timetable_entry.end_time
-    else:
-        session_start = local_now.time()
-        session_end = (local_now + timedelta(hours=1)).time()
+        if len(today_entries) == 1:
+            timetable_entry = today_entries[0]
+        else:
+            # Multiple slots on today. Determine if one is active right now.
+            active_slots = [
+                e for e in today_entries
+                if schedule.evaluate_timetable_window(today_date, e.start_time, e.end_time, current_dt=now)[1] == "ACTIVE"
+            ]
+            if len(active_slots) == 1:
+                timetable_entry = active_slots[0]
+            elif len(active_slots) > 1:
+                return jsonify({
+                    "success": False,
+                    "message": "Multiple active timetable slots exist for this course today. Please select a specific slot.",
+                }), 400
+            else:
+                # None is active right now. Do not silently select an expired slot if an upcoming slot exists!
+                upcoming_slots = [
+                    e for e in today_entries
+                    if schedule.evaluate_timetable_window(today_date, e.start_time, e.end_time, current_dt=now)[1] == "UPCOMING"
+                ]
+                if upcoming_slots:
+                    timetable_entry = upcoming_slots[0]
+                else:
+                    # All slots today have ended. Select the most recent one to evaluate and report ended.
+                    timetable_entry = today_entries[-1]
+
+    session_start = timetable_entry.start_time
+    session_end = timetable_entry.end_time
+
+
+    # Validate against authoritative scheduled timetable window
+    is_active, status_str, start_dt, end_dt = schedule.evaluate_timetable_window(
+        today_date, session_start, session_end, current_dt=now
+    )
+
+    if status_str == "UPCOMING":
+        return jsonify({
+            "success": False,
+            "message": f"Cannot start attendance session before the scheduled start time ({session_start.strftime('%I:%M %p')}).",
+        }), 400
+
+    if status_str == "ENDED":
+        return jsonify({
+            "success": False,
+            "message": f"Cannot start attendance session after the scheduled class window has ended ({session_end.strftime('%I:%M %p')}).",
+        }), 400
 
     session = AttendanceSession(
         offering_id=offering.offering_id,
         faculty_id=faculty.faculty_id,
-        session_date=local_now.date(),
+        session_date=today_date,
         start_time=session_start,
         end_time=session_end,
         status="ACTIVE",
@@ -459,19 +528,39 @@ def get_active_attendance_session():
             "message": "Faculty profile not found",
         }), 404
 
-    session = (
-        AttendanceSession.query
-        .filter_by(
-            faculty_id=faculty.faculty_id,
-            status="ACTIVE",
-        )
+    offering_id = request.args.get("offering_id", type=int)
+    now = schedule.get_current_institution_time()
+
+    query = AttendanceSession.query.filter_by(
+        faculty_id=faculty.faculty_id,
+        status="ACTIVE",
+    )
+    if offering_id:
+        query = query.filter(AttendanceSession.offering_id == offering_id)
+
+    sessions = (
+        query
         .order_by(
             AttendanceSession.session_id.desc()
         )
-        .first()
+        .all()
     )
 
-    if not session:
+    active_eligible_session = None
+
+    for s in sessions:
+        if not s.offering:
+            continue
+        is_eligible, status_str, _ = schedule.get_session_schedule_status(s, current_dt=now)
+        if status_str == "ENDED":
+            schedule.close_expired_session(s)
+        elif status_str == "UPCOMING":
+            schedule.reconcile_premature_session(s)
+        elif is_eligible and not active_eligible_session:
+            active_eligible_session = s
+
+
+    if not active_eligible_session:
         return jsonify({
             "success": True,
             "message": "No active attendance session",
@@ -480,7 +569,7 @@ def get_active_attendance_session():
 
     return jsonify({
         "success": True,
-        "data": serialize_session(session),
+        "data": serialize_session(active_eligible_session),
     }), 200
 
 
@@ -622,35 +711,46 @@ def mark_attendance(session_id):
             "message": "Invalid recognition_method",
         }), 400
 
-    # Face capture requires active session; manual correction is permitted on active or closed sessions
-    if recognition_method == "FACE" and session.status != "ACTIVE":
+    now = schedule.get_current_institution_time()
+    is_eligible, status_str, details = schedule.get_session_schedule_status(session, current_dt=now)
+
+    if status_str == "UPCOMING":
         return jsonify({
             "success": False,
-            "message": "Attendance session is not active",
-        }), 409
+            "message": details.get("message", "Attendance cannot be recorded before scheduled start time"),
+        }), 400
 
-    student = db.session.get(
-        Student,
-        student_id,
-    )
+    # Face capture requires active session within valid class window; manual correction is permitted on active or closed sessions
+    if recognition_method == "FACE":
+        if session.status != "ACTIVE":
+            return jsonify({
+                "success": False,
+                "message": "Attendance session is not active",
+            }), 409
+        if status_str == "ENDED":
+            schedule.close_expired_session(session)
+            return jsonify({
+                "success": False,
+                "message": "Attendance session has ended",
+            }), 409
 
-    if not student:
-        return jsonify({
-            "success": False,
-            "message": "Student not found",
-        }), 404
-
-    enrollment = Enrollment.query.filter_by(
+    is_eligible, message, student = validate_student_attendance_eligibility(
+        session=session,
         student_id=student_id,
-        offering_id=session.offering_id,
-        status="ACTIVE",
-    ).first()
-
-    if not enrollment:
+        faculty_id=None,
+        check_window=(recognition_method == "FACE"),
+    )
+    if not is_eligible:
+        if "not found" in message.lower():
+            return jsonify({
+                "success": False,
+                "message": message,
+            }), 404
         return jsonify({
             "success": False,
-            "message": "Student is not enrolled in this course",
+            "message": message,
         }), 403
+
 
     existing_record = AttendanceRecord.query.filter_by(
         session_id=session_id,
@@ -736,23 +836,21 @@ def update_attendance_record(session_id, student_id):
             "message": "Attendance session not found",
         }), 404
 
-    student = db.session.get(Student, student_id)
-    if not student:
-        return jsonify({
-            "success": False,
-            "message": "Student not found",
-        }), 404
-
-    enrollment = Enrollment.query.filter_by(
+    is_eligible, message, student = validate_student_attendance_eligibility(
+        session=session,
         student_id=student_id,
-        offering_id=session.offering_id,
-        status="ACTIVE",
-    ).first()
-
-    if not enrollment:
+        faculty_id=None,
+        check_window=False,
+    )
+    if not is_eligible:
+        if "not found" in message.lower():
+            return jsonify({
+                "success": False,
+                "message": message,
+            }), 404
         return jsonify({
             "success": False,
-            "message": "Student is not enrolled in this course",
+            "message": message,
         }), 403
 
     data = request.get_json(silent=True) or {}
