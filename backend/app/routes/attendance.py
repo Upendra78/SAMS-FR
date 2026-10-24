@@ -157,6 +157,22 @@ def start_attendance_session():
             "message": "You are not authorized for this course offering",
         }), 403
 
+    # Verify the offering has eligible active enrollments.
+    active_enrollments_count = (
+        Enrollment.query
+        .filter_by(
+            offering_id=offering.offering_id,
+            status="ACTIVE",
+        )
+        .count()
+    )
+
+    if active_enrollments_count == 0:
+        return jsonify({
+            "success": False,
+            "message": "Cannot start attendance session: No active students are enrolled in this course offering",
+        }), 400
+
     # Prevent multiple active sessions for the same faculty member.
     active_session = (
         AttendanceSession.query
@@ -264,11 +280,167 @@ def get_attendance_sessions():
     if session_date:
         query = query.filter(AttendanceSession.session_date == session_date)
 
-    sessions = query.order_by(AttendanceSession.session_id.desc()).all()
+    query = query.order_by(
+        AttendanceSession.session_date.desc(),
+        AttendanceSession.session_id.desc(),
+    )
+
+    page = request.args.get("page", type=int)
+    per_page = request.args.get("per_page", type=int)
+
+    if page is not None and per_page is not None:
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        return jsonify({
+            "success": True,
+            "data": [serialize_session(s) for s in pagination.items],
+            "total": pagination.total,
+            "page": pagination.page,
+            "per_page": pagination.per_page,
+            "pages": pagination.pages,
+        }), 200
+
+    sessions = query.all()
 
     return jsonify({
         "success": True,
         "data": [serialize_session(session) for session in sessions],
+    }), 200
+
+
+# ============================================================
+# GET FACULTY ATTENDANCE OVERVIEW
+# ============================================================
+
+@attendance_bp.get("/overview")
+@faculty_required
+def get_attendance_overview():
+    faculty = get_current_faculty()
+
+    if not faculty:
+        return jsonify({
+            "success": False,
+            "message": "Faculty profile not found",
+        }), 404
+
+    local_now = datetime.now()
+    today_date = local_now.date()
+
+    # 1. Today's sessions count for this faculty
+    today_sessions_count = (
+        AttendanceSession.query
+        .filter(
+            AttendanceSession.faculty_id == faculty.faculty_id,
+            AttendanceSession.session_date == today_date,
+        )
+        .count()
+    )
+
+    # 2. Active session check
+    active_session = (
+        AttendanceSession.query
+        .filter_by(
+            faculty_id=faculty.faculty_id,
+            status="ACTIVE",
+        )
+        .order_by(AttendanceSession.session_id.desc())
+        .first()
+    )
+
+    # 3. Contextual target session for attendance stats
+    session_id_param = request.args.get("session_id", type=int)
+    target_session = None
+
+    if session_id_param:
+        target_session = (
+            AttendanceSession.query
+            .filter_by(
+                session_id=session_id_param,
+                faculty_id=faculty.faculty_id,
+            )
+            .first()
+        )
+        if not target_session:
+            return jsonify({
+                "success": False,
+                "message": "Session not found or not authorized for this faculty",
+            }), 404
+    else:
+        # Default context: active session, or most recent session, or None
+        target_session = (
+            active_session
+            or AttendanceSession.query
+            .filter_by(faculty_id=faculty.faculty_id)
+            .order_by(
+                AttendanceSession.session_date.desc(),
+                AttendanceSession.session_id.desc(),
+            )
+            .first()
+        )
+
+    # 4. Compute statistics for target session
+    if target_session:
+        enrolled_count = (
+            Enrollment.query
+            .filter_by(
+                offering_id=target_session.offering_id,
+                status="ACTIVE",
+            )
+            .count()
+        )
+
+        present_count = (
+            AttendanceRecord.query
+            .filter(
+                AttendanceRecord.session_id == target_session.session_id,
+                AttendanceRecord.status.in_(["PRESENT", "LATE"]),
+            )
+            .count()
+        )
+
+        if target_session.status == "CLOSED":
+            absent_count = (
+                AttendanceRecord.query
+                .filter_by(
+                    session_id=target_session.session_id,
+                    status="ABSENT",
+                )
+                .count()
+            )
+        else:
+            absent_count = max(0, enrolled_count - present_count)
+
+        total_recorded = (
+            AttendanceRecord.query
+            .filter_by(session_id=target_session.session_id)
+            .count()
+        )
+
+        attendance_rate = (
+            round((present_count / enrolled_count) * 100, 1)
+            if enrolled_count > 0
+            else None
+        )
+    else:
+        enrolled_count = 0
+        present_count = 0
+        absent_count = 0
+        total_recorded = 0
+        attendance_rate = None
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "today_sessions": today_sessions_count,
+            "active_sessions": 1 if active_session else 0,
+            "has_active_session": bool(active_session),
+            "active_session": serialize_session(active_session) if active_session else None,
+            "selected_session": serialize_session(target_session) if target_session else None,
+            "students_present": present_count,
+            "students_absent": absent_count,
+            "total_enrolled": enrolled_count,
+            "total_recorded": total_recorded,
+            "attendance_rate": attendance_rate,
+        },
     }), 200
 
 

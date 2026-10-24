@@ -1,5 +1,5 @@
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import DataTable from "../../components/DataTable";
 import PageState from "../../components/PageState";
 import { getStudentAttendance } from "../../services/attendanceService";
@@ -16,46 +16,57 @@ function AttendanceHistory() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const loadAttendanceHistory = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError("");
+  useEffect(() => {
+    let isCancelled = false;
 
-      const params = { page, per_page: PAGE_SIZE };
+    async function loadAttendanceHistory() {
+      try {
+        setLoading(true);
+        setError("");
 
-      if (filter !== "all") {
-        params.status = filter.toUpperCase();
-      }
+        const params = { page, per_page: PAGE_SIZE };
 
-      const result = await getStudentAttendance(params);
+        if (filter !== "all") {
+          params.status = filter.toUpperCase();
+        }
 
-      if (!result?.success) {
+        const result = await getStudentAttendance(params);
+
+        if (isCancelled) return;
+
+        if (!result?.success) {
+          setAttendanceRecords([]);
+          setTotalRecords(0);
+          setTotalPages(0);
+          setError(result?.message || "Unable to load attendance records.");
+          return;
+        }
+
+        setAttendanceRecords(result.data ?? []);
+        setTotalRecords(result.total_records ?? 0);
+        setTotalPages(result.total_pages ?? 0);
+      } catch (err) {
+        if (isCancelled) return;
         setAttendanceRecords([]);
         setTotalRecords(0);
         setTotalPages(0);
-        setError(result?.message || "Unable to load attendance records.");
-        return;
+        setError(
+          err?.response?.data?.message ||
+            "Unable to load attendance records.",
+        );
+      } finally {
+        if (!isCancelled) {
+          setLoading(false);
+        }
       }
-
-      setAttendanceRecords(result.data ?? []);
-      setTotalRecords(result.total_records ?? 0);
-      setTotalPages(result.total_pages ?? 0);
-    } catch (err) {
-      setAttendanceRecords([]);
-      setTotalRecords(0);
-      setTotalPages(0);
-      setError(
-        err?.response?.data?.message ||
-          "Unable to load attendance records.",
-      );
-    } finally {
-      setLoading(false);
     }
-  }, [page, filter]);
 
-  useEffect(() => {
     loadAttendanceHistory();
-  }, [loadAttendanceHistory]);
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [page, filter]);
 
   const handleFilterChange = (event) => {
     setFilter(event.target.value);

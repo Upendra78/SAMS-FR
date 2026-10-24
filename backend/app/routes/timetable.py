@@ -174,6 +174,12 @@ def get_faculty_timetable():
     if offering_id is not None:
         query = query.filter(TimetableEntry.offering_id == offering_id)
 
+    day_filter = request.args.get("day") or request.args.get("day_of_week")
+    if day_filter and day_filter.strip().lower() not in ["all", "all days", ""]:
+        query = query.filter(
+            db.func.lower(TimetableEntry.day_of_week) == day_filter.strip().lower()
+        )
+
     entries = (
         query
         .order_by(

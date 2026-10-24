@@ -700,6 +700,19 @@ def get_faculty_students():
     )
 
     if offering_id_filter:
+        offering = db.session.get(CourseOffering, offering_id_filter)
+        if not offering:
+            return jsonify({
+                "success": False,
+                "message": "Course offering not found",
+            }), 404
+
+        if offering.faculty_id != faculty.faculty_id:
+            return jsonify({
+                "success": False,
+                "message": "You are not authorized for this course offering",
+            }), 403
+
         query = query.filter(Enrollment.offering_id == offering_id_filter)
 
     enrollments = query.all()
