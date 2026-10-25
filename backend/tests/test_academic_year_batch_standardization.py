@@ -374,6 +374,318 @@ class TestAcademicYearBatchStandardization(unittest.TestCase):
         for ay in data["academic_years"]:
             self.assertTrue(is_single_academic_session(ay))
 
+    def test_offering_academic_year_lifecycle_and_faculty_display(self):
+        """
+        Verify:
+        1. Creating an offering with academic year 2025-2026.
+        2. Editing and persisting the academic year to 2026-2027.
+        3. Returning the saved year through GET APIs.
+        4. Displaying the correct 1-year session in faculty courses API.
+        5. Preserving a student's original admission batch.
+        6. Correct academic-year filtering in faculty courses.
+        7. Handling existing records with cohort ranges or single years.
+        8. Ensuring timetable and attendance associations remain unchanged when editing offering.
+        """
+        # Create Course, Faculty, and Student
+        with self.app.app_context():
+            course = Course(
+                course_code="BCSE-501",
+                course_name="Software Engineering",
+                department_id=self.dept_id,
+                semester=5,
+                credits=4,
+                batch="2024",
+                is_active=True,
+            )
+            fac_user = User(name="Prof. Sharma", email="faculty@test.local", password_hash="pw", role="FACULTY")
+            stu_user = User(name="Alice Student", email="alice@test.local", password_hash="pw", role="STUDENT")
+            db.session.add_all([course, fac_user, stu_user])
+            db.session.flush()
+
+            faculty = Faculty(
+                user_id=fac_user.user_id,
+                employee_id="EMP001",
+                designation="Associate Professor",
+                department_id=self.dept_id,
+            )
+            student = Student(
+                user_id=stu_user.user_id,
+                enrollment_no="ENR2024001",
+                department_id=self.dept_id,
+                batch_id=self.batch_id,
+                semester=5,
+                section="A",
+                academic_year="2026-2027",
+            )
+            db.session.add_all([faculty, student])
+            db.session.commit()
+
+            course_id = course.course_id
+            faculty_id = faculty.faculty_id
+            faculty_user_id = fac_user.user_id
+            student_id = student.student_id
+
+        # 1. Create Course Offering with academic year 2025-2026
+        create_res = self.client.post(
+            "/api/admin/course-offerings",
+            json={
+                "course_id": course_id,
+                "faculty_id": faculty_id,
+                "academic_year": "2025-2026",
+                "semester": 5,
+                "section": "A",
+            },
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(create_res.status_code, 201)
+        offering_id = create_res.get_json()["data"]["offering_id"]
+
+        # Add timetable entry and attendance session to verify associations remain unchanged
+        with self.app.app_context():
+            tt_entry = TimetableEntry(
+                offering_id=offering_id,
+                day_of_week="Monday",
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                room="Room 101",
+            )
+            att_session = AttendanceSession(
+                offering_id=offering_id,
+                faculty_id=faculty_id,
+                session_date=date(2025, 9, 1),
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                status="CLOSED",
+            )
+            enrollment = Enrollment(
+                offering_id=offering_id,
+                student_id=student_id,
+                status="ACTIVE",
+            )
+            db.session.add_all([tt_entry, att_session, enrollment])
+            db.session.commit()
+            tt_entry_id = tt_entry.timetable_entry_id
+            att_session_id = att_session.session_id
+
+        # 2. Edit and persist the academic year to 2026-2027
+        update_res = self.client.put(
+            f"/api/admin/course-offerings/{offering_id}",
+            json={
+                "course_id": course_id,
+                "academic_year": "2026-2027",
+                "semester": 5,
+                "section": "A",
+            },
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(update_res.status_code, 200)
+
+        # Reject invalid cohort range on edit
+        invalid_edit_res = self.client.put(
+            f"/api/admin/course-offerings/{offering_id}",
+            json={
+                "course_id": course_id,
+                "academic_year": "2026-2030",
+                "semester": 5,
+                "section": "A",
+            },
+            headers=self.admin_headers(),
+        )
+        self.assertEqual(invalid_edit_res.status_code, 400)
+
+        # 3. Returning the saved year through the API
+        get_res = self.client.get("/api/admin/course-offerings", headers=self.admin_headers())
+        self.assertEqual(get_res.status_code, 200)
+        all_offerings = get_res.get_json()["data"]
+        target_offering = next((o for o in all_offerings if o["offering_id"] == offering_id), None)
+        self.assertIsNotNone(target_offering)
+        self.assertEqual(target_offering["academic_year"], "2026-2027")
+
+        # 4. Displaying the correct 1-year session in the faculty portal
+        with self.app.app_context():
+            faculty_token = create_access_token(identity=str(faculty_user_id), additional_claims={"role": "FACULTY"})
+            faculty_headers = {"Authorization": f"Bearer {faculty_token}"}
+
+        fac_courses_res = self.client.get("/api/faculty/courses", headers=faculty_headers)
+        self.assertEqual(fac_courses_res.status_code, 200)
+        fac_courses = fac_courses_res.get_json()["data"]
+        matching_fc = next((c for c in fac_courses if c["offering_id"] == offering_id), None)
+        self.assertIsNotNone(matching_fc)
+        self.assertEqual(matching_fc["academic_year"], "2026-2027")
+
+        # 5. Preserving a student's original admission batch
+        fac_course_details_res = self.client.get(f"/api/faculty/courses/{course_id}", headers=faculty_headers)
+        self.assertEqual(fac_course_details_res.status_code, 200)
+        details_data = fac_course_details_res.get_json()["data"]
+        students_roster = details_data["offerings"][0]["students"]
+        self.assertEqual(len(students_roster), 1)
+        student_record = students_roster[0]
+        # Student's cohort admission batch is preserved as 2024-2028
+        self.assertEqual(student_record["batch_year"], "2024-2028")
+        # While offering's academic session is 1-year session
+        self.assertEqual(student_record["academic_year"], "2026-2027")
+
+        # 6. Correct academic-year filtering in faculty courses
+        filtered_match = self.client.get("/api/faculty/courses?academic_year=2026-2027", headers=faculty_headers)
+        self.assertEqual(len(filtered_match.get_json()["data"]), 1)
+
+        filtered_mismatch = self.client.get("/api/faculty/courses?academic_year=2024-2025", headers=faculty_headers)
+        self.assertEqual(len(filtered_mismatch.get_json()["data"]), 0)
+
+        # 7. Handling existing records with cohort ranges or single years safely
+        with self.app.app_context():
+            # Create a legacy record with cohort range 2026-2030 in DB
+            legacy_offering = CourseOffering(
+                course_id=course_id,
+                faculty_id=faculty_id,
+                semester=1,
+                section="B",
+                academic_year="2026 -2030",
+            )
+            db.session.add(legacy_offering)
+            db.session.commit()
+            legacy_id = legacy_offering.offering_id
+
+        # GET API should resolve legacy cohort range to 1-year academic session 2026-2027
+        get_legacy_res = self.client.get("/api/admin/course-offerings", headers=self.admin_headers())
+        legacy_data = next((o for o in get_legacy_res.get_json()["data"] if o["offering_id"] == legacy_id), None)
+        self.assertIsNotNone(legacy_data)
+        self.assertEqual(legacy_data["academic_year"], "2026-2027")
+
+        # 8. Ensuring timetable and attendance associations remain unchanged
+        with self.app.app_context():
+            refreshed_tt = db.session.get(TimetableEntry, tt_entry_id)
+            self.assertIsNotNone(refreshed_tt)
+            self.assertEqual(refreshed_tt.offering_id, offering_id)
+
+            refreshed_att = db.session.get(AttendanceSession, att_session_id)
+            self.assertIsNotNone(refreshed_att)
+            self.assertEqual(refreshed_att.offering_id, offering_id)
+
+    def test_batch_column_and_academic_year_in_courses_and_offerings(self):
+        """Verify Courses and Course Offerings APIs return separate Batch and Academic Year fields."""
+        with self.app.app_context():
+            faculty_user = User(name="Test Prof", email="prof@test.local", password_hash="pw", role="FACULTY")
+            db.session.add(faculty_user)
+            db.session.flush()
+            fac = Faculty(user_id=faculty_user.user_id, employee_id="EMP999", designation="Professor", department_id=self.dept_id)
+            db.session.add(fac)
+            db.session.commit()
+            faculty_id = fac.faculty_id
+
+        # 1. Create a course with batch and academic_year
+        create_res = self.client.post(
+            "/api/admin/courses",
+            headers=self.admin_headers(),
+            json={
+                "course_code": "CS-401",
+                "course_name": "Advanced Operating Systems",
+                "department_id": self.dept_id,
+                "semester": 4,
+                "credits": 4,
+                "batch": "2025",
+                "academic_year": "2026-2027",
+            },
+        )
+        self.assertEqual(create_res.status_code, 201)
+        course_id = create_res.get_json()["data"]["course_id"]
+
+        # 2. GET /api/admin/courses should include both batch and academic_year
+        get_courses_res = self.client.get("/api/admin/courses", headers=self.admin_headers())
+        self.assertEqual(get_courses_res.status_code, 200)
+        courses_data = get_courses_res.get_json()["data"]
+        matching_course = next((c for c in courses_data if c["course_id"] == course_id), None)
+        self.assertIsNotNone(matching_course)
+        self.assertEqual(matching_course["batch"], "2025")
+        self.assertEqual(matching_course["academic_year"], "2026-2027")
+
+        # 3. Create a course offering for this course
+        offering_res = self.client.post(
+            "/api/admin/course-offerings",
+            headers=self.admin_headers(),
+            json={
+                "course_id": course_id,
+                "faculty_id": faculty_id,
+                "batch": "2025",
+                "academic_year": "2026-2027",
+                "semester": 4,
+                "section": "A",
+            },
+        )
+        self.assertEqual(offering_res.status_code, 201)
+        offering_id = offering_res.get_json()["data"]["offering_id"]
+
+        # 4. GET /api/admin/course-offerings should return batch immediately alongside academic_year
+        get_offerings_res = self.client.get("/api/admin/course-offerings", headers=self.admin_headers())
+        self.assertEqual(get_offerings_res.status_code, 200)
+        offerings_data = get_offerings_res.get_json()["data"]
+        matching_offering = next((o for o in offerings_data if o["offering_id"] == offering_id), None)
+        self.assertIsNotNone(matching_offering)
+        self.assertEqual(matching_offering["batch"], "2025")
+        self.assertEqual(matching_offering["academic_year"], "2026-2027")
+
+        # 5. Offering without course.batch resolves batch from enrolled student's batch
+        with self.app.app_context():
+            # Create a course without batch
+            no_batch_course = Course(
+                course_code="CS-402",
+                course_name="Distributed Systems",
+                department_id=self.dept_id,
+                semester=5,
+                credits=3,
+                batch=None,
+            )
+            db.session.add(no_batch_course)
+            db.session.flush()
+
+            no_batch_offering = CourseOffering(
+                course_id=no_batch_course.course_id,
+                faculty_id=faculty_id,
+                academic_year="2026-2027",
+                semester=5,
+                section="B",
+            )
+            db.session.add(no_batch_offering)
+            db.session.flush()
+
+            # Create enrolled student with batch
+            stu_user = User(name="Enrolled Student", email="enrolled@test.local", password_hash="pw", role="STUDENT")
+            db.session.add(stu_user)
+            db.session.flush()
+
+            stu_batch = Batch(batch_name="2024")
+            db.session.add(stu_batch)
+            db.session.flush()
+
+            stu = Student(
+                user_id=stu_user.user_id,
+                department_id=self.dept_id,
+                batch_id=stu_batch.batch_id,
+                enrollment_no="ENR2024099",
+                semester=5,
+                section="B",
+                academic_year="2026-2027",
+            )
+            db.session.add(stu)
+            db.session.flush()
+
+            enrollment = Enrollment(
+                offering_id=no_batch_offering.offering_id,
+                student_id=stu.student_id,
+                status="ENROLLED",
+            )
+            db.session.add(enrollment)
+            db.session.commit()
+            no_batch_offering_id = no_batch_offering.offering_id
+
+        # GET /api/admin/course-offerings should resolve the batch via enrollment
+        res_resolved = self.client.get("/api/admin/course-offerings", headers=self.admin_headers())
+        self.assertEqual(res_resolved.status_code, 200)
+        resolved_offering = next((o for o in res_resolved.get_json()["data"] if o["offering_id"] == no_batch_offering_id), None)
+        self.assertIsNotNone(resolved_offering)
+        self.assertEqual(resolved_offering["batch"], "2024")
+        self.assertEqual(resolved_offering["academic_year"], "2026-2027")
+
 
 if __name__ == "__main__":
     unittest.main()

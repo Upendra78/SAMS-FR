@@ -28,6 +28,8 @@ import {
   faFileLines,
   faPlay,
   faPause,
+  faShieldHalved,
+  faTriangleExclamation,
 } from "@fortawesome/free-solid-svg-icons";
 
 import "./Attendance.css";
@@ -42,8 +44,10 @@ import {
   getFacultyStudents,
   getFacultyTimetable,
   getSystemHealth,
-  recognizeFacultyAttendance,
+  recordVerifiedAttendance,
+  requestLivenessChallenge,
   startFacultyAttendanceSession,
+  verifyLiveness,
 } from "../../services/facultyService";
 
 const getErrorMessage = (error, fallback) =>
@@ -96,12 +100,29 @@ const formatTime = (value) => {
       });
 };
 
-const getClassScheduleStatus = (startTime, endTime) => {
-  if (!startTime || !endTime) return { status: "SCHEDULED", label: "Scheduled" };
+const getClassScheduleStatus = (startTime, endTime, dayOfWeek = null) => {
+  if (!startTime || !endTime) return { status: "SCHEDULED", label: "Scheduled", isToday: false };
+  const todayWeekday = new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(new Date());
+  const isToday = !dayOfWeek || String(dayOfWeek).trim().toLowerCase() === todayWeekday.toLowerCase();
+
+  const formattedStart = formatTime(startTime);
+  const formattedEnd = formatTime(endTime);
+
+  if (!isToday) {
+    const formattedDay = dayOfWeek ? String(dayOfWeek).trim() : "Scheduled Day";
+    return {
+      status: "SCHEDULED",
+      label: `Scheduled for ${formattedDay}`,
+      formattedStart,
+      formattedEnd,
+      isToday: false,
+    };
+  }
+
   const now = new Date();
   const sMatch = String(startTime).match(/^(\d{1,2}):(\d{2})/);
   const eMatch = String(endTime).match(/^(\d{1,2}):(\d{2})/);
-  if (!sMatch || !eMatch) return { status: "SCHEDULED", label: "Scheduled" };
+  if (!sMatch || !eMatch) return { status: "SCHEDULED", label: "Scheduled", isToday: true };
 
   const start = new Date(now);
   start.setHours(Number(sMatch[1]), Number(sMatch[2]), 0, 0);
@@ -115,23 +136,26 @@ const getClassScheduleStatus = (startTime, endTime) => {
   if (now < start) {
     return {
       status: "UPCOMING",
-      label: `Upcoming • Starts at ${formatTime(startTime)}`,
-      formattedStart: formatTime(startTime),
-      formattedEnd: formatTime(endTime),
+      label: `Upcoming • Starts at ${formattedStart}`,
+      formattedStart,
+      formattedEnd,
+      isToday: true,
     };
   } else if (now >= end) {
     return {
       status: "ENDED",
       label: "Ended",
-      formattedStart: formatTime(startTime),
-      formattedEnd: formatTime(endTime),
+      formattedStart,
+      formattedEnd,
+      isToday: true,
     };
   } else {
     return {
       status: "ACTIVE",
       label: "Active",
-      formattedStart: formatTime(startTime),
-      formattedEnd: formatTime(endTime),
+      formattedStart,
+      formattedEnd,
+      isToday: true,
     };
   }
 };
@@ -215,7 +239,9 @@ function Attendance() {
   const [autoScanActive, setAutoScanActive] = useState(true);
   const [lastRecognizedStudent, setLastRecognizedStudent] = useState(null);
   const [recentDetections, setRecentDetections] = useState([]);
-  const [scanStatusMessage, setScanStatusMessage] = useState("Looking for students…");
+  const [scanStatusMessage, setScanStatusMessage] = useState("Position your face in the frame");
+  const [livenessState, setLivenessState] = useState("POSITION_FACE");
+  const [currentChallenge, setCurrentChallenge] = useState(null);
 
   const [searchTerm, setSearchTerm] = useState("");
   const [studentSearch, setStudentSearch] = useState("");
@@ -237,6 +263,14 @@ function Attendance() {
   const recordsRequestRef = useRef(0);
   const recognitionRequestRef = useRef(false);
   const selectedSessionRef = useRef(null);
+  const currentChallengeRef = useRef(null);
+
+  const handleRetryChallenge = useCallback(() => {
+    currentChallengeRef.current = null;
+    setCurrentChallenge(null);
+    setLivenessState("POSITION_FACE");
+    setScanStatusMessage("Position your face in the frame");
+  }, []);
 
   const stopCamera = useCallback(() => {
     if (cameraStreamRef.current) {
@@ -252,14 +286,143 @@ function Attendance() {
     setCameraReady(false);
   }, []);
 
-  const refreshSessions = useCallback(async () => {
+  const checkSystemHealth = useCallback(async () => {
+    setSystemHealth((prev) => ({ ...prev, loading: true }));
+    try {
+      const res = await getSystemHealth();
+      if (res?.database === "ok") {
+        setSystemHealth({
+          loading: false,
+          connected: true,
+          message: "Database & Backend Connected",
+        });
+      } else {
+        setSystemHealth({
+          loading: false,
+          connected: false,
+          message: res?.message || "Database connection degraded",
+        });
+      }
+    } catch (err) {
+      setSystemHealth({
+        loading: false,
+        connected: false,
+        message: getErrorMessage(err, "Backend connection failed"),
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadHealth() {
+      try {
+        const res = await getSystemHealth();
+        if (isCancelled) return;
+        if (res?.database === "ok") {
+          setSystemHealth({
+            loading: false,
+            connected: true,
+            message: "Database & Backend Connected",
+          });
+        } else {
+          setSystemHealth({
+            loading: false,
+            connected: false,
+            message: res?.message || "Database connection degraded",
+          });
+        }
+      } catch (err) {
+        if (isCancelled) return;
+        setSystemHealth({
+          loading: false,
+          connected: false,
+          message: getErrorMessage(err, "Backend connection failed"),
+        });
+      }
+    }
+
+    void loadHealth();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  const loadAttendanceRecords = useCallback(async (session) => {
+    const requestId = ++recordsRequestRef.current;
+
+    if (!session?.session_id) {
+      selectedSessionRef.current = null;
+      setSelectedSession(null);
+      setAttendanceRecords([]);
+      setRecordsError("");
+      setRecordsLoading(false);
+      return;
+    }
+
+    selectedSessionRef.current = session;
+    setSelectedSession(session);
+    setRecordsLoading(true);
+    setRecordsError("");
+
+    try {
+      const [recordsResult, overviewResult, studentsResult] = await Promise.all([
+        getFacultyAttendanceRecords(session.session_id),
+        getFacultyAttendanceOverview({ session_id: session.session_id }),
+        session.offering_id
+          ? getFacultyStudents({ offering_id: session.offering_id })
+          : Promise.resolve(null),
+      ]);
+
+      if (requestId !== recordsRequestRef.current) return;
+
+      if (!recordsResult?.success) {
+        throw new Error(
+          recordsResult?.message || "Unable to load attendance records."
+        );
+      }
+
+      setAttendanceRecords(getList(recordsResult));
+
+      if (overviewResult?.success && overviewResult?.data) {
+        setOverviewData(overviewResult.data);
+      }
+
+      if (studentsResult?.success && Array.isArray(studentsResult.data)) {
+        setStudents((prev) => {
+          const incoming = studentsResult.data;
+          const map = new Map(prev.map((s) => [String(s.student_id), s]));
+          for (const s of incoming) {
+            map.set(String(s.student_id), s);
+          }
+          return Array.from(map.values());
+        });
+      }
+    } catch (requestError) {
+      if (requestId !== recordsRequestRef.current) return;
+
+      setAttendanceRecords([]);
+      setRecordsError(
+        getErrorMessage(requestError, "Unable to load attendance records.")
+      );
+    } finally {
+      if (requestId === recordsRequestRef.current) {
+        setRecordsLoading(false);
+      }
+    }
+  }, []);
+
+  const refreshSessions = useCallback(async (preserveSessionId = null) => {
     setLoading(true);
     setError("");
 
     try {
-      const [sessionsResult, activeResult] = await Promise.all([
+      const targetId = preserveSessionId || selectedSessionRef.current?.session_id;
+      const [sessionsResult, activeResult, overviewResult] = await Promise.all([
         getFacultyAttendanceSessions(),
         getActiveFacultyAttendanceSession(),
+        getFacultyAttendanceOverview(targetId ? { session_id: targetId } : {}),
       ]);
 
       if (!sessionsResult?.success) {
@@ -280,29 +443,26 @@ function Attendance() {
       setSessions(sessionList);
       setActiveSession(active);
 
-      let targetSession = null;
-      setSelectedSession((current) => {
-        targetSession = current
-          ? sessionList.find((item) => isSameId(item.session_id, current.session_id)) || current
-          : active || sessionList[0] || null;
-        return targetSession;
-      });
+      if (overviewResult?.success && overviewResult?.data) {
+        setOverviewData(overviewResult.data);
+      }
 
-      const sessionToLoad = targetSession || active;
-      if (sessionToLoad?.session_id) {
-        setRecordsLoading(true);
-        try {
-          const recordsResult = await getFacultyAttendanceRecords(
-            sessionToLoad.session_id
-          );
-          if (recordsResult?.success) {
-            setAttendanceRecords(getList(recordsResult));
-          }
-        } catch {
-          // session records load failure handled gracefully
-        } finally {
-          setRecordsLoading(false);
-        }
+      // Determine target session synchronously
+      let target = null;
+      if (targetId) {
+        target = sessionList.find((item) => isSameId(item.session_id, targetId)) || null;
+      }
+      if (!target) {
+        target = active || sessionList[0] || null;
+      }
+
+      selectedSessionRef.current = target;
+      setSelectedSession(target);
+
+      if (target?.session_id) {
+        await loadAttendanceRecords(target);
+      } else {
+        setAttendanceRecords([]);
       }
     } catch (requestError) {
       setError(
@@ -311,7 +471,7 @@ function Attendance() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadAttendanceRecords]);
 
   useEffect(
     () => () => {
@@ -397,7 +557,7 @@ function Attendance() {
     };
   }, [showFaceAttendance]);
 
-  // Automated real-time face recognition scanner loop
+  // Automated real-time face recognition and liveness verification scanner loop
   useEffect(() => {
     if (!showFaceAttendance || !cameraReady || !autoScanActive) {
       return undefined;
@@ -410,6 +570,26 @@ function Attendance() {
 
     let isCancelled = false;
     let timerId = null;
+
+    const captureCanvasBlob = async (video, canvas) => {
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Unable to get 2d context");
+      // Mirror horizontally to match what the user sees in the mirrored webcam preview
+      ctx.save();
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.restore();
+      return new Promise((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => (blob ? resolve(blob) : reject(new Error("Unable to capture frame"))),
+          "image/jpeg",
+          0.90
+        );
+      });
+    };
 
     const performScanCycle = async () => {
       if (
@@ -425,7 +605,7 @@ function Attendance() {
       const canvas = canvasRef.current;
 
       if (!video.videoWidth || !video.videoHeight || video.readyState < 2) {
-        timerId = setTimeout(performScanCycle, 500);
+        timerId = setTimeout(performScanCycle, 400);
         return;
       }
 
@@ -433,117 +613,247 @@ function Attendance() {
       setRecognizingFace(true);
 
       try {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const context = canvas.getContext("2d");
-        if (context) {
-          context.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const imageBlob = await new Promise((resolve, reject) => {
-            canvas.toBlob(
-              (blob) => (blob ? resolve(blob) : reject(new Error("Unable to capture frame"))),
-              "image/jpeg",
-              0.88
-            );
-          });
+        // Step 1: Ensure we have an active randomized liveness challenge
+        let challenge = currentChallengeRef.current;
+        if (!challenge) {
+          setLivenessState("PERFORMING_CHECK");
+          setScanStatusMessage("Requesting randomized liveness challenge…");
 
-          if (!isCancelled) {
-            const result = await recognizeFacultyAttendance(session.session_id, imageBlob);
+          const challengeRes = await requestLivenessChallenge(session.session_id);
+          if (isCancelled) return;
 
-            if (!isCancelled && result?.success) {
-              const recognizedList = Array.isArray(result.recognized)
-                ? result.recognized
-                : result.data
-                ? [result.data]
-                : [];
+          challenge = challengeRes;
+          currentChallengeRef.current = challenge;
+          setCurrentChallenge(challenge);
+          setLivenessState("FOLLOW_INSTRUCTION");
+          setScanStatusMessage(challenge.instruction || "Follow the randomized instruction");
 
-              if (recognizedList.length > 0) {
-                // Filter only authorized eligible students who have a valid database attendance record
-                const eligibleRecords = recognizedList.filter(
-                  (rec) => rec.is_eligible !== false && rec.status !== "INELIGIBLE" && rec.attendance_id
-                );
+          // Brief pause for user to view guidance instruction before baseline capture
+          await new Promise((resolve) => setTimeout(resolve, 900));
+          if (isCancelled) return;
+        }
 
-                if (eligibleRecords.length > 0) {
-                  setAttendanceRecords((current) => {
-                    let updated = [...current];
-                    for (const rec of eligibleRecords) {
-                      if (rec.student_id) {
-                        const idx = updated.findIndex((item) => isSameId(item.student_id, rec.student_id));
-                        if (idx >= 0) {
-                          updated[idx] = { ...updated[idx], ...rec };
-                        } else {
-                          updated.push(rec);
-                        }
-                      }
-                    }
-                    return updated;
-                  });
-                }
+        // Step 2: Capture multi-frame evidence across the challenge movement
+        // Frame 0: Baseline capture (neutral face looking at camera)
+        const frame0Blob = await captureCanvasBlob(video, canvas);
+        const t0 = 0;
 
-                const firstStudent = recognizedList[0];
-                setLastRecognizedStudent(firstStudent);
+        // Interval for action movement (1200ms allows natural human response and peak amplitude)
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        if (isCancelled) return;
 
-                const isIneligible =
-                  firstStudent.is_eligible === false ||
-                  firstStudent.status === "INELIGIBLE" ||
-                  !firstStudent.attendance_id;
+        // Frame 1: Action movement frame
+        const frame1Blob = await captureCanvasBlob(video, canvas);
+        const t1 = 1200;
 
-                if (isIneligible) {
-                  setScanStatusMessage(
-                    `⚠️ Ineligible: ${firstStudent.name || firstStudent.student_name} (${firstStudent.message || "Section/Class Mismatch"})`
-                  );
-                } else if (firstStudent.is_new) {
-                  setScanStatusMessage(
-                    `✅ Marked: ${firstStudent.name || firstStudent.student_name} (${firstStudent.enrollment_no})`
-                  );
+        // Interval for return / completion (800ms)
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        if (isCancelled) return;
+
+        // Frame 2: Completion frame
+        const frame2Blob = await captureCanvasBlob(video, canvas);
+        const t2 = 2000;
+
+        setLivenessState("VERIFYING_IDENTITY");
+        setScanStatusMessage("Verifying facial liveness & identity…");
+
+        const formData = new FormData();
+        formData.append("session_id", String(session.session_id));
+        formData.append("challenge_id", challenge.challenge_id);
+        formData.append("frames", frame0Blob, "frame_0.jpg");
+        formData.append("frames", frame1Blob, "frame_1.jpg");
+        formData.append("frames", frame2Blob, "frame_2.jpg");
+        formData.append("timestamps", JSON.stringify([t0, t1, t2]));
+        formData.append("mirrored", "true");
+
+        const verifyResult = await verifyLiveness(formData);
+        if (isCancelled) return;
+
+        if (verifyResult?.status === "verified" && verifyResult.verification_token) {
+          // Liveness and identity match passed on server!
+          // Now mark attendance atomically using the issued single-use token:
+          const attResult = await recordVerifiedAttendance(
+            session.session_id,
+            verifyResult.verification_token,
+            verifyResult.student_id
+          );
+
+          if (isCancelled) return;
+
+          if (attResult?.success && attResult.data) {
+            const confirmedRecord = attResult.data;
+            setAttendanceRecords((current) => {
+              const updated = [...current];
+              if (confirmedRecord.student_id) {
+                const idx = updated.findIndex((item) => isSameId(item.student_id, confirmedRecord.student_id));
+                if (idx >= 0) {
+                  updated[idx] = { ...updated[idx], ...confirmedRecord };
                 } else {
-                  setScanStatusMessage(
-                    `ℹ️ ${firstStudent.name || firstStudent.student_name} — Already Present`
-                  );
+                  updated.push(confirmedRecord);
                 }
-
-                setRecentDetections((prev) => {
-                  const items = [...recognizedList, ...prev];
-                  const seen = new Set();
-                  const deduplicated = [];
-                  for (const item of items) {
-                    if (item.student_id && !seen.has(item.student_id)) {
-                      seen.add(item.student_id);
-                      deduplicated.push(item);
-                    }
-                  }
-                  return deduplicated.slice(0, 6);
-                });
-              } else if (result.status === "no_face") {
-                setScanStatusMessage("Scanning for students…");
-              } else if (result.status === "not_recognized") {
-                setScanStatusMessage("Face detected — verifying identity…");
               }
+              return updated;
+            });
+
+            setLastRecognizedStudent(confirmedRecord);
+            setLivenessState("VERIFIED_SUCCESS");
+
+            if (confirmedRecord.is_new) {
+              setScanStatusMessage(
+                `✅ Marked: ${confirmedRecord.name || confirmedRecord.student_name} (${confirmedRecord.enrollment_no})`
+              );
+            } else {
+              setScanStatusMessage(
+                `ℹ️ ${confirmedRecord.name || confirmedRecord.student_name} — Already Present`
+              );
             }
+
+            setRecentDetections((prev) => {
+              const items = [confirmedRecord, ...prev];
+              const seen = new Set();
+              const deduplicated = [];
+              for (const item of items) {
+                if (item.student_id && !seen.has(item.student_id)) {
+                  seen.add(item.student_id);
+                  deduplicated.push(item);
+                }
+              }
+              return deduplicated.slice(0, 6);
+            });
+
+            // Reset challenge for the next student
+            currentChallengeRef.current = null;
+            setCurrentChallenge(null);
+
+            // Wait 2.8s before scanning next student
+            timerId = setTimeout(() => {
+              setLivenessState("POSITION_FACE");
+              setScanStatusMessage("Position your face in the frame");
+              performScanCycle();
+            }, 2800);
+            return;
           }
+        } else if (verifyResult?.status === "not_recognized") {
+          setLivenessState("POSITION_FACE");
+          setScanStatusMessage("Face detected — verifying registered profile…");
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          timerId = setTimeout(performScanCycle, 1500);
+          return;
+        } else if (verifyResult?.status === "no_face") {
+          setLivenessState("POSITION_FACE");
+          setScanStatusMessage("Position your face in the frame");
+          timerId = setTimeout(performScanCycle, 900);
+          return;
+        } else if (verifyResult?.status === "multiple_faces") {
+          setLivenessState("POSITION_FACE");
+          setScanStatusMessage("Multiple faces detected — exactly one person at a time");
+          timerId = setTimeout(performScanCycle, 1500);
+          return;
         }
       } catch (scanError) {
-        if (scanError?.response?.status === 409 || scanError?.response?.status === 400) {
-          const msg = scanError?.response?.data?.message || "Attendance session window has ended or is not eligible.";
+        if (isCancelled) return;
+
+        const statusNum = scanError?.response?.status;
+        const resData = scanError?.response?.data;
+        const msg = resData?.message || scanError?.message || "Verification failed";
+
+        if (statusNum === 503 || resData?.status === "liveness_model_unavailable") {
+          setLivenessState("MODEL_UNAVAILABLE");
+          setScanStatusMessage("Liveness verification model is unavailable. Attendance fail-safe active.");
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          return;
+        }
+
+        if (resData?.status === "quality_warning") {
+          setLivenessState("QUALITY_WARNING");
+          setScanStatusMessage(`ℹ️ ${msg}`);
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          timerId = setTimeout(() => {
+            setLivenessState("POSITION_FACE");
+            setScanStatusMessage("Position your face in the frame");
+            performScanCycle();
+          }, 1800);
+          return;
+        }
+
+        if (resData?.status === "spoof_suspected") {
+          setLivenessState("SPOOF_SUSPECTED");
+          setScanStatusMessage(`⚠️ Photo/screen spoof suspected: ${msg}`);
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          timerId = setTimeout(() => {
+            setLivenessState("POSITION_FACE");
+            setScanStatusMessage("Position your face in the frame");
+            performScanCycle();
+          }, 3000);
+          return;
+        }
+
+        if (resData?.status === "challenge_failed" || resData?.status === "challenge_expired") {
+          setLivenessState("CHALLENGE_EXPIRED");
+          setScanStatusMessage(resData?.status === "challenge_expired" ? "Challenge expired; generating new prompt…" : `Liveness instruction incomplete: ${msg}`);
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          timerId = setTimeout(() => {
+            setLivenessState("POSITION_FACE");
+            setScanStatusMessage("Position your face in the frame");
+            performScanCycle();
+          }, 2000);
+          return;
+        }
+
+        if (resData?.status === "ineligible") {
+          setLivenessState("POSITION_FACE");
+          setScanStatusMessage(`⚠️ ${msg}`);
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          timerId = setTimeout(() => {
+            setLivenessState("POSITION_FACE");
+            setScanStatusMessage("Position your face in the frame");
+            performScanCycle();
+          }, 2500);
+          return;
+        }
+
+        if (statusNum === 409) {
           setScanStatusMessage(msg);
           setFaceAttendanceError(msg);
           stopCamera();
           setShowFaceAttendance(false);
           void refreshSessions();
-        } else if (scanError?.response?.status === 401 || scanError?.response?.status === 403) {
-          setScanStatusMessage("Session expired — please refresh or log in again.");
-        } else {
-          console.debug("Live auto-scan error:", scanError?.message);
+          return;
         }
+
+        if (statusNum === 401 || statusNum === 403) {
+          const authMsg = resData?.message || "Session expired or access unauthorized.";
+          setScanStatusMessage(authMsg);
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          return;
+        }
+
+        if (statusNum === 400) {
+          setScanStatusMessage(msg);
+          currentChallengeRef.current = null;
+          setCurrentChallenge(null);
+          timerId = setTimeout(performScanCycle, 2000);
+          return;
+        }
+
+        console.debug("Live liveness scan error:", msg);
+        timerId = setTimeout(performScanCycle, 1200);
       } finally {
         recognitionRequestRef.current = false;
         if (!isCancelled) {
           setRecognizingFace(false);
-          timerId = setTimeout(performScanCycle, 850);
         }
       }
     };
 
-    timerId = setTimeout(performScanCycle, 400);
+    timerId = setTimeout(performScanCycle, 450);
 
     return () => {
       isCancelled = true;
@@ -1370,12 +1680,63 @@ function Attendance() {
                         <div className="attendance-scanner-corner bottom-right" />
                         {autoScanActive && <div className="attendance-scanner-laser" />}
                       </div>
+
+                      {currentChallenge && livenessState === "FOLLOW_INSTRUCTION" && (
+                        <div className="attendance-liveness-instruction-badge">
+                          <FontAwesomeIcon icon={faShieldHalved} />
+                          <span>{currentChallenge.instruction}</span>
+                        </div>
+                      )}
+
                       <span className="attendance-live-badge">
                         <span /> LIVE SCANNER
                       </span>
-                      <div className="attendance-scanner-status-toast">
-                        <FontAwesomeIcon icon={recognizingFace ? faSpinner : faCircleInfo} spin={recognizingFace} />
+                      <div
+                        className={`attendance-scanner-status-toast ${
+                          livenessState === "SPOOF_SUSPECTED"
+                            ? "spoof"
+                            : livenessState === "CHALLENGE_EXPIRED" || livenessState === "QUALITY_WARNING"
+                            ? "warning"
+                            : livenessState === "MODEL_UNAVAILABLE"
+                            ? "danger"
+                            : livenessState === "VERIFIED_SUCCESS"
+                            ? "success"
+                            : ""
+                        }`}
+                      >
+                        <FontAwesomeIcon
+                          icon={
+                            recognizingFace ||
+                            livenessState === "VERIFYING_IDENTITY" ||
+                            livenessState === "PERFORMING_CHECK"
+                              ? faSpinner
+                              : livenessState === "SPOOF_SUSPECTED" ||
+                                livenessState === "MODEL_UNAVAILABLE" ||
+                                livenessState === "QUALITY_WARNING"
+                              ? faTriangleExclamation
+                              : livenessState === "VERIFIED_SUCCESS"
+                              ? faCircleCheck
+                              : faCircleInfo
+                          }
+                          spin={
+                            recognizingFace ||
+                            livenessState === "VERIFYING_IDENTITY" ||
+                            livenessState === "PERFORMING_CHECK"
+                          }
+                        />
                         <span>{scanStatusMessage}</span>
+                        {(livenessState === "SPOOF_SUSPECTED" ||
+                          livenessState === "CHALLENGE_EXPIRED" ||
+                          livenessState === "QUALITY_WARNING" ||
+                          livenessState === "MODEL_UNAVAILABLE") && (
+                          <button
+                            type="button"
+                            className="attendance-scanner-retry-btn"
+                            onClick={handleRetryChallenge}
+                          >
+                            Retry
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (
@@ -2219,10 +2580,10 @@ function Attendance() {
       );
       const displaySlots = availableSlots.length > 0 ? availableSlots : allOfferingSlots;
       const activeSlot = displaySlots.find(
-        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+        (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "ACTIVE"
       );
       const upcomingSlot = displaySlots.find(
-        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+        (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "UPCOMING"
       );
       const currentSlot =
         displaySlots.find(
@@ -2231,9 +2592,14 @@ function Attendance() {
         activeSlot ||
         upcomingSlot ||
         displaySlots[0];
-      const slotStatus = currentSlot ? getClassScheduleStatus(currentSlot.start_time, currentSlot.end_time) : null;
-      const isSlotEnded = slotStatus?.status === "ENDED";
-      const isSlotUpcoming = slotStatus?.status === "UPCOMING";
+      const slotStatus = currentSlot
+        ? getClassScheduleStatus(currentSlot.start_time, currentSlot.end_time, currentSlot.day_of_week)
+        : null;
+      const isSlotToday = currentSlot
+        ? String(currentSlot.day_of_week || "").trim().toLowerCase() === today.toLowerCase()
+        : false;
+      const isSlotEnded = isSlotToday && slotStatus?.status === "ENDED";
+      const isSlotUpcoming = isSlotToday && slotStatus?.status === "UPCOMING";
 
       return (
         <div
@@ -2314,7 +2680,7 @@ function Attendance() {
                     disabled={startingSession}
                   >
                     {displaySlots.map((slot) => {
-                      const st = getClassScheduleStatus(slot.start_time, slot.end_time);
+                      const st = getClassScheduleStatus(slot.start_time, slot.end_time, slot.day_of_week);
                       return (
                         <option
                           key={slot.timetable_entry_id}
@@ -2357,10 +2723,22 @@ function Attendance() {
                     </span>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                    <div><span style={{ color: "#64748b" }}>Date:</span> Today ({today})</div>
+                    <div><span style={{ color: "#64748b" }}>Date:</span> {currentSlot.day_of_week} {isSlotToday ? `(${today})` : "(Scheduled)"}</div>
                     <div><span style={{ color: "#64748b" }}>Section:</span> {selectedOffering?.section || "N/A"}</div>
                     <div><span style={{ color: "#64748b" }}>Time:</span> {formatTime(currentSlot.start_time)} – {formatTime(currentSlot.end_time)}</div>
                     <div><span style={{ color: "#64748b" }}>Room:</span> {currentSlot.room || selectedOffering?.room || "Not assigned"}</div>
+                  </div>
+                </div>
+              )}
+
+              {!isSlotToday && (
+                <div className="attendance-session-pending" role="alert" style={{ background: "#eff6ff", borderColor: "#bfdbfe", color: "#1e40af" }}>
+                  <div className="attendance-pending-dot">
+                    <FontAwesomeIcon icon={faClock} style={{ color: "#2563eb" }} />
+                  </div>
+                  <div>
+                    <strong>Scheduled for {currentSlot.day_of_week}</strong>
+                    <p>Cannot start attendance session today: this slot is scheduled for {currentSlot.day_of_week}. Attendance sessions can only be started during the scheduled class hours.</p>
                   </div>
                 </div>
               )}
@@ -2421,7 +2799,8 @@ function Attendance() {
                   !selectedOfferingId ||
                   courses.length === 0 ||
                   isSlotEnded ||
-                  isSlotUpcoming
+                  isSlotUpcoming ||
+                  !isSlotToday
                 }
               >
                 {startingSession ? (

@@ -89,6 +89,20 @@ export async function deleteAdminStudent(studentId) {
   return response.data;
 }
 
+export async function deleteAdminStudentFaceRegistration(studentId, options = {}) {
+  const { reason, permanent = false, face_id } = options;
+  const payload = {};
+  if (reason) payload.reason = reason;
+  if (permanent) payload.permanent = true;
+  if (face_id) payload.face_id = face_id;
+
+  const response = await api.delete(
+    `/admin/students/${studentId}/face`,
+    { data: payload }
+  );
+  return response.data;
+}
+
 // ==================== FACULTY ====================
 
 export async function getAdminFaculty() {

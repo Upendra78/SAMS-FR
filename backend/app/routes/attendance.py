@@ -13,6 +13,7 @@ from app.models import (
     FacultyAdjustment,
     Student,
     TimetableEntry,
+    User,
 )
 from app.services.activity_service import record_activity
 from app.utils.auth import faculty_required, faculty_or_admin_required
@@ -39,6 +40,54 @@ def get_current_faculty():
     return Faculty.query.filter_by(
         user_id=user_id
     ).first()
+
+
+def get_offering_active_enrollments(offering):
+    """
+    Returns active enrollments for active students for this course offering.
+    Includes active students enrolled directly or under duplicate/legacy offering
+    records matching the same course_id, semester, and section.
+    """
+    if not offering:
+        return []
+
+    base_q = (
+        Enrollment.query
+        .join(Student, Enrollment.student_id == Student.student_id)
+        .join(User, Student.user_id == User.user_id)
+        .filter(
+            Enrollment.status == "ACTIVE",
+            User.is_active.is_(True),
+            User.role == "STUDENT",
+        )
+    )
+
+    direct = base_q.filter(
+        Enrollment.offering_id == offering.offering_id
+    ).all()
+    if direct:
+        return direct
+
+    # Check matching sibling offerings for same course, semester, section
+    matching_offering_ids = (
+        db.session.query(CourseOffering.offering_id)
+        .filter(
+            CourseOffering.course_id == offering.course_id,
+            CourseOffering.semester == offering.semester,
+            CourseOffering.section == offering.section,
+        )
+        .subquery()
+    )
+
+    return (
+        base_q
+        .filter(
+            Enrollment.offering_id.in_(db.select(matching_offering_ids.c.offering_id)),
+            Student.semester == offering.semester,
+            Student.section == offering.section,
+        )
+        .all()
+    )
 
 
 def serialize_attendance_record(record):
@@ -158,6 +207,15 @@ def start_attendance_session():
             "success": False,
             "message": "You are not authorized for this course offering",
         }), 403
+
+    # Verify the offering has eligible active enrollments.
+    active_enrollments = get_offering_active_enrollments(offering)
+
+    if not active_enrollments:
+        return jsonify({
+            "success": False,
+            "message": "Cannot start attendance session: No active students are enrolled in this course offering",
+        }), 400
 
     now = schedule.get_current_institution_time()
     today_date = now.date()
@@ -448,14 +506,8 @@ def get_attendance_overview():
 
     # 4. Compute statistics for target session
     if target_session:
-        enrolled_count = (
-            Enrollment.query
-            .filter_by(
-                offering_id=target_session.offering_id,
-                status="ACTIVE",
-            )
-            .count()
-        )
+        active_enrollments = get_offering_active_enrollments(target_session.offering)
+        enrolled_count = len(active_enrollments)
 
         present_count = (
             AttendanceRecord.query
@@ -612,10 +664,7 @@ def close_attendance_session(session_id):
         }), 409
 
     # Find all actively enrolled students for this course offering.
-    active_enrollments = Enrollment.query.filter_by(
-        offering_id=session.offering_id,
-        status="ACTIVE",
-    ).all()
+    active_enrollments = get_offering_active_enrollments(session.offering)
 
     # Find students whose attendance has already been recorded.
     existing_records = AttendanceRecord.query.filter_by(

@@ -22,6 +22,7 @@ const DAYS_OF_WEEK = [
   "Thursday",
   "Friday",
   "Saturday",
+  "Sunday",
 ];
 
 function formatTimeDisplay(timeStr) {

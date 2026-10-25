@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   BookOpen,
@@ -19,10 +19,12 @@ import {
   ArrowRight,
   AlertCircle,
   X,
+  RotateCw,
 } from "lucide-react";
 
 import "./FacultyDashboard.css";
 import useAuth from "../../hooks/useAuth";
+import { formatAcademicYear } from "../../utils/academicYearUtils";
 import { getFacultyDashboard } from "../../services/portalService";
 import { getFacultyAttendanceAnalytics } from "../../services/reportService";
 import {
@@ -32,6 +34,7 @@ import {
   startFacultyAttendanceSession,
   getFacultyTimetable,
 } from "../../services/facultyService";
+import { invalidateApiCache } from "../../services/api";
 
 // Card background illustrations
 import assignedCoursesImg from "../../../image/Assigned Courses.png";
@@ -81,12 +84,39 @@ function formatTime(value) {
   }).format(date);
 }
 
-function getClassScheduleStatus(startTime, endTime) {
-  if (!startTime || !endTime) return { status: "SCHEDULED", label: "Scheduled" };
+const ALL_WEEKDAYS = [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+];
+
+function getClassScheduleStatus(startTime, endTime, dayOfWeek = null) {
+  if (!startTime || !endTime) return { status: "SCHEDULED", label: "Scheduled", isToday: false };
+  const todayWeekday = getTodayWeekday();
+  const isToday = !dayOfWeek || String(dayOfWeek).trim().toLowerCase() === todayWeekday.toLowerCase();
+
+  const formattedStart = formatTime(startTime);
+  const formattedEnd = formatTime(endTime);
+
+  if (!isToday) {
+    const formattedDay = dayOfWeek ? String(dayOfWeek).trim() : "Scheduled Day";
+    return {
+      status: "SCHEDULED",
+      label: `Scheduled for ${formattedDay}`,
+      formattedStart,
+      formattedEnd,
+      isToday: false,
+    };
+  }
+
   const now = new Date();
   const sMatch = String(startTime).match(/^(\d{2}):(\d{2})/);
   const eMatch = String(endTime).match(/^(\d{2}):(\d{2})/);
-  if (!sMatch || !eMatch) return { status: "SCHEDULED", label: "Scheduled" };
+  if (!sMatch || !eMatch) return { status: "SCHEDULED", label: "Scheduled", isToday: true };
 
   const start = new Date(now);
   start.setHours(Number(sMatch[1]), Number(sMatch[2]), 0, 0);
@@ -100,23 +130,26 @@ function getClassScheduleStatus(startTime, endTime) {
   if (now < start) {
     return {
       status: "UPCOMING",
-      label: `Upcoming • Starts at ${formatTime(startTime)}`,
-      formattedStart: formatTime(startTime),
-      formattedEnd: formatTime(endTime),
+      label: `Upcoming • Starts at ${formattedStart}`,
+      formattedStart,
+      formattedEnd,
+      isToday: true,
     };
   } else if (now >= end) {
     return {
       status: "ENDED",
       label: "Ended",
-      formattedStart: formatTime(startTime),
-      formattedEnd: formatTime(endTime),
+      formattedStart,
+      formattedEnd,
+      isToday: true,
     };
   } else {
     return {
       status: "ACTIVE",
       label: "Active",
-      formattedStart: formatTime(startTime),
-      formattedEnd: formatTime(endTime),
+      formattedStart,
+      formattedEnd,
+      isToday: true,
     };
   }
 }
@@ -167,6 +200,10 @@ function FacultyDashboard() {
   const [recentSessions, setRecentSessions] = useState([]);
   const [analytics, setAnalytics] = useState(null);
 
+  // Day filter for schedule view ("TODAY", "ALL", or individual weekday)
+  const [selectedScheduleDay, setSelectedScheduleDay] = useState("TODAY");
+  const [isReloadingTimetable, setIsReloadingTimetable] = useState(false);
+
   // Live timer for active session
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
@@ -176,6 +213,25 @@ function FacultyDashboard() {
   const [selectedTimetableEntryId, setSelectedTimetableEntryId] = useState("");
   const [startingSession, setStartingSession] = useState(false);
   const [startError, setStartError] = useState("");
+
+  // Lock body scroll and close on Escape key when Start Attendance modal is open
+  useEffect(() => {
+    if (!showStartDialog) return;
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    function handleKeyDown(e) {
+      if (e.key === "Escape" && !startingSession) {
+        setShowStartDialog(false);
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showStartDialog, startingSession]);
 
 
   // Live ticker for active session elapsed time
@@ -191,7 +247,110 @@ function FacultyDashboard() {
     };
   }, [activeSession]);
 
-  // Fetch all dashboard data from backend APIs
+  // Reload handlers with cache invalidation and retry support
+  const reloadCourses = useCallback(async () => {
+    setCoursesStatus("loading");
+    try {
+      invalidateApiCache("courses");
+      const result = await getFacultyCourses();
+      if (result?.success && Array.isArray(result.data)) {
+        setCourses(result.data);
+        setCoursesStatus("loaded");
+        if (result.data.length > 0) {
+          const preferred =
+            result.data.find((c) => Number(c.student_count || c.enrolled_students || 0) > 0) ||
+            result.data[0];
+          setSelectedOfferingId((prev) => (prev ? prev : String(preferred.offering_id)));
+        }
+      } else {
+        setCourses([]);
+        setCoursesStatus("error");
+      }
+    } catch {
+      setCourses([]);
+      setCoursesStatus("error");
+    }
+  }, []);
+
+  const reloadTimetable = useCallback(async () => {
+    setIsReloadingTimetable(true);
+    setTimetableStatus((prev) => (prev === "loaded" ? prev : "loading"));
+    try {
+      invalidateApiCache("timetable");
+      const result = await getFacultyTimetable();
+      if (result?.success) {
+        const items = Array.isArray(result.data)
+          ? result.data
+          : Array.isArray(result.data?.timetable)
+          ? result.data.timetable
+          : [];
+        setTimetable(items);
+        setTimetableStatus("loaded");
+      } else {
+        setTimetable([]);
+        setTimetableStatus("error");
+      }
+    } catch {
+      setTimetableStatus((prev) => (prev === "loaded" ? prev : "error"));
+    } finally {
+      setIsReloadingTimetable(false);
+    }
+  }, []);
+
+  const reloadSessions = useCallback(async () => {
+    setSessionStatus("loading");
+    try {
+      invalidateApiCache("session");
+      const [activeRes, sessionsRes] = await Promise.allSettled([
+        getActiveFacultyAttendanceSession(),
+        getFacultyAttendanceSessions(),
+      ]);
+
+      if (activeRes.status === "fulfilled" && activeRes.value?.success && activeRes.value?.data) {
+        const s = activeRes.value.data;
+        if (s?.session_id && String(s?.status).toUpperCase() === "ACTIVE" && s?.is_eligible_for_attendance !== false) {
+          setActiveSession(s);
+          setElapsedSeconds(0);
+        } else {
+          setActiveSession(null);
+        }
+        setSessionStatus("loaded");
+      } else {
+        setActiveSession(null);
+        setSessionStatus(activeRes.status === "fulfilled" ? "loaded" : "error");
+      }
+
+      if (sessionsRes.status === "fulfilled" && sessionsRes.value?.success && Array.isArray(sessionsRes.value.data)) {
+        setRecentSessions(sessionsRes.value.data);
+      } else {
+        setRecentSessions([]);
+      }
+    } catch {
+      setActiveSession(null);
+      setRecentSessions([]);
+      setSessionStatus("error");
+    }
+  }, []);
+
+  const reloadAnalytics = useCallback(async () => {
+    setAnalyticsStatus("loading");
+    try {
+      invalidateApiCache("analytics");
+      const result = await getFacultyAttendanceAnalytics();
+      if (result?.success && result?.data) {
+        setAnalytics(result.data);
+        setAnalyticsStatus("loaded");
+      } else {
+        setAnalytics(null);
+        setAnalyticsStatus("error");
+      }
+    } catch {
+      setAnalytics(null);
+      setAnalyticsStatus("error");
+    }
+  }, []);
+
+  // Fetch all dashboard data from backend APIs on mount
   useEffect(() => {
     let cancelled = false;
 
@@ -205,101 +364,12 @@ function FacultyDashboard() {
         if (!cancelled) setBackendStatus("error");
       }
 
-      // 2. Assigned Courses
-      try {
-        const result = await getFacultyCourses();
-        if (cancelled) return;
-        if (result?.success && Array.isArray(result.data)) {
-          setCourses(result.data);
-          setCoursesStatus("loaded");
-          if (result.data.length > 0) {
-            setSelectedOfferingId(String(result.data[0].offering_id));
-          }
-        } else {
-          setCourses([]);
-          setCoursesStatus("error");
-        }
-      } catch {
-        if (!cancelled) {
-          setCourses([]);
-          setCoursesStatus("error");
-        }
-      }
-
-      // 3. Timetable / Schedule
-      try {
-        const result = await getFacultyTimetable();
-        if (cancelled) return;
-        if (result?.success) {
-          const items = Array.isArray(result.data)
-            ? result.data
-            : Array.isArray(result.data?.timetable)
-            ? result.data.timetable
-            : [];
-          setTimetable(items);
-          setTimetableStatus("loaded");
-        } else {
-          setTimetable([]);
-          setTimetableStatus("error");
-        }
-      } catch {
-        if (!cancelled) {
-          setTimetable([]);
-          setTimetableStatus("error");
-        }
-      }
-
-      // 4. Active Session & Recent Sessions
-      try {
-        const [activeRes, sessionsRes] = await Promise.allSettled([
-          getActiveFacultyAttendanceSession(),
-          getFacultyAttendanceSessions(),
-        ]);
-        if (cancelled) return;
-
-        if (activeRes.status === "fulfilled" && activeRes.value?.success && activeRes.value?.data) {
-          const s = activeRes.value.data;
-          if (s?.session_id && String(s?.status).toUpperCase() === "ACTIVE" && s?.is_eligible_for_attendance !== false) {
-            setActiveSession(s);
-            setElapsedSeconds(0);
-          } else {
-            setActiveSession(null);
-          }
-          setSessionStatus("loaded");
-        } else {
-          setActiveSession(null);
-          setSessionStatus(activeRes.status === "fulfilled" ? "loaded" : "error");
-        }
-
-        if (sessionsRes.status === "fulfilled" && sessionsRes.value?.success && Array.isArray(sessionsRes.value.data)) {
-          setRecentSessions(sessionsRes.value.data);
-        } else {
-          setRecentSessions([]);
-        }
-      } catch {
-        if (!cancelled) {
-          setActiveSession(null);
-          setRecentSessions([]);
-          setSessionStatus("error");
-        }
-      }
-
-      // 5. Attendance Analytics
-      try {
-        const result = await getFacultyAttendanceAnalytics();
-        if (cancelled) return;
-        if (result?.success && result?.data) {
-          setAnalytics(result.data);
-          setAnalyticsStatus("loaded");
-        } else {
-          setAnalytics(null);
-          setAnalyticsStatus("error");
-        }
-      } catch {
-        if (!cancelled) {
-          setAnalytics(null);
-          setAnalyticsStatus("error");
-        }
+      // 2. Fetch all modules in parallel
+      if (!cancelled) {
+        reloadCourses();
+        reloadTimetable();
+        reloadSessions();
+        reloadAnalytics();
       }
     }
 
@@ -308,7 +378,7 @@ function FacultyDashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [reloadCourses, reloadTimetable, reloadSessions, reloadAnalytics]);
 
   // Periodic active session status revalidation (every 25 seconds)
   useEffect(() => {
@@ -338,6 +408,31 @@ function FacultyDashboard() {
     };
   }, []);
 
+  // Listen to cross-tab updates, custom timetable update events, and window focus
+  useEffect(() => {
+    function handleTimetableUpdate() {
+      reloadTimetable();
+    }
+    function handleStorage(e) {
+      if (e.key === "sams_timetable_last_updated") {
+        reloadTimetable();
+      }
+    }
+    function handleFocus() {
+      reloadTimetable();
+    }
+
+    window.addEventListener("sams:timetable-updated", handleTimetableUpdate);
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      window.removeEventListener("sams:timetable-updated", handleTimetableUpdate);
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, [reloadTimetable]);
+
   // Revalidate session eligibility before entering live attendance page
   const handleViewLiveAttendance = async () => {
     try {
@@ -364,15 +459,42 @@ function FacultyDashboard() {
       todayWeekday.toLowerCase()
   );
 
+  // Filter timetable based on selected schedule view (TODAY, ALL, or specific weekday)
+  const displayedClasses = timetable.filter((entry) => {
+    if (selectedScheduleDay === "ALL") return true;
+    const targetDay = selectedScheduleDay === "TODAY" ? todayWeekday : selectedScheduleDay;
+    return (
+      String(entry.day_of_week || "").trim().toLowerCase() ===
+      targetDay.toLowerCase()
+    );
+  });
+
+  // Group other days with scheduled classes for the quick-switch pills in empty state
+  const otherDaysWithClasses = useMemo(() => {
+    const dayCounts = {};
+    timetable.forEach((entry) => {
+      const rawDay = (entry.day_of_week || "").trim();
+      if (rawDay) {
+        const canonicalDay =
+          ALL_WEEKDAYS.find((wd) => wd.toLowerCase() === rawDay.toLowerCase()) || rawDay;
+        dayCounts[canonicalDay] = (dayCounts[canonicalDay] || 0) + 1;
+      }
+    });
+    return Object.entries(dayCounts).map(([dayName, count]) => ({
+      day: dayName,
+      count,
+    }));
+  }, [timetable]);
+
   // Find currently active scheduled class in progress today
   const activeScheduledClass = todaysClasses.find((entry) => {
-    const s = getClassScheduleStatus(entry.start_time, entry.end_time);
+    const s = getClassScheduleStatus(entry.start_time, entry.end_time, entry.day_of_week);
     return s.status === "ACTIVE";
   });
 
   // Find next upcoming class if no session is actively running
   const upcomingClass = todaysClasses.find((entry) => {
-    const s = getClassScheduleStatus(entry.start_time, entry.end_time);
+    const s = getClassScheduleStatus(entry.start_time, entry.end_time, entry.day_of_week);
     return s.status === "UPCOMING";
   });
 
@@ -398,13 +520,17 @@ function FacultyDashboard() {
           String(e.offering_id) === String(targetOfferingId) &&
           String(e.day_of_week || "").trim().toLowerCase() === todayWeekday.toLowerCase()
       );
-      const activeSlot = offeringTodaySlots.find(
-        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+      const allOfferingSlots = timetable.filter(
+        (e) => String(e.offering_id) === String(targetOfferingId)
       );
-      const upcomingSlot = offeringTodaySlots.find(
-        (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+      const candidateSlots = offeringTodaySlots.length > 0 ? offeringTodaySlots : allOfferingSlots;
+      const activeSlot = candidateSlots.find(
+        (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "ACTIVE"
       );
-      const bestSlot = activeSlot || upcomingSlot || offeringTodaySlots[0];
+      const upcomingSlot = candidateSlots.find(
+        (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "UPCOMING"
+      );
+      const bestSlot = activeSlot || upcomingSlot || candidateSlots[0];
       setSelectedTimetableEntryId(bestSlot ? String(bestSlot.timetable_entry_id) : "");
     }
     setShowStartDialog(true);
@@ -420,14 +546,18 @@ function FacultyDashboard() {
         String(e.offering_id) === String(newOfferingId) &&
         String(e.day_of_week || "").trim().toLowerCase() === todayWeekday.toLowerCase()
     );
+    const allOfferingSlots = timetable.filter(
+      (e) => String(e.offering_id) === String(newOfferingId)
+    );
+    const candidateSlots = offeringTodaySlots.length > 0 ? offeringTodaySlots : allOfferingSlots;
 
-    const activeSlot = offeringTodaySlots.find(
-      (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+    const activeSlot = candidateSlots.find(
+      (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "ACTIVE"
     );
-    const upcomingSlot = offeringTodaySlots.find(
-      (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+    const upcomingSlot = candidateSlots.find(
+      (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "UPCOMING"
     );
-    const bestSlot = activeSlot || upcomingSlot || offeringTodaySlots[0];
+    const bestSlot = activeSlot || upcomingSlot || candidateSlots[0];
     setSelectedTimetableEntryId(bestSlot ? String(bestSlot.timetable_entry_id) : "");
   };
 
@@ -487,20 +617,60 @@ function FacultyDashboard() {
   };
 
 
-  // Metrics from real backend data (or API integration pending)
+  // Distinct offerings grouped by course + semester + section, prioritizing active timetable/students
+  const distinctOfferings = useMemo(() => {
+    if (!Array.isArray(courses)) return [];
+    const map = new Map();
+    for (const c of courses) {
+      const key = `${c.course_id || c.course_code}_${c.semester}_${c.section}`;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, c);
+      } else {
+        const hasTimetable = timetable.some(
+          (t) => String(t.offering_id) === String(c.offering_id)
+        );
+        const existingHasTimetable = timetable.some(
+          (t) => String(t.offering_id) === String(existing.offering_id)
+        );
+        const cStudents = Number(c.enrolled_students || c.student_count || 0);
+        const existingStudents = Number(
+          existing.enrolled_students || existing.student_count || 0
+        );
+
+        if (hasTimetable && !existingHasTimetable) {
+          map.set(key, c);
+        } else if (
+          cStudents > existingStudents &&
+          (!existingHasTimetable || hasTimetable)
+        ) {
+          map.set(key, c);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [courses, timetable]);
+
+  // Attendance history flag
+  const hasAttendanceHistory =
+    analyticsStatus === "loaded" &&
+    analytics?.total_sessions != null &&
+    Number(analytics.total_sessions) > 0;
+
+  // Metrics from real backend data
   const assignedCoursesDisplay =
     coursesStatus === "loaded"
-      ? String(courses.length)
+      ? String(distinctOfferings.length)
       : coursesStatus === "loading"
       ? "..."
-      : "API integration pending";
+      : "—";
 
   const todaysClassesDisplay =
     timetableStatus === "loaded"
       ? String(todaysClasses.length)
       : timetableStatus === "loading"
       ? "..."
-      : "API integration pending";
+      : "—";
 
   const activeSessionsDisplay =
     sessionStatus === "loaded"
@@ -509,19 +679,30 @@ function FacultyDashboard() {
         : "0"
       : sessionStatus === "loading"
       ? "..."
-      : "API integration pending";
+      : "—";
 
   const attendanceRateDisplay =
-    analyticsStatus === "loaded" && analytics?.overall_attendance_percentage != null
-      ? `${Number(analytics.overall_attendance_percentage).toFixed(1)}%`
-      : analyticsStatus === "loading"
+    analyticsStatus === "loading"
       ? "..."
-      : "API integration pending";
+      : analyticsStatus === "error"
+      ? "—"
+      : hasAttendanceHistory && analytics?.overall_attendance_percentage != null
+      ? `${Number(analytics.overall_attendance_percentage).toFixed(1)}%`
+      : "0%";
+
+  const attendanceRateDescription =
+    analyticsStatus === "loading"
+      ? "Loading attendance..."
+      : analyticsStatus === "error"
+      ? "Failed to load analytics"
+      : hasAttendanceHistory
+      ? "Attendance across closed sessions"
+      : "No attendance data yet";
 
   // Donut chart calculation from real analytics
   const donutPercentage =
-    analyticsStatus === "loaded" && analytics?.overall_attendance_percentage != null
-      ? Number(analytics.overall_attendance_percentage)
+    hasAttendanceHistory && analytics?.overall_attendance_percentage != null
+      ? Math.max(0, Math.min(100, Number(analytics.overall_attendance_percentage)))
       : 0;
   const circumference = 2 * Math.PI * 45; // r=45
   const strokeOffset = circumference - (circumference * donutPercentage) / 100;
@@ -582,9 +763,17 @@ function FacultyDashboard() {
               <div className="faculty-stat-title-wrap">
                 <span className="faculty-stat-title">Assigned Courses</span>
                 {coursesStatus === "error" && (
-                  <span className="faculty-api-pending-tag" title="API integration pending: Courses API">
-                    API integration pending
-                  </span>
+                  <button
+                    type="button"
+                    className="faculty-stat-retry-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      reloadCourses();
+                    }}
+                    title="Retry loading courses"
+                  >
+                    <RotateCw size={11} /> Retry
+                  </button>
                 )}
               </div>
             </div>
@@ -593,7 +782,9 @@ function FacultyDashboard() {
 
           <div className="faculty-stat-body">
             <span className="faculty-stat-value">{assignedCoursesDisplay}</span>
-            <span className="faculty-stat-description">Assigned course offerings</span>
+            <span className="faculty-stat-description">
+              {coursesStatus === "error" ? "Failed to load offerings" : "Assigned course offerings"}
+            </span>
           </div>
         </div>
 
@@ -612,9 +803,17 @@ function FacultyDashboard() {
               <div className="faculty-stat-title-wrap">
                 <span className="faculty-stat-title">Today's Classes</span>
                 {timetableStatus === "error" && (
-                  <span className="faculty-api-pending-tag" title="API integration pending: Timetable API">
-                    API integration pending
-                  </span>
+                  <button
+                    type="button"
+                    className="faculty-stat-retry-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      reloadTimetable();
+                    }}
+                    title="Retry loading schedule"
+                  >
+                    <RotateCw size={11} /> Retry
+                  </button>
                 )}
               </div>
             </div>
@@ -623,7 +822,9 @@ function FacultyDashboard() {
 
           <div className="faculty-stat-body">
             <span className="faculty-stat-value">{todaysClassesDisplay}</span>
-            <span className="faculty-stat-description">Today's teaching schedule</span>
+            <span className="faculty-stat-description">
+              {timetableStatus === "error" ? "Failed to load schedule" : "Today's teaching schedule"}
+            </span>
           </div>
         </div>
 
@@ -642,9 +843,17 @@ function FacultyDashboard() {
               <div className="faculty-stat-title-wrap">
                 <span className="faculty-stat-title">Active Sessions</span>
                 {sessionStatus === "error" && (
-                  <span className="faculty-api-pending-tag" title="API integration pending: Active Session API">
-                    API integration pending
-                  </span>
+                  <button
+                    type="button"
+                    className="faculty-stat-retry-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      reloadSessions();
+                    }}
+                    title="Retry checking session status"
+                  >
+                    <RotateCw size={11} /> Retry
+                  </button>
                 )}
               </div>
             </div>
@@ -653,7 +862,9 @@ function FacultyDashboard() {
 
           <div className="faculty-stat-body">
             <span className="faculty-stat-value">{activeSessionsDisplay}</span>
-            <span className="faculty-stat-description">Confirmed active session</span>
+            <span className="faculty-stat-description">
+              {sessionStatus === "error" ? "Failed to check status" : "Confirmed active session"}
+            </span>
           </div>
         </div>
 
@@ -672,9 +883,17 @@ function FacultyDashboard() {
               <div className="faculty-stat-title-wrap">
                 <span className="faculty-stat-title">Average Attendance</span>
                 {analyticsStatus === "error" && (
-                  <span className="faculty-api-pending-tag" title="API integration pending: Analytics API">
-                    API integration pending
-                  </span>
+                  <button
+                    type="button"
+                    className="faculty-stat-retry-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      reloadAnalytics();
+                    }}
+                    title="Retry loading analytics"
+                  >
+                    <RotateCw size={11} /> Retry
+                  </button>
                 )}
               </div>
             </div>
@@ -684,11 +903,13 @@ function FacultyDashboard() {
           <div className="faculty-stat-body">
             <div className="faculty-stat-value-row">
               <span className="faculty-stat-value">{attendanceRateDisplay}</span>
-              {analyticsStatus === "loaded" && (
+              {hasAttendanceHistory && (
                 <ArrowRight size={20} strokeWidth={2.8} className="faculty-stat-arrow-right" />
               )}
             </div>
-            <span className="faculty-stat-description">Attendance across closed sessions</span>
+            <span className="faculty-stat-description">
+              {attendanceRateDescription}
+            </span>
           </div>
         </div>
       </section>
@@ -705,15 +926,53 @@ function FacultyDashboard() {
                   <Calendar size={18} />
                 </div>
                 <div>
-                  <h2 className="faculty-panel-title">Today's Schedule</h2>
-                  <p className="faculty-panel-subtitle">Your classes and teaching sessions for today.</p>
+                  <h2 className="faculty-panel-title">
+                    {selectedScheduleDay === "TODAY"
+                      ? "Today's Schedule"
+                      : selectedScheduleDay === "ALL"
+                      ? "Weekly Schedule"
+                      : `${selectedScheduleDay}'s Schedule`}
+                  </h2>
+                  <p className="faculty-panel-subtitle">
+                    {selectedScheduleDay === "TODAY"
+                      ? `Your classes and teaching sessions for today (${todayWeekday}).`
+                      : selectedScheduleDay === "ALL"
+                      ? "All teaching sessions across your weekly timetable."
+                      : `Your classes and teaching sessions scheduled for ${selectedScheduleDay}.`}
+                  </p>
                 </div>
               </div>
 
-              <div className="faculty-dropdown-pill">
-                <Calendar size={13} className="faculty-dropdown-cal-icon" />
-                <span>Today</span>
-                <ChevronDown size={14} />
+              <div className="faculty-schedule-header-actions">
+                <div className="faculty-dropdown-pill faculty-dropdown-pill-interactive" title="Select day to view schedule">
+                  <Calendar size={13} className="faculty-dropdown-cal-icon" />
+                  <select
+                    className="faculty-schedule-day-native-select"
+                    value={selectedScheduleDay}
+                    onChange={(e) => setSelectedScheduleDay(e.target.value)}
+                    aria-label="Select schedule day"
+                  >
+                    <option value="TODAY">Today ({todayWeekday})</option>
+                    <option value="ALL">All Days (Full Week)</option>
+                    <option disabled>──────────</option>
+                    {ALL_WEEKDAYS.map((d) => (
+                      <option key={d} value={d}>
+                        {d} {d.toLowerCase() === todayWeekday.toLowerCase() ? "(Today)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown size={14} className="faculty-dropdown-chevron" />
+                </div>
+
+                <button
+                  type="button"
+                  className="faculty-schedule-refresh-icon-btn"
+                  onClick={reloadTimetable}
+                  title="Refresh timetable schedule"
+                  aria-label="Refresh timetable schedule"
+                >
+                  <RotateCw size={13} className={isReloadingTimetable ? "faculty-spin" : ""} />
+                </button>
               </div>
             </div>
 
@@ -724,19 +983,58 @@ function FacultyDashboard() {
             ) : timetableStatus === "error" ? (
               <div className="faculty-empty-state">
                 <AlertCircle size={22} className="text-amber" />
-                <strong>API integration pending: Timetable API</strong>
-                <p>Timetable service endpoint is not yet connected to the backend.</p>
+                <strong>Unable to load schedule</strong>
+                <p>Could not retrieve your teaching timetable from the server.</p>
+                <button
+                  type="button"
+                  className="faculty-retry-btn"
+                  onClick={reloadTimetable}
+                >
+                  <RotateCw size={14} /> Retry
+                </button>
               </div>
-            ) : todaysClasses.length === 0 ? (
+            ) : displayedClasses.length === 0 ? (
               <div className="faculty-empty-state">
                 <Calendar size={22} className="text-muted" />
-                <strong>No classes scheduled for today</strong>
-                <p>Your timetable contains no teaching sessions for {todayWeekday}.</p>
+                <strong>
+                  {selectedScheduleDay === "TODAY"
+                    ? "No classes scheduled for today"
+                    : `No classes scheduled for ${selectedScheduleDay}`}
+                </strong>
+                <p>
+                  {selectedScheduleDay === "TODAY"
+                    ? `Your timetable contains no teaching sessions for ${todayWeekday}.`
+                    : `Your timetable contains no teaching sessions for ${selectedScheduleDay}.`}
+                </p>
+                {otherDaysWithClasses.length > 0 && (
+                  <div className="faculty-other-days-box">
+                    <span className="faculty-other-days-label">You have classes scheduled on:</span>
+                    <div className="faculty-other-days-pills">
+                      {otherDaysWithClasses.map(({ day: dayName, count }) => (
+                        <button
+                          key={dayName}
+                          type="button"
+                          className="faculty-day-quick-pill"
+                          onClick={() => setSelectedScheduleDay(dayName)}
+                        >
+                          {dayName} ({count})
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="faculty-day-quick-pill faculty-day-quick-pill-all"
+                        onClick={() => setSelectedScheduleDay("ALL")}
+                      >
+                        View Full Week
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="faculty-schedule-list">
-                {todaysClasses.map((item, index) => {
-                  const schedStatus = getClassScheduleStatus(item.start_time, item.end_time);
+                {displayedClasses.map((item, index) => {
+                  const schedStatus = getClassScheduleStatus(item.start_time, item.end_time, item.day_of_week);
                   return (
                     <div
                       key={item.timetable_entry_id || index}
@@ -759,6 +1057,9 @@ function FacultyDashboard() {
                           <span>{item.course_name || ""}</span>
                         </div>
                         <div className="faculty-schedule-meta">
+                          {selectedScheduleDay === "ALL" && (
+                            <span className="faculty-schedule-day-tag">{item.day_of_week}</span>
+                          )}
                           {item.section ? `Section ${item.section}` : ""}
                           {item.semester ? ` • Sem ${item.semester}` : ""}
                         </div>
@@ -792,8 +1093,18 @@ function FacultyDashboard() {
                 </div>
                 <div>
                   <h2 className="faculty-panel-title">Attendance Overview</h2>
+                  <p className="faculty-panel-subtitle">Attendance statistics across closed sessions.</p>
                 </div>
               </div>
+              <button
+                type="button"
+                className="faculty-schedule-refresh-icon-btn"
+                onClick={reloadAnalytics}
+                title="Refresh attendance analytics"
+                aria-label="Refresh attendance analytics"
+              >
+                <RotateCw size={13} className={analyticsStatus === "loading" ? "faculty-spin" : ""} />
+              </button>
             </div>
 
             {analyticsStatus === "loading" ? (
@@ -803,74 +1114,91 @@ function FacultyDashboard() {
             ) : analyticsStatus === "error" ? (
               <div className="faculty-empty-state">
                 <AlertCircle size={22} className="text-amber" />
-                <strong>API integration pending: Analytics API</strong>
-                <p>Attendance analytics endpoint is pending backend integration.</p>
+                <strong>Unable to load attendance analytics</strong>
+                <p>Could not retrieve attendance analytics from the server.</p>
+                <button
+                  type="button"
+                  className="faculty-retry-btn"
+                  onClick={reloadAnalytics}
+                >
+                  <RotateCw size={14} /> Retry
+                </button>
               </div>
             ) : (
-              <div className="faculty-overview-content">
-                {/* Circular SVG Donut Chart */}
-                <div className="faculty-donut-wrap">
-                  <svg className="faculty-donut-svg" viewBox="0 0 110 110">
-                    <circle
-                      className="faculty-donut-bg"
-                      cx="55"
-                      cy="55"
-                      r="45"
-                      strokeWidth="9"
-                    />
-                    <circle
-                      className="faculty-donut-fill"
-                      cx="55"
-                      cy="55"
-                      r="45"
-                      strokeWidth="9"
-                      strokeDasharray={circumference}
-                      strokeDashoffset={strokeOffset}
-                      strokeLinecap="round"
-                      transform="rotate(-90 55 55)"
-                    />
-                    <text x="55" y="52" className="faculty-donut-text-val" textAnchor="middle">
-                      {attendanceRateDisplay}
-                    </text>
-                    <text x="55" y="66" className="faculty-donut-text-sub" textAnchor="middle">
-                      Overall Attendance
-                    </text>
-                  </svg>
+              <>
+                <div className="faculty-overview-content">
+                  {/* Circular SVG Donut Chart */}
+                  <div className="faculty-donut-wrap">
+                    <svg className="faculty-donut-svg" viewBox="0 0 110 110">
+                      <circle
+                        className="faculty-donut-bg"
+                        cx="55"
+                        cy="55"
+                        r="45"
+                        strokeWidth="9"
+                      />
+                      <circle
+                        className="faculty-donut-fill"
+                        cx="55"
+                        cy="55"
+                        r="45"
+                        strokeWidth="9"
+                        strokeDasharray={circumference}
+                        strokeDashoffset={strokeOffset}
+                        strokeLinecap="round"
+                        transform="rotate(-90 55 55)"
+                      />
+                      <text x="55" y="52" className="faculty-donut-text-val" textAnchor="middle">
+                        {hasAttendanceHistory && analytics?.overall_attendance_percentage != null
+                          ? `${Number(analytics.overall_attendance_percentage).toFixed(1)}%`
+                          : "0%"}
+                      </text>
+                      <text x="55" y="66" className="faculty-donut-text-sub" textAnchor="middle">
+                        {hasAttendanceHistory ? "Overall Attendance" : "No data yet"}
+                      </text>
+                    </svg>
+                  </div>
+
+                  {/* Legend List */}
+                  <div className="faculty-overview-legend">
+                    <div className="faculty-legend-item">
+                      <div className="faculty-legend-label">
+                        <span className="faculty-legend-dot dot-green" />
+                        <span>Present</span>
+                      </div>
+                      <strong className="faculty-legend-val">
+                        {analytics?.total_present ?? 0}
+                      </strong>
+                    </div>
+
+                    <div className="faculty-legend-item">
+                      <div className="faculty-legend-label">
+                        <span className="faculty-legend-dot dot-red" />
+                        <span>Absent</span>
+                      </div>
+                      <strong className="faculty-legend-val">
+                        {analytics?.total_absent ?? 0}
+                      </strong>
+                    </div>
+
+                    <div className="faculty-legend-item">
+                      <div className="faculty-legend-label">
+                        <span className="faculty-legend-dot dot-blue" />
+                        <span>Closed Sessions</span>
+                      </div>
+                      <strong className="faculty-legend-val">
+                        {analytics?.total_sessions ?? 0}
+                      </strong>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Legend List */}
-                <div className="faculty-overview-legend">
-                  <div className="faculty-legend-item">
-                    <div className="faculty-legend-label">
-                      <span className="faculty-legend-dot dot-green" />
-                      <span>Present</span>
-                    </div>
-                    <strong className="faculty-legend-val">
-                      {analytics?.total_present ?? 0}
-                    </strong>
-                  </div>
-
-                  <div className="faculty-legend-item">
-                    <div className="faculty-legend-label">
-                      <span className="faculty-legend-dot dot-red" />
-                      <span>Absent</span>
-                    </div>
-                    <strong className="faculty-legend-val">
-                      {analytics?.total_absent ?? 0}
-                    </strong>
-                  </div>
-
-                  <div className="faculty-legend-item">
-                    <div className="faculty-legend-label">
-                      <span className="faculty-legend-dot dot-blue" />
-                      <span>Closed Sessions</span>
-                    </div>
-                    <strong className="faculty-legend-val">
-                      {analytics?.total_sessions ?? 0}
-                    </strong>
-                  </div>
-                </div>
-              </div>
+                {!hasAttendanceHistory && (
+                  <p className="faculty-overview-empty-note">
+                    No attendance data yet
+                  </p>
+                )}
+              </>
             )}
           </div>
 
@@ -895,8 +1223,15 @@ function FacultyDashboard() {
             ) : coursesStatus === "error" ? (
               <div className="faculty-empty-state">
                 <AlertCircle size={22} className="text-amber" />
-                <strong>API integration pending: Courses API</strong>
-                <p>Assigned course offerings endpoint is pending backend integration.</p>
+                <strong>Unable to load course offerings</strong>
+                <p>Could not retrieve your assigned courses from the server.</p>
+                <button
+                  type="button"
+                  className="faculty-retry-btn"
+                  onClick={reloadCourses}
+                >
+                  <RotateCw size={14} /> Retry
+                </button>
               </div>
             ) : courses.length === 0 ? (
               <div className="faculty-empty-state">
@@ -906,12 +1241,13 @@ function FacultyDashboard() {
               </div>
             ) : (
               <div className="faculty-my-courses-grid">
-                {courses.slice(0, 3).map((c) => (
+                {distinctOfferings.slice(0, 3).map((c) => (
                   <div key={c.offering_id || c.course_id} className="faculty-course-mini-card">
                     <strong className="faculty-mini-code">{c.course_code || "Course"}</strong>
                     <span className="faculty-mini-name">{c.course_name || "Unnamed"}</span>
                     <span className="faculty-mini-sec">
                       {c.section ? `Sec ${c.section}` : ""}{c.semester ? ` • Sem ${c.semester}` : ""}
+                      {c.academic_year ? ` • ${formatAcademicYear(c.academic_year, c.semester)}` : ""}
                     </span>
 
                     <div className="faculty-mini-footer">
@@ -960,8 +1296,15 @@ function FacultyDashboard() {
             ) : sessionStatus === "error" ? (
               <div className="faculty-empty-state">
                 <AlertCircle size={22} className="text-amber" />
-                <strong>API integration pending: Active Session API</strong>
-                <p>Attendance session status endpoint is pending backend integration.</p>
+                <strong>Unable to check session status</strong>
+                <p>Could not verify current attendance session status from the server.</p>
+                <button
+                  type="button"
+                  className="faculty-retry-btn"
+                  onClick={reloadSessions}
+                >
+                  <RotateCw size={14} /> Retry
+                </button>
               </div>
             ) : activeSession && activeSession.is_eligible_for_attendance !== false ? (
               <div className="faculty-active-session-box">
@@ -1118,8 +1461,15 @@ function FacultyDashboard() {
             ) : sessionStatus === "error" ? (
               <div className="faculty-empty-state">
                 <AlertCircle size={22} className="text-amber" />
-                <strong>API integration pending: Session History API</strong>
-                <p>Recent session history endpoint is pending backend integration.</p>
+                <strong>Unable to load session history</strong>
+                <p>Could not retrieve recent session history from the server.</p>
+                <button
+                  type="button"
+                  className="faculty-retry-btn"
+                  onClick={reloadSessions}
+                >
+                  <RotateCw size={14} /> Retry
+                </button>
               </div>
             ) : recentSessions.length === 0 ? (
               <div className="faculty-empty-state">
@@ -1321,7 +1671,9 @@ function FacultyDashboard() {
 
       {/* Start Attendance Dialog Modal */}
       {showStartDialog && (() => {
-        const selectedOffering = courses.find((c) => String(c.offering_id) === String(selectedOfferingId));
+        const selectedOffering =
+          courses.find((c) => String(c.offering_id) === String(selectedOfferingId)) ||
+          distinctOfferings.find((c) => String(c.offering_id) === String(selectedOfferingId));
         const availableSlots = timetable.filter(
           (t) =>
             String(t.offering_id) === String(selectedOfferingId) &&
@@ -1332,10 +1684,10 @@ function FacultyDashboard() {
         );
         const displaySlots = availableSlots.length > 0 ? availableSlots : allOfferingSlots;
         const activeSlot = displaySlots.find(
-          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "ACTIVE"
+          (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "ACTIVE"
         );
         const upcomingSlot = displaySlots.find(
-          (s) => getClassScheduleStatus(s.start_time, s.end_time).status === "UPCOMING"
+          (s) => getClassScheduleStatus(s.start_time, s.end_time, s.day_of_week).status === "UPCOMING"
         );
         const currentSlot =
           displaySlots.find(
@@ -1344,9 +1696,14 @@ function FacultyDashboard() {
           activeSlot ||
           upcomingSlot ||
           displaySlots[0];
-        const slotStatus = currentSlot ? getClassScheduleStatus(currentSlot.start_time, currentSlot.end_time) : null;
-        const isSlotEnded = slotStatus?.status === "ENDED";
-        const isSlotUpcoming = slotStatus?.status === "UPCOMING";
+        const slotStatus = currentSlot
+          ? getClassScheduleStatus(currentSlot.start_time, currentSlot.end_time, currentSlot.day_of_week)
+          : null;
+        const isSlotToday = currentSlot
+          ? String(currentSlot.day_of_week || "").trim().toLowerCase() === todayWeekday.toLowerCase()
+          : false;
+        const isSlotEnded = isSlotToday && slotStatus?.status === "ENDED";
+        const isSlotUpcoming = isSlotToday && slotStatus?.status === "UPCOMING";
 
         return (
           <div
@@ -1356,13 +1713,28 @@ function FacultyDashboard() {
                 setShowStartDialog(false);
               }
             }}
+            role="presentation"
           >
-            <div className="faculty-modal-card" role="dialog" aria-modal="true">
+            <div
+              className="faculty-modal-card"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="start-attendance-title"
+            >
               <div className="faculty-modal-header">
-                <div>
-                  <span className="faculty-modal-eyebrow">Attendance Session</span>
-                  <h3 className="faculty-modal-title">Start Attendance</h3>
-                  <p className="faculty-modal-sub">Select the assigned course offering and scheduled timetable slot.</p>
+                <div className="faculty-modal-header-main">
+                  <div className="faculty-modal-header-icon" aria-hidden="true">
+                    <Camera size={20} />
+                  </div>
+                  <div className="faculty-modal-header-text">
+                    <span className="faculty-modal-eyebrow">Attendance Session</span>
+                    <h3 id="start-attendance-title" className="faculty-modal-title">
+                      Start Attendance
+                    </h3>
+                    <p className="faculty-modal-sub">
+                      Select the assigned course offering and scheduled timetable slot.
+                    </p>
+                  </div>
                 </div>
 
                 <button
@@ -1370,6 +1742,7 @@ function FacultyDashboard() {
                   className="faculty-modal-close"
                   onClick={() => setShowStartDialog(false)}
                   disabled={startingSession}
+                  aria-label="Close dialog"
                 >
                   <X size={18} />
                 </button>
@@ -1380,25 +1753,29 @@ function FacultyDashboard() {
                   <label htmlFor="course-select-input" className="faculty-modal-label">
                     Course offering
                   </label>
-                  <select
-                    id="course-select-input"
-                    className="faculty-modal-select"
-                    value={selectedOfferingId}
-                    onChange={(e) => handleOfferingChange(e.target.value)}
-                    disabled={startingSession || courses.length === 0}
-                  >
-                    {courses.length === 0 ? (
-                      <option value="">No assigned courses available</option>
-                    ) : (
-                      courses.map((c) => (
-                        <option key={c.offering_id} value={c.offering_id}>
-                          {c.course_code} — {c.course_name}
-                          {c.section ? ` · Section ${c.section}` : ""}
-                          {c.semester ? ` (Sem ${c.semester})` : ""}
-                        </option>
-                      ))
-                    )}
-                  </select>
+                  <div className="faculty-modal-select-wrapper">
+                    <select
+                      id="course-select-input"
+                      className="faculty-modal-select"
+                      value={selectedOfferingId}
+                      onChange={(e) => handleOfferingChange(e.target.value)}
+                      disabled={startingSession || distinctOfferings.length === 0}
+                    >
+                      {distinctOfferings.length === 0 ? (
+                        <option value="">No assigned courses available</option>
+                      ) : (
+                        distinctOfferings.map((c) => (
+                          <option key={c.offering_id} value={c.offering_id}>
+                            {c.course_code} — {c.course_name}
+                            {c.section ? ` · Section ${c.section}` : ""}
+                            {c.semester ? ` (Sem ${c.semester})` : ""}
+                            {c.academic_year ? ` · ${formatAcademicYear(c.academic_year, c.semester)}` : ""}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                    <ChevronDown className="faculty-modal-select-chevron" size={16} aria-hidden="true" />
+                  </div>
                 </div>
 
                 {displaySlots.length > 0 && (
@@ -1406,89 +1783,114 @@ function FacultyDashboard() {
                     <label htmlFor="slot-select-input" className="faculty-modal-label">
                       Scheduled timetable slot
                     </label>
-                    <select
-                      id="slot-select-input"
-                      className="faculty-modal-select"
-                      value={selectedTimetableEntryId || (currentSlot ? String(currentSlot.timetable_entry_id) : "")}
-                      onChange={(e) => {
-                        setSelectedTimetableEntryId(e.target.value);
-                        setStartError("");
-                      }}
-                      disabled={startingSession}
-                    >
-                      {displaySlots.map((slot) => {
-                        const st = getClassScheduleStatus(slot.start_time, slot.end_time);
-                        return (
-                          <option key={slot.timetable_entry_id} value={slot.timetable_entry_id}>
-                            {slot.day_of_week} {formatTime(slot.start_time)} – {formatTime(slot.end_time)}
-                            {slot.room ? ` · Room ${slot.room}` : ""} — [{st.label}]
-                          </option>
-                        );
-                      })}
-                    </select>
+                    <div className="faculty-modal-select-wrapper">
+                      <select
+                        id="slot-select-input"
+                        className="faculty-modal-select"
+                        value={selectedTimetableEntryId || (currentSlot ? String(currentSlot.timetable_entry_id) : "")}
+                        onChange={(e) => {
+                          setSelectedTimetableEntryId(e.target.value);
+                          setStartError("");
+                        }}
+                        disabled={startingSession}
+                      >
+                        {displaySlots.map((slot) => {
+                          const st = getClassScheduleStatus(slot.start_time, slot.end_time, slot.day_of_week);
+                          return (
+                            <option key={slot.timetable_entry_id} value={slot.timetable_entry_id}>
+                              {slot.day_of_week} {formatTime(slot.start_time)} – {formatTime(slot.end_time)}
+                              {slot.room ? ` · Room ${slot.room}` : ""} — [{st.label}]
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <ChevronDown className="faculty-modal-select-chevron" size={16} aria-hidden="true" />
+                    </div>
                   </div>
                 )}
 
                 {currentSlot && (
-                  <div
-                    style={{
-                      background: "#f8fafc",
-                      border: "1px solid #e2e8f0",
-                      borderRadius: "10px",
-                      padding: "12px 14px",
-                      marginBottom: "14px",
-                      fontSize: "12px",
-                      color: "#334155",
-                    }}
-                  >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                      <strong style={{ fontSize: "13px", color: "#0f172a" }}>Scheduled Class Details</strong>
+                  <div className="faculty-modal-details-card">
+                    <div className="faculty-modal-details-header">
+                      <div className="faculty-modal-details-title-wrap">
+                        <Calendar size={15} className="faculty-modal-details-icon" aria-hidden="true" />
+                        <strong className="faculty-modal-details-title">Scheduled Class Details</strong>
+                      </div>
                       <span
-                        style={{
-                          fontSize: "11px",
-                          fontWeight: "700",
-                          padding: "2px 8px",
-                          borderRadius: "6px",
-                          background: slotStatus?.status === "ACTIVE" ? "#ecfdf5" : slotStatus?.status === "UPCOMING" ? "#fffbeb" : "#f1f5f9",
-                          color: slotStatus?.status === "ACTIVE" ? "#059669" : slotStatus?.status === "UPCOMING" ? "#d97706" : "#64748b",
-                        }}
+                        className={`faculty-modal-details-badge ${
+                          slotStatus?.status === "ACTIVE"
+                            ? "is-active"
+                            : slotStatus?.status === "UPCOMING"
+                            ? "is-upcoming"
+                            : "is-ended"
+                        }`}
                       >
                         {slotStatus?.label || "SCHEDULED"}
                       </span>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px" }}>
-                      <div><span style={{ color: "#64748b" }}>Date:</span> Today ({todayWeekday})</div>
-                      <div><span style={{ color: "#64748b" }}>Section:</span> {selectedOffering?.section || "N/A"}</div>
-                      <div><span style={{ color: "#64748b" }}>Time:</span> {formatTime(currentSlot.start_time)} – {formatTime(currentSlot.end_time)}</div>
-                      <div><span style={{ color: "#64748b" }}>Room:</span> {currentSlot.room || selectedOffering?.room || "Not assigned"}</div>
+                    <div className="faculty-modal-details-grid">
+                      <div className="faculty-modal-details-item">
+                        <span className="faculty-modal-details-label">Date</span>
+                        <span className="faculty-modal-details-value">
+                          {currentSlot.day_of_week} {isSlotToday ? `(${todayWeekday})` : "(Scheduled)"}
+                        </span>
+                      </div>
+                      <div className="faculty-modal-details-item">
+                        <span className="faculty-modal-details-label">Section</span>
+                        <span className="faculty-modal-details-value">{selectedOffering?.section || "N/A"}</span>
+                      </div>
+                      <div className="faculty-modal-details-item">
+                        <span className="faculty-modal-details-label">Time</span>
+                        <span className="faculty-modal-details-value">
+                          {formatTime(currentSlot.start_time)} – {formatTime(currentSlot.end_time)}
+                        </span>
+                      </div>
+                      <div className="faculty-modal-details-item">
+                        <span className="faculty-modal-details-label">Room</span>
+                        <span className="faculty-modal-details-value">
+                          {currentSlot.room || selectedOffering?.room || "Not assigned"}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 )}
 
+                {!isSlotToday && (
+                  <div className="faculty-modal-banner is-warning" role="alert">
+                    <Clock size={16} className="faculty-modal-banner-icon" aria-hidden="true" />
+                    <span>
+                      This timetable slot is scheduled for {currentSlot.day_of_week}. Attendance sessions can only be started during class hours on {currentSlot.day_of_week}.
+                    </span>
+                  </div>
+                )}
+
                 {isSlotEnded && (
-                  <div className="faculty-modal-error" style={{ background: "#fef2f2", borderColor: "#fecaca", color: "#991b1b" }}>
-                    <AlertCircle size={15} />
+                  <div className="faculty-modal-banner is-error" role="alert">
+                    <AlertCircle size={16} className="faculty-modal-banner-icon" aria-hidden="true" />
                     <span>Cannot start attendance: scheduled class window ended at {formatTime(currentSlot.end_time)}.</span>
                   </div>
                 )}
 
                 {isSlotUpcoming && (
-                  <div className="faculty-modal-error" style={{ background: "#fffbeb", borderColor: "#fde68a", color: "#92400e" }}>
-                    <Clock size={15} />
+                  <div className="faculty-modal-banner is-warning" role="alert">
+                    <Clock size={16} className="faculty-modal-banner-icon" aria-hidden="true" />
                     <span>Cannot start attendance yet: scheduled class starts at {formatTime(currentSlot.start_time)}.</span>
                   </div>
                 )}
 
                 {startError && (
-                  <div className="faculty-modal-error">
-                    <AlertCircle size={15} />
+                  <div className="faculty-modal-banner is-error" role="alert">
+                    <AlertCircle size={16} className="faculty-modal-banner-icon" aria-hidden="true" />
                     <span>{startError}</span>
                   </div>
                 )}
 
-                <p className="faculty-modal-note">
-                  This initializes the attendance session. Camera face recognition controls will be available on the Attendance page.
-                </p>
+                <div className="faculty-modal-note">
+                  <Zap size={14} className="faculty-modal-note-icon" aria-hidden="true" />
+                  <span>
+                    This initializes the attendance session. Camera face recognition controls will be available on the Attendance page.
+                  </span>
+                </div>
 
                 <div className="faculty-modal-actions">
                   <button
@@ -1502,10 +1904,31 @@ function FacultyDashboard() {
                   <button
                     type="submit"
                     className="faculty-modal-confirm"
-                    disabled={startingSession || courses.length === 0 || isSlotEnded || isSlotUpcoming}
-                    title={isSlotEnded ? "Class has already ended" : isSlotUpcoming ? "Class has not started yet" : "Start session"}
+                    disabled={
+                      startingSession ||
+                      courses.length === 0 ||
+                      isSlotEnded ||
+                      isSlotUpcoming ||
+                      !isSlotToday
+                    }
+                    title={
+                      !isSlotToday
+                        ? `Slot is scheduled for ${currentSlot?.day_of_week}, not today (${todayWeekday})`
+                        : isSlotEnded
+                        ? "Class has already ended"
+                        : isSlotUpcoming
+                        ? "Class has not started yet"
+                        : "Start session"
+                    }
                   >
-                    {startingSession ? "Starting..." : "Confirm & Start"}
+                    {startingSession ? (
+                      <>
+                        <span className="faculty-modal-spinner" aria-hidden="true" />
+                        <span>Starting...</span>
+                      </>
+                    ) : (
+                      "Confirm & Start"
+                    )}
                   </button>
                 </div>
               </form>

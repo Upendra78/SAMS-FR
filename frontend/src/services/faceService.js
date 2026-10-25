@@ -42,3 +42,22 @@ export async function enrollStudentFace(studentId, imageBlob) {
     throw error;
   }
 }
+
+export async function removeStudentFaceRegistration(studentId, options = {}) {
+  if (!studentId) {
+    throw new Error("Student ID is required to remove face registration.");
+  }
+
+  const { reason, permanent = false, face_id } = options;
+  const payload = {};
+  if (reason) payload.reason = reason;
+  if (permanent) payload.permanent = true;
+  if (face_id) payload.face_id = face_id;
+
+  const response = await api.delete(
+    `/admin/students/${encodeURIComponent(studentId)}/face`,
+    { data: payload }
+  );
+
+  return response.data;
+}

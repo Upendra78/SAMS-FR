@@ -556,6 +556,9 @@ class TestDuplicateStudentAndFaceReplacement(unittest.TestCase):
             path1 = os.path.join(PHOTOS_DIR, filename1)
             self.assertTrue(os.path.exists(path1))
 
+            import time as _py_time
+            _py_time.sleep(0.02)
+
             # 2. Upload replacement photo
             dummy_bytes2 = b"\xff\xd8\xff\xe0" + b"\x11" * 600
             res2 = self.client.post(

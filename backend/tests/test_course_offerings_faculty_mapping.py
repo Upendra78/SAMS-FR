@@ -41,19 +41,39 @@ def get_admin_headers(client, app):
 def test_course_offerings_returns_real_faculty_name(app, client):
     """Offerings with a valid faculty assignment must return the real faculty display name."""
     headers = get_admin_headers(client, app)
-    res = client.get("/api/admin/course-offerings", headers=headers)
-    assert res.status_code == 200
-    data = res.get_json()
-    assert data["success"] is True
 
-    assigned_offerings = [o for o in data["data"] if o["faculty_id"] is not None]
-    assert len(assigned_offerings) > 0, "Expected at least one assigned course offering in DB"
+    assigned_id = None
+    with app.app_context():
+        offering = CourseOffering.query.filter(CourseOffering.faculty_id.isnot(None)).first()
+        if not offering:
+            offering = CourseOffering.query.first()
+            faculty = Faculty.query.first()
+            if offering and faculty:
+                offering.faculty_id = faculty.faculty_id
+                db.session.commit()
+                assigned_id = offering.offering_id
 
-    for off in assigned_offerings:
-        assert off["faculty_name"] is not None
-        assert not off["faculty_name"].startswith("Faculty #null")
-        assert off["faculty_name"] != "Unassigned"
-        assert len(off["faculty_name"].strip()) > 0
+    try:
+        res = client.get("/api/admin/course-offerings", headers=headers)
+        assert res.status_code == 200
+        data = res.get_json()
+        assert data["success"] is True
+
+        assigned_offerings = [o for o in data["data"] if o["faculty_id"] is not None]
+        assert len(assigned_offerings) > 0, "Expected at least one assigned course offering in DB"
+
+        for off in assigned_offerings:
+            assert off["faculty_name"] is not None
+            assert not off["faculty_name"].startswith("Faculty #null")
+            assert off["faculty_name"] != "Unassigned"
+            assert len(off["faculty_name"].strip()) > 0
+    finally:
+        if assigned_id is not None:
+            with app.app_context():
+                off = db.session.get(CourseOffering, assigned_id)
+                if off:
+                    off.faculty_id = None
+                    db.session.commit()
 
 
 def test_course_offerings_without_assignment_returns_unassigned(app, client):

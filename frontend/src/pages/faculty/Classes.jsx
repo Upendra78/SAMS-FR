@@ -24,6 +24,8 @@ import {
   getFacultyTimetable,
   getFacultyClassesSummary,
 } from "../../services/facultyService";
+import { invalidateApiCache } from "../../services/api";
+import { formatAcademicYear } from "../../utils/academicYearUtils";
 
 import bannerBg from "../../../images/faculty-classes-banner.png";
 import cardBlueBg from "../../../images/faculty-classes-card-blue.png";
@@ -40,6 +42,7 @@ const DAYS_OF_WEEK = [
   "Thursday",
   "Friday",
   "Saturday",
+  "Sunday",
 ];
 
 function formatTime12(timeStr) {
@@ -216,9 +219,39 @@ function Classes() {
   }, [academicYear, semester, section, day, reloadKey]);
 
   const handleRefresh = () => {
+    invalidateApiCache("timetable");
+    invalidateApiCache("faculty");
     setRefreshing(true);
     setReloadKey((prev) => prev + 1);
   };
+
+  // Re-fetch when timetable updates occur elsewhere in application or window regains focus
+  useEffect(() => {
+    function handleTimetableUpdate() {
+      invalidateApiCache("timetable");
+      setReloadKey((prev) => prev + 1);
+    }
+    function handleStorage(e) {
+      if (e.key === "sams_timetable_last_updated") {
+        invalidateApiCache("timetable");
+        setReloadKey((prev) => prev + 1);
+      }
+    }
+    function handleFocus() {
+      invalidateApiCache("timetable");
+      setReloadKey((prev) => prev + 1);
+    }
+
+    window.addEventListener("sams:timetable-updated", handleTimetableUpdate);
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", handleFocus);
+
+    return () => {
+      window.removeEventListener("sams:timetable-updated", handleTimetableUpdate);
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleFocus);
+    };
+  }, []);
 
   // Dynamic filter options derived from complete classes dataset
   const filterOptions = useMemo(() => {
@@ -227,7 +260,9 @@ function Classes() {
     const secs = new Set();
 
     classes.forEach((c) => {
-      if (c.academic_year) years.add(c.academic_year);
+      if (c.academic_year) {
+        years.add(formatAcademicYear(c.academic_year, c.semester));
+      }
       if (c.semester !== null && c.semester !== undefined) sems.add(c.semester);
       if (c.section) secs.add(c.section);
     });
@@ -283,15 +318,24 @@ function Classes() {
     }
 
     // If no more today, show upcoming this week
-    const currentDayIndex = DAYS_OF_WEEK.indexOf(todayName);
+    const currentDayIndex = DAYS_OF_WEEK.findIndex(
+      (d) => d.toLowerCase() === todayName.toLowerCase()
+    );
     const restOfWeek = timetable.filter((e) => {
-      const entryDayIndex = DAYS_OF_WEEK.indexOf(e.day_of_week);
+      const entryDayIndex = DAYS_OF_WEEK.findIndex(
+        (d) => d.toLowerCase() === String(e.day_of_week || "").trim().toLowerCase()
+      );
       return entryDayIndex > currentDayIndex;
     });
 
     return restOfWeek.sort((a, b) => {
-      const dayDiff =
-        DAYS_OF_WEEK.indexOf(a.day_of_week) - DAYS_OF_WEEK.indexOf(b.day_of_week);
+      const aDayIndex = DAYS_OF_WEEK.findIndex(
+        (d) => d.toLowerCase() === String(a.day_of_week || "").trim().toLowerCase()
+      );
+      const bDayIndex = DAYS_OF_WEEK.findIndex(
+        (d) => d.toLowerCase() === String(b.day_of_week || "").trim().toLowerCase()
+      );
+      const dayDiff = aDayIndex - bDayIndex;
       if (dayDiff !== 0) return dayDiff;
       return (a.start_time || "").localeCompare(b.start_time || "");
     });
@@ -422,7 +466,7 @@ function Classes() {
               <option value="All">All Academic Years</option>
               {filterOptions.academicYears.map((yr) => (
                 <option key={yr} value={yr}>
-                  {yr}
+                  {formatAcademicYear(yr)}
                 </option>
               ))}
             </select>
@@ -997,7 +1041,11 @@ function Classes() {
                   </h2>
                   <p className="fc-modal-subtitle">
                     Section {selectedOffering.section} · Semester{" "}
-                    {selectedOffering.semester} · {selectedOffering.academic_year}
+                    {selectedOffering.semester} ·{" "}
+                    {formatAcademicYear(
+                      selectedOffering.academic_year,
+                      selectedOffering.semester
+                    )}
                   </p>
                 </div>
               </div>

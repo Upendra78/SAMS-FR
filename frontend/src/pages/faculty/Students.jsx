@@ -9,6 +9,7 @@ import {
   getFacultyCourses,
   getFacultyStudents,
 } from "../../services/facultyService";
+import { formatAcademicYear } from "../../utils/academicYearUtils";
 
 const EMPTY_METRICS = {
   activeStudents: null,
@@ -757,7 +758,10 @@ function Students() {
                       </td>
 
                       <td>
-                        {student.academicYear || "N/A"}
+                        {formatAcademicYear(
+                          student.academicYear,
+                          student.semester
+                        )}
                       </td>
 
                       <td>
@@ -953,7 +957,10 @@ function Students() {
                 <span>Academic Year</span>
 
                 <strong>
-                  {selectedStudent.academicYear || "N/A"}
+                  {formatAcademicYear(
+                    selectedStudent.academicYear,
+                    selectedStudent.semester
+                  )}
                 </strong>
               </div>
 

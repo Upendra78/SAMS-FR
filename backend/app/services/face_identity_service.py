@@ -12,6 +12,7 @@ from app.models import (
     Student,
     User,
 )
+from app.services.activity_service import record_activity
 from app.services.face_service import FaceService
 
 logger = logging.getLogger(__name__)
@@ -416,3 +417,133 @@ def cleanup_obsolete_face_profiles(
 
     logger.info("Purged %d obsolete face profile records (retention_days=%d)", deleted_count, retention_days)
     return deleted_count
+
+
+def remove_student_face_profile(
+    student_id: int,
+    admin_user_id: int,
+    face_id: int | None = None,
+    reason: str | None = None,
+    permanent: bool = False,
+) -> tuple[bool, str, dict | None, str]:
+    """
+    Safely deactivates or removes a student's active face biometric registration:
+    1. Validates that the canonical student record exists.
+    2. If face_id is specified, verifies it exists and belongs to the given student.
+    3. Finds active FaceProfile(s) for the student.
+    4. Safely deactivates (is_active=False) or permanently deletes them.
+    5. Preserves student account, enrollment, courses, and historical attendance.
+    6. Records the removal action in the system activity log.
+    7. Atomically commits the database transaction.
+
+    Returns:
+        (success: bool, message: str, data: dict | None, status: str)
+    """
+    student = db.session.get(Student, student_id)
+    if not student:
+        return False, "Student not found", None, "student_not_found"
+
+    if face_id is not None:
+        try:
+            face_id = int(face_id)
+        except (TypeError, ValueError):
+            return False, "Invalid face_id format", None, "invalid_face_id"
+
+        target_fp = db.session.get(FaceProfile, face_id)
+        if not target_fp:
+            return False, "Face profile not found", None, "face_profile_not_found"
+
+        if target_fp.student_id != student_id:
+            return (
+                False,
+                "Face profile does not belong to the specified student",
+                None,
+                "profile_student_mismatch",
+            )
+
+    active_query = FaceProfile.query.filter_by(
+        student_id=student_id,
+        is_active=True,
+    )
+    if face_id is not None:
+        active_query = active_query.filter_by(face_id=face_id)
+
+    active_profiles = active_query.with_for_update().all()
+
+    if not active_profiles:
+        return (
+            False,
+            "No active face biometric registration found for this student",
+            {
+                "student_id": student.student_id,
+                "enrollment_no": student.enrollment_no,
+                "face_registered": False,
+            },
+            "not_registered",
+        )
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    removed_face_ids = []
+
+    for fp in active_profiles:
+        removed_face_ids.append(fp.face_id)
+        if permanent:
+            db.session.delete(fp)
+        else:
+            fp.is_active = False
+            fp.updated_at = now_utc
+
+    student_name = student.user.name if student.user else None
+    action_desc = (
+        f"Removed active face biometric registration for student {student.enrollment_no}"
+        f" ({student_name or 'ID: ' + str(student_id)})"
+    )
+
+    record_activity(
+        action_type="FACE_BIOMETRIC_REMOVED",
+        description=action_desc[:255],
+        actor_id=admin_user_id,
+        entity_type="Student",
+        entity_id=str(student_id),
+        status="SUCCESS",
+        details={
+            "student_id": student_id,
+            "enrollment_no": student.enrollment_no,
+            "student_name": student_name,
+            "removed_face_ids": removed_face_ids,
+            "deactivated_count": len(removed_face_ids),
+            "permanent_deletion": bool(permanent),
+            "reason": reason or "Administrative removal of incorrect biometric registration",
+        },
+        commit=False,
+    )
+
+    try:
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error("Error removing face profile for student %s: %s", student_id, e)
+        return False, "Failed to remove face biometric registration", None, "error"
+
+    logger.info(
+        "Admin user %s removed face biometric registration for student %s (%s). Profiles: %s, permanent: %s",
+        admin_user_id,
+        student_id,
+        student.enrollment_no,
+        removed_face_ids,
+        permanent,
+    )
+
+    return (
+        True,
+        "Face biometric registration removed successfully",
+        {
+            "student_id": student.student_id,
+            "enrollment_no": student.enrollment_no,
+            "face_registered": False,
+            "removed_face_ids": removed_face_ids,
+            "deactivated_count": len(removed_face_ids),
+            "permanent": bool(permanent),
+        },
+        "removed",
+    )

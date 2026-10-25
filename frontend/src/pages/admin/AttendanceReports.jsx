@@ -31,6 +31,7 @@ import kpiAbsentImg from "../../../image/admin_quickstat_absent.jpg";
 import kpiClassesImg from "../../../image/admin_quickstat_courses.jpg";
 import kpiRateImg from "../../../image/admin_quickstat_records.jpg";
 
+import { formatAcademicYear } from "../../utils/academicYearUtils";
 import "./AttendanceReports.css";
 
 // =========================================================================
@@ -956,7 +957,7 @@ function AttendanceReports() {
               <option value="All">All Academic Years</option>
               {filterOptions.academic_years.map((year) => (
                 <option key={year} value={year}>
-                  {year}
+                  {formatAcademicYear(year)}
                 </option>
               ))}
             </select>

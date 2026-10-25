@@ -109,10 +109,58 @@ export async function getFacultyAttendanceRecords(
   return response.data;
 }
 
+export async function requestLivenessChallenge(sessionId) {
+  const response = await api.post("/faculty/recognition/liveness/challenge", {
+    session_id: Number(sessionId),
+  });
+
+  return response.data;
+}
+
+export async function verifyLiveness(payload) {
+  // Supports both FormData and regular JSON payload
+  if (payload instanceof FormData) {
+    const response = await api.post("/faculty/recognition/liveness/verify", payload);
+    return response.data;
+  }
+
+  const response = await api.post("/faculty/recognition/liveness/verify", payload);
+  return response.data;
+}
+
+export async function recordVerifiedAttendance(
+  sessionId,
+  verificationToken,
+  studentId = null
+) {
+  const payload = {
+    session_id: Number(sessionId),
+    verification_token: verificationToken,
+    ...(studentId ? { student_id: Number(studentId) } : {}),
+  };
+
+  const response = await api.post("/faculty/recognition/attendance", payload);
+  return response.data;
+}
+
 export async function recognizeFacultyAttendance(
   sessionId,
-  imageBlob
+  imageBlob,
+  verificationToken = null,
+  studentId = null
 ) {
+  if (
+    typeof imageBlob === "object" &&
+    !(imageBlob instanceof Blob) &&
+    !(imageBlob instanceof File)
+  ) {
+    const response = await api.post("/faculty/recognition/attendance", {
+      session_id: Number(sessionId),
+      ...imageBlob,
+    });
+    return response.data;
+  }
+
   const formData = new FormData();
 
   formData.append(
@@ -120,11 +168,21 @@ export async function recognizeFacultyAttendance(
     String(sessionId)
   );
 
-  formData.append(
-    "image",
-    imageBlob,
-    "attendance-frame.jpg"
-  );
+  if (imageBlob) {
+    formData.append(
+      "image",
+      imageBlob,
+      "attendance-frame.jpg"
+    );
+  }
+
+  if (verificationToken) {
+    formData.append("verification_token", verificationToken);
+  }
+
+  if (studentId) {
+    formData.append("student_id", String(studentId));
+  }
 
   const response = await api.post(
     "/faculty/recognition/attendance",

@@ -7,7 +7,10 @@ from flask_jwt_extended import get_jwt, get_jwt_identity
 
 from app.extensions import db
 from app.models import FaceProfile, Student
-from app.services.face_identity_service import safe_replace_face_profile
+from app.services.face_identity_service import (
+    remove_student_face_profile,
+    safe_replace_face_profile,
+)
 from app.services.face_service import FaceService
 from app.utils.auth import role_required
 
@@ -216,4 +219,53 @@ def face_registration_status(student_id):
             "status": "not_registered",
             "model_version": None,
         },
+    }), 200
+
+
+@face_bp.delete("/student/<int:student_id>")
+@face_bp.delete("/<int:student_id>")
+@role_required("ADMIN")
+def remove_student_face_biometric(student_id):
+    """
+    Administrator-controlled removal / deactivation of a student's active face biometric.
+    Allows re-registration while maintaining student academic data and attendance history.
+    """
+    admin_user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    reason = data.get("reason") or request.args.get("reason")
+    face_id = data.get("face_id") or request.args.get("face_id", type=int)
+    permanent = data.get("permanent") if "permanent" in data else request.args.get("permanent", type=bool, default=False)
+
+    success, message, result_data, status = remove_student_face_profile(
+        student_id=student_id,
+        admin_user_id=admin_user_id,
+        face_id=face_id,
+        reason=reason,
+        permanent=permanent,
+    )
+
+    if not success:
+        if status in ("student_not_found", "face_profile_not_found", "not_registered"):
+            return jsonify({
+                "success": False,
+                "message": message,
+                "status": status,
+                "data": result_data,
+            }), 404
+        elif status in ("profile_student_mismatch", "invalid_face_id"):
+            return jsonify({
+                "success": False,
+                "message": message,
+                "status": status,
+            }), 400
+        return jsonify({
+            "success": False,
+            "message": message,
+            "status": status,
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": message,
+        "data": result_data,
     }), 200

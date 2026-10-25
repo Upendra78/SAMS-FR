@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import datetime, time
+import re
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
@@ -12,9 +13,11 @@ from app.models import (
     FacultyAdjustment,
     Student,
     TimetableEntry,
+    User,
 )
 from app.utils.auth import admin_required, faculty_required, student_required
 from app.utils.academic_year import canonical_academic_year
+from app.services.activity_service import record_activity
 
 timetable_bp = Blueprint(
     "timetable",
@@ -406,4 +409,284 @@ def cancel_faculty_adjustment(adjustment_id):
         "success": True,
         "message": "Faculty adjustment has been cancelled. Timetable reverted to original assignment.",
         "data": adjustment.to_dict(),
+    }), 200
+
+
+@timetable_bp.route("/<int:entry_id>", methods=["PUT", "PATCH"])
+@admin_required
+def update_timetable_entry(entry_id):
+    """
+    Updates an existing timetable entry directly (day of week, start time, end time, room).
+    Validates time formats, ensures end_time > start_time, checks for faculty/room conflicts,
+    and updates transactionally without creating duplicate entries.
+    """
+    entry = db.session.get(TimetableEntry, entry_id)
+    if not entry:
+        return jsonify({
+            "success": False,
+            "message": f"Timetable entry with ID {entry_id} not found.",
+            "field": "timetable_entry_id",
+        }), 404
+
+    data = request.get_json(silent=True)
+    if not data or not isinstance(data, dict):
+        return jsonify({
+            "success": False,
+            "message": "Valid JSON body is required.",
+        }), 400
+
+    # Validate offering if provided
+    if "offering_id" in data and data["offering_id"] is not None:
+        try:
+            req_offering_id = int(data["offering_id"])
+            if req_offering_id != entry.offering_id:
+                return jsonify({
+                    "success": False,
+                    "message": "Timetable entry does not belong to the expected course offering.",
+                    "field": "offering_id",
+                }), 400
+        except (ValueError, TypeError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid offering_id provided.",
+                "field": "offering_id",
+            }), 400
+
+    # Day of week normalization & validation
+    day_mapping = {
+        "MON": "Monday",
+        "MONDAY": "Monday",
+        "TUE": "Tuesday",
+        "TUES": "Tuesday",
+        "TUESDAY": "Tuesday",
+        "WED": "Wednesday",
+        "WEDNESDAY": "Wednesday",
+        "THU": "Thursday",
+        "THUR": "Thursday",
+        "THURS": "Thursday",
+        "THURSDAY": "Thursday",
+        "FRI": "Friday",
+        "FRIDAY": "Friday",
+        "SAT": "Saturday",
+        "SATURDAY": "Saturday",
+        "SUN": "Sunday",
+        "SUNDAY": "Sunday",
+    }
+
+    target_day = entry.day_of_week
+    if "day_of_week" in data and data["day_of_week"] is not None:
+        cleaned_day = str(data["day_of_week"]).strip().upper()
+        if cleaned_day not in day_mapping:
+            return jsonify({
+                "success": False,
+                "message": "Invalid day of week. Allowed values: Monday through Sunday.",
+                "field": "day_of_week",
+            }), 400
+        target_day = day_mapping[cleaned_day]
+
+    # Time validation
+    time_re = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$")
+
+    start_time_val = data.get("start_time")
+    if start_time_val is None:
+        start_t = entry.start_time
+    else:
+        s_str = str(start_time_val).strip()
+        m_start = time_re.match(s_str)
+        if not m_start:
+            return jsonify({
+                "success": False,
+                "message": "Invalid start time format. Use HH:MM in 24-hour format.",
+                "field": "start_time",
+            }), 400
+        start_t = time(int(m_start.group(1)), int(m_start.group(2)))
+
+    end_time_val = data.get("end_time")
+    if end_time_val is None:
+        end_t = entry.end_time
+    else:
+        e_str = str(end_time_val).strip()
+        m_end = time_re.match(e_str)
+        if not m_end:
+            return jsonify({
+                "success": False,
+                "message": "Invalid end time format. Use HH:MM in 24-hour format.",
+                "field": "end_time",
+            }), 400
+        end_t = time(int(m_end.group(1)), int(m_end.group(2)))
+
+    if start_t >= end_t:
+        return jsonify({
+            "success": False,
+            "message": "End time must be later than start time.",
+            "field": "end_time",
+        }), 400
+
+    # Room validation
+    if "room" in data:
+        raw_room = data.get("room")
+        if raw_room is None:
+            target_room = None
+        else:
+            target_room = str(raw_room).strip()
+            if len(target_room) > 50:
+                return jsonify({
+                    "success": False,
+                    "message": "Room name cannot exceed 50 characters.",
+                    "field": "room",
+                }), 400
+            if target_room in ["", "Not assigned", "None", "null"]:
+                target_room = None
+    else:
+        target_room = entry.room
+
+    # Conflict Check 1: Faculty overlap
+    offering = entry.offering
+    faculty_id = offering.faculty_id if offering else None
+    if faculty_id:
+        # Check standard timetable entries for the same faculty on target_day
+        fac_entries = (
+            TimetableEntry.query
+            .join(CourseOffering)
+            .filter(
+                CourseOffering.faculty_id == faculty_id,
+                db.func.lower(TimetableEntry.day_of_week) == target_day.lower(),
+                TimetableEntry.timetable_entry_id != entry.timetable_entry_id,
+            )
+            .all()
+        )
+        for te in fac_entries:
+            if max(start_t, te.start_time) < min(end_t, te.end_time):
+                c_code = te.offering.course.course_code if te.offering and te.offering.course else "another class"
+                fac_name = te.offering.faculty.user.name if te.offering and te.offering.faculty and te.offering.faculty.user else "Faculty"
+                return jsonify({
+                    "success": False,
+                    "message": (
+                        f"Faculty {fac_name} already has a scheduled class ({c_code}) "
+                        f"on {target_day} ({te.start_time.strftime('%H:%M')}–{te.end_time.strftime('%H:%M')})."
+                    ),
+                    "field": "start_time",
+                }), 409
+
+        # Check substitute adjustments where this faculty is substituting for another class
+        sub_adjs = (
+            FacultyAdjustment.query
+            .filter(
+                FacultyAdjustment.substitute_faculty_id == faculty_id,
+                FacultyAdjustment.status == "APPROVED",
+                FacultyAdjustment.timetable_entry_id != entry.timetable_entry_id,
+            )
+            .all()
+        )
+        for adj in sub_adjs:
+            te = adj.timetable_entry
+            if te and te.day_of_week.lower() == target_day.lower():
+                if max(start_t, te.start_time) < min(end_t, te.end_time):
+                    fac_name = offering.faculty.user.name if offering and offering.faculty and offering.faculty.user else "Faculty"
+                    return jsonify({
+                        "success": False,
+                        "message": (
+                            f"Faculty {fac_name} is already substituting for another class "
+                            f"on {target_day} ({te.start_time.strftime('%H:%M')}–{te.end_time.strftime('%H:%M')})."
+                        ),
+                        "field": "start_time",
+                    }), 409
+
+    # Conflict Check 2: Room overlap
+    if target_room:
+        room_entries = (
+            TimetableEntry.query
+            .join(CourseOffering)
+            .filter(
+                db.func.lower(TimetableEntry.day_of_week) == target_day.lower(),
+                TimetableEntry.timetable_entry_id != entry.timetable_entry_id,
+                db.or_(
+                    db.func.lower(TimetableEntry.room) == target_room.lower(),
+                    db.and_(
+                        TimetableEntry.room.is_(None),
+                        db.func.lower(CourseOffering.room) == target_room.lower(),
+                    ),
+                ),
+            )
+            .all()
+        )
+        for te in room_entries:
+            te_ay = canonical_academic_year(te.offering.academic_year) if te.offering else ""
+            entry_ay = canonical_academic_year(entry.offering.academic_year) if entry.offering else ""
+            if not te_ay or not entry_ay or te_ay == entry_ay:
+                if max(start_t, te.start_time) < min(end_t, te.end_time):
+                    c_code = te.offering.course.course_code if te.offering and te.offering.course else "another class"
+                    return jsonify({
+                        "success": False,
+                        "message": (
+                            f"Room {target_room} is already booked on {target_day} "
+                            f"({te.start_time.strftime('%H:%M')}–{te.end_time.strftime('%H:%M')}) for {c_code}."
+                        ),
+                        "field": "room",
+                    }), 409
+
+    # Conflict Check 3: Section overlap
+    if offering and offering.section:
+        sec_entries = (
+            TimetableEntry.query
+            .join(CourseOffering)
+            .filter(
+                CourseOffering.semester == offering.semester,
+                CourseOffering.section == offering.section,
+                db.func.lower(TimetableEntry.day_of_week) == target_day.lower(),
+                TimetableEntry.timetable_entry_id != entry.timetable_entry_id,
+            )
+            .all()
+        )
+        for te in sec_entries:
+            te_ay = canonical_academic_year(te.offering.academic_year) if te.offering else ""
+            entry_ay = canonical_academic_year(entry.offering.academic_year) if entry.offering else ""
+            if not te_ay or not entry_ay or te_ay == entry_ay:
+                if max(start_t, te.start_time) < min(end_t, te.end_time):
+                    c_code = te.offering.course.course_code if te.offering and te.offering.course else "another class"
+                    return jsonify({
+                        "success": False,
+                        "message": (
+                            f"Section {offering.section} (Sem {offering.semester}) already has a scheduled class ({c_code}) "
+                            f"on {target_day} ({te.start_time.strftime('%H:%M')}–{te.end_time.strftime('%H:%M')})."
+                        ),
+                        "field": "start_time",
+                    }), 409
+
+    # Transactional update
+    entry.day_of_week = target_day
+    entry.start_time = start_t
+    entry.end_time = end_t
+    entry.room = target_room
+
+    db.session.commit()
+
+    admin_user_id = int(get_jwt_identity())
+    admin_user = db.session.get(User, admin_user_id)
+    admin_name = admin_user.name if admin_user else f"Admin {admin_user_id}"
+
+    record_activity(
+        action_type="TIMETABLE_ENTRY_UPDATED",
+        description=(
+            f"Updated timetable entry #{entry.timetable_entry_id}: "
+            f"{entry.day_of_week} {entry.start_time.strftime('%H:%M')}–{entry.end_time.strftime('%H:%M')}, "
+            f"Room: {entry.room or 'Not assigned'}"
+        ),
+        actor_id=admin_user_id,
+        actor_name=admin_name,
+        entity_type="TimetableEntry",
+        entity_id=entry.timetable_entry_id,
+        details={
+            "timetable_entry_id": entry.timetable_entry_id,
+            "day_of_week": entry.day_of_week,
+            "start_time": entry.start_time.strftime("%H:%M"),
+            "end_time": entry.end_time.strftime("%H:%M"),
+            "room": entry.room,
+        },
+    )
+
+    return jsonify({
+        "success": True,
+        "message": "Timetable entry updated successfully.",
+        "data": serialize_entry(entry),
     }), 200

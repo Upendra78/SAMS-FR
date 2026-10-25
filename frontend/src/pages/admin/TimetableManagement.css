@@ -771,7 +771,7 @@
   color: #b91c1c;
 }
 
-.timetable-row-adjust-btn {
+.timetable-row-edit-btn {
   background: #f0f9ff;
   border: 1px solid #bae6fd;
   color: #0284c7;
@@ -780,11 +780,57 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.timetable-row-edit-btn:hover {
+  background: #0284c7;
+  color: #ffffff;
+}
+
+.timetable-row-adjust-btn {
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  color: #475569;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .timetable-row-adjust-btn:hover {
-  background: #0284c7;
-  color: #ffffff;
+  background: #e2e8f0;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.timetable-actions-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.timetable-cell-adjust-link {
+  background: none;
+  border: none;
+  color: #0284c7;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 2px 4px;
+  margin-top: 3px;
+  border-radius: 3px;
+  display: inline-block;
+  text-align: left;
+  transition: all 0.15s ease;
+}
+
+.timetable-cell-adjust-link:hover {
+  background: #e0f2fe;
+  color: #0369a1;
+  text-decoration: underline;
 }
 
 /* Pagination */

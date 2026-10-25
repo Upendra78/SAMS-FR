@@ -1831,4 +1831,75 @@
   margin-top: 8px;
 }
 
+/* Liveness Challenge Guidance & Status Badges */
+.attendance-dashboard-layout .attendance-liveness-instruction-badge {
+  position: absolute;
+  top: 14px;
+  left: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-radius: 24px;
+  background: rgba(16, 24, 39, 0.90);
+  border: 1px solid rgba(59, 130, 246, 0.45);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+  color: #60a5fa;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 10;
+  animation: liveness-banner-pop 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
 
+.attendance-dashboard-layout .attendance-liveness-instruction-badge span {
+  color: #ffffff;
+}
+
+@keyframes liveness-banner-pop {
+  0% { transform: translateY(-10px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 1; }
+}
+
+.attendance-dashboard-layout .attendance-scanner-status-toast.spoof {
+  background: rgba(220, 38, 38, 0.92);
+  border: 1px solid #f87171;
+  color: #ffffff;
+}
+
+.attendance-dashboard-layout .attendance-scanner-status-toast.warning {
+  background: rgba(217, 119, 6, 0.92);
+  border: 1px solid #fcd34d;
+  color: #ffffff;
+}
+
+.attendance-dashboard-layout .attendance-scanner-status-toast.danger {
+  background: rgba(153, 27, 27, 0.92);
+  border: 1px solid #ef4444;
+  color: #ffffff;
+}
+
+.attendance-dashboard-layout .attendance-scanner-status-toast.success {
+  background: rgba(16, 185, 129, 0.92);
+  border: 1px solid #6ee7b7;
+  color: #ffffff;
+}
+
+.attendance-dashboard-layout .attendance-scanner-retry-btn {
+  margin-left: auto;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.attendance-dashboard-layout .attendance-scanner-retry-btn:hover {
+  background: rgba(255, 255, 255, 0.35);
+}

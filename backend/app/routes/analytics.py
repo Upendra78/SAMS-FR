@@ -9,6 +9,8 @@ from app.models import (
     CourseOffering,
     Enrollment,
     Faculty,
+    Student,
+    User,
 )
 from app.utils.auth import faculty_required
 from app.utils.academic_year import canonical_academic_year
@@ -23,7 +25,13 @@ analytics_bp = Blueprint(
 
 
 def get_current_faculty():
-    user_id = int(get_jwt_identity())
+    identity = get_jwt_identity()
+    if not identity:
+        return None
+    try:
+        user_id = int(identity)
+    except (TypeError, ValueError):
+        return None
 
     return Faculty.query.filter_by(
         user_id=user_id
@@ -139,15 +147,40 @@ def get_attendance_analytics():
 
         session_count = len(session_ids)
 
-        enrollments = (
+        base_enr_q = (
             Enrollment.query
-            .filter_by(
-                offering_id=offering.offering_id,
-                status="ACTIVE",
+            .join(Student, Enrollment.student_id == Student.student_id)
+            .join(User, Student.user_id == User.user_id)
+            .filter(
+                Enrollment.status == "ACTIVE",
+                User.is_active.is_(True),
+                User.role == "STUDENT",
             )
+        )
+        enrollments = (
+            base_enr_q
+            .filter(Enrollment.offering_id == offering.offering_id)
             .order_by(Enrollment.student_id.asc())
             .all()
         )
+        if not enrollments:
+            sibling_offering_ids = [
+                o.offering_id for o in CourseOffering.query.filter_by(
+                    course_id=offering.course_id,
+                    semester=offering.semester,
+                    section=offering.section,
+                ).all()
+            ]
+            enrollments = (
+                base_enr_q
+                .filter(
+                    Enrollment.offering_id.in_(sibling_offering_ids),
+                    Student.semester == offering.semester,
+                    Student.section == offering.section,
+                )
+                .order_by(Enrollment.student_id.asc())
+                .all()
+            )
 
         student_count = len(enrollments)
 

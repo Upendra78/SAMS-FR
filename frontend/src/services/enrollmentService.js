@@ -53,19 +53,41 @@ export async function previewGroupEnrollment(
 }
 
 /**
+ * Retrieve enrollment summary metrics and student groups.
+ */
+export async function getAdminEnrollmentsSummary() {
+  const response = await api.get("/admin/enrollments/summary");
+  return response.data;
+}
+
+/**
  * Enroll eligible students in the selected offerings.
  *
  * Do not call until the preview has been checked and confirmed.
  */
 export async function bulkEnrollGroup(groupData) {
+  const payload = {
+    department_id: Number(groupData.department_id),
+    academic_year: groupData.academic_year,
+    semester: Number(groupData.semester),
+    section: groupData.section,
+  };
+
+  if (Array.isArray(groupData.course_ids)) {
+    payload.course_ids = groupData.course_ids.map(Number);
+  }
+
+  if (Array.isArray(groupData.offering_ids)) {
+    payload.offering_ids = groupData.offering_ids.map(Number);
+  }
+
+  if (Array.isArray(groupData.student_ids)) {
+    payload.student_ids = groupData.student_ids.map(Number);
+  }
+
   const response = await api.post(
     "/admin/enrollments/group-bulk",
-    {
-      department_id: Number(groupData.department_id),
-      academic_year: groupData.academic_year,
-      semester: Number(groupData.semester),
-      section: groupData.section,
-    }
+    payload
   );
 
   return response.data;

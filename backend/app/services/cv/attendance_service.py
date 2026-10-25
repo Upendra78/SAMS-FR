@@ -5,12 +5,19 @@ from app.extensions import db
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
+    CourseOffering,
     Enrollment,
     FacultyAdjustment,
     Student,
     TimetableEntry,
+    User,
 )
 from app.utils import schedule
+from app.utils.academic_year import (
+    canonical_academic_year,
+    extract_cohort_start_year,
+    is_batch_cohort,
+)
 
 
 def get_active_session(faculty_id):
@@ -93,12 +100,28 @@ def validate_student_attendance_eligibility(
     if user.role != "STUDENT":
         return False, "User account is not a student", student
 
-    # 4. Enrollment check for this exact course offering
+    # 4. Enrollment check for this course offering (or sibling duplicate offering)
     enrollment = Enrollment.query.filter_by(
         student_id=student_id,
         offering_id=session.offering_id,
         status="ACTIVE",
     ).first()
+    if not enrollment and offering:
+        matching_offering_ids = (
+            db.session.query(CourseOffering.offering_id)
+            .filter(
+                CourseOffering.course_id == offering.course_id,
+                CourseOffering.semester == offering.semester,
+                CourseOffering.section == offering.section,
+            )
+            .subquery()
+        )
+        enrollment = Enrollment.query.filter(
+            Enrollment.student_id == student_id,
+            Enrollment.offering_id.in_(db.select(matching_offering_ids.c.offering_id)),
+            Enrollment.status == "ACTIVE",
+        ).first()
+
     if not enrollment:
         return False, "Student is not enrolled in this course", student
 
@@ -114,8 +137,19 @@ def validate_student_attendance_eligibility(
 
     # 7. Academic year match
     if offering.academic_year and student.academic_year:
-        if student.academic_year.strip().lower() != offering.academic_year.strip().lower():
-            return False, f"Student academic year ({student.academic_year}) does not match session academic year ({offering.academic_year})", student
+        student_ay = student.academic_year.strip()
+        offering_ay = canonical_academic_year(offering.academic_year)
+        if is_batch_cohort(student_ay):
+            cohort_start = extract_cohort_start_year(student_ay)
+            offering_start = extract_cohort_start_year(offering_ay)
+            if cohort_start and offering_start:
+                c_start_int = int(cohort_start)
+                o_start_int = int(offering_start)
+                if o_start_int < c_start_int or o_start_int > c_start_int + 5:
+                    return False, f"Offering academic year ({offering.academic_year}) is outside student cohort ({student.academic_year})", student
+        else:
+            if canonical_academic_year(student_ay) != offering_ay:
+                return False, f"Student academic year ({student.academic_year}) does not match session academic year ({offering.academic_year})", student
 
     # 8. Department match
     if course and course.department_id and student.department_id:
@@ -125,8 +159,13 @@ def validate_student_attendance_eligibility(
     # 9. Batch match (if specified on course and student)
     if course and course.batch:
         student_batch_name = student.batch.batch_name if student.batch else None
-        if student_batch_name and student_batch_name.strip().upper() != course.batch.strip().upper():
-            return False, f"Student batch ({student_batch_name}) does not match course batch ({course.batch})", student
+        if student_batch_name:
+            sb_clean = student_batch_name.strip().upper()
+            cb_clean = course.batch.strip().upper()
+            sb_start = extract_cohort_start_year(sb_clean)
+            cb_start = extract_cohort_start_year(cb_clean)
+            if sb_clean != cb_clean and (not sb_start or not cb_start or sb_start != cb_start):
+                return False, f"Student batch ({student_batch_name}) does not match course batch ({course.batch})", student
 
     return True, "Student is eligible", student
 

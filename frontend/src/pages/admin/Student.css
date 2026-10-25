@@ -1132,6 +1132,30 @@
   color: #ffffff;
 }
 
+.student-panel-face-remove-btn {
+  height: 38px;
+  padding: 0 18px;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #dc2626;
+  border: 1px solid #fecaca;
+  font-size: 13px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 8px;
+}
+
+.student-panel-face-remove-btn:hover {
+  background: #fee2e2;
+  color: #b91c1c;
+  border-color: #f87171;
+}
+
+
 /* Panel Footer */
 .student-panel-footer {
   margin-top: 14px;

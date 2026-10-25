@@ -22,6 +22,7 @@ const FaceRegistration = lazy(() => import("../pages/admin/FaceRegistration"));
 const Faculty = lazy(() => import("../pages/admin/Faculty"));
 const Departments = lazy(() => import("../pages/admin/Departments"));
 const AcademicManagement = lazy(() => import("../pages/admin/AcademicManagement"));
+const CourseEnrollments = lazy(() => import("../pages/admin/CourseEnrollments"));
 const AttendanceReports = lazy(() => import("../pages/admin/AttendanceReports"));
 const AdminManagement = lazy(() => import("../pages/admin/AdminManagement"));
 const BatchManagement = lazy(() => import("../pages/admin/BatchManagement"));
@@ -181,7 +182,7 @@ function AppRoutes() {
 
           <Route
             path="academic-management/course-enrollments"
-            element={<AcademicManagement />}
+            element={<CourseEnrollments />}
           />
 
           <Route
