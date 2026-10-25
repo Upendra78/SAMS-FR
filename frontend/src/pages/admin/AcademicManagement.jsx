@@ -46,6 +46,15 @@ import activeCoursesImage from "../../../image/ActiveCourses.png";
 import offeringsImage from "../../../image/Offerings.png";
 import enrollmentsImage from "../../../image/Enrollments.png";
 
+import {
+  formatAcademicYear,
+  toCanonicalAcademicYear,
+  isSingleAcademicSession,
+  getAcademicYearOptions,
+  extractCohortStartYear,
+} from "../../utils/academicYearUtils";
+import ErrorBoundary from "../../components/ErrorBoundary";
+
 import "./AcademicManagement.css";
 
 const TABS = [
@@ -62,11 +71,13 @@ const EMPTY_COURSE_FORM = {
   semester: "",
   credits: "",
   batch: "",
+  academic_year: "",
 };
 
 const EMPTY_OFFERING_FORM = {
   course_id: "",
   faculty_id: "",
+  batch: "",
   academic_year: "",
   semester: "",
   section: "",
@@ -155,9 +166,6 @@ function AcademicManagement() {
 
   // Course data
   const [courses, setCourses] = useState([]);
-  const [batches, setBatches] = useState([]);
-  const [batchesLoading, setBatchesLoading] = useState(false);
-  const [batchesError, setBatchesError] = useState("");
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [coursesError, setCoursesError] = useState("");
   const [departments, setDepartments] = useState([]);
@@ -185,6 +193,8 @@ function AcademicManagement() {
   const [offeringsLoading, setOfferingsLoading] = useState(false);
   const [offeringsError, setOfferingsError] = useState("");
   const [faculty, setFaculty] = useState([]);
+  const [offeringDropdownLoading, setOfferingDropdownLoading] = useState(false);
+  const [offeringDropdownError, setOfferingDropdownError] = useState("");
 
   const [showOfferingModal, setShowOfferingModal] = useState(false);
   const [editingOfferingId, setEditingOfferingId] = useState(null);
@@ -195,6 +205,52 @@ function AcademicManagement() {
   const [offeringForm, setOfferingForm] = useState({
     ...EMPTY_OFFERING_FORM,
   });
+
+  const [batches, setBatches] = useState([]);
+  const [batchesLoading, setBatchesLoading] = useState(true);
+
+  const academicYearOptions = useMemo(() => getAcademicYearOptions(), []);
+
+  useEffect(() => {
+    let cancelled = false;
+    getAdminBatches()
+      .then((result) => {
+        if (!cancelled && result?.success && Array.isArray(result.data)) {
+          setBatches(result.data);
+        }
+      })
+      .catch(() => {
+        // Fallback handled in batchOptions
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setBatchesLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const batchOptions = useMemo(() => {
+    const list = [];
+    if (Array.isArray(batches) && batches.length > 0) {
+      batches.forEach((b) => {
+        const val = b.raw_name || b.batch_name;
+        const lbl = b.batch_name || b.raw_name;
+        if (val && !list.some((item) => item.value === val)) {
+          list.push({ value: val, label: lbl });
+        }
+      });
+    }
+    ["2023", "2024", "2025", "2026", "2027", "2028"].forEach((y) => {
+      if (!list.some((item) => item.value === y)) {
+        list.push({ value: y, label: y });
+      }
+    });
+    return list;
+  }, [batches]);
 
   // Enrollment data
   const [enrollments, setEnrollments] = useState([]);
@@ -512,39 +568,6 @@ function AcademicManagement() {
     };
   }, [activeTab]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadBatches = async () => {
-      setBatchesLoading(true);
-      setBatchesError("");
-
-      try {
-        const response = await getAdminBatches();
-
-        if (!cancelled) {
-          setBatches(response.data || []);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setBatchesError(
-            error.response?.data?.message ||
-              "Failed to load batches."
-          );
-        }
-      } finally {
-        if (!cancelled) {
-          setBatchesLoading(false);
-        }
-      }
-    };
-
-    loadBatches();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Load enrollment records and the data needed by the enrollment form.
   useEffect(() => {
@@ -804,6 +827,10 @@ function AcademicManagement() {
 
     setEditingCourseId(course?.course_id ?? null);
 
+    const initialBatch = course?.batch || "";
+    const initialSem = course?.semester ? Number(course.semester) : 1;
+    const initialAY = course?.academic_year || (initialBatch ? toCanonicalAcademicYear(initialBatch, initialSem) : "");
+
     setCourseForm(
       course
         ? {
@@ -812,31 +839,35 @@ function AcademicManagement() {
             department_id: String(course.department_id ?? ""),
             semester: String(course.semester ?? ""),
             credits: String(course.credits ?? ""),
-            batch: course.batch || "",
+            batch: initialBatch,
+            academic_year: initialAY,
           }
         : { ...EMPTY_COURSE_FORM }
     );
 
     setShowCourseModal(true);
-    setDepartmentsLoading(true);
 
-    try {
-      const result = await getAdminDepartments();
+    if (departments.length === 0) {
+      setDepartmentsLoading(true);
 
-      if (!result?.success || !Array.isArray(result.data)) {
-        throw new Error(
-          result?.message || "Unable to load departments."
+      try {
+        const result = await getAdminDepartments();
+
+        if (!result?.success || !Array.isArray(result.data)) {
+          throw new Error(
+            result?.message || "Unable to load departments."
+          );
+        }
+
+        setDepartments(result.data);
+      } catch (error) {
+        setDepartments([]);
+        setDepartmentError(
+          getErrorMessage(error, "Unable to load departments.")
         );
+      } finally {
+        setDepartmentsLoading(false);
       }
-
-      setDepartments(result.data);
-    } catch (error) {
-      setDepartments([]);
-      setDepartmentError(
-        getErrorMessage(error, "Unable to load departments.")
-      );
-    } finally {
-      setDepartmentsLoading(false);
     }
   };
 
@@ -894,6 +925,10 @@ function AcademicManagement() {
     const credits = Number(courseForm.credits);
     const departmentId = Number(courseForm.department_id);
     const isEditing = editingCourseId !== null;
+    const selectedBatch = courseForm.batch.trim();
+    const canonAcademicYear = courseForm.academic_year.trim()
+      ? toCanonicalAcademicYear(courseForm.academic_year.trim(), semester)
+      : (selectedBatch ? toCanonicalAcademicYear(selectedBatch, semester) : "");
 
     const payload = {
       course_code: courseForm.course_code.trim(),
@@ -901,7 +936,8 @@ function AcademicManagement() {
       department_id: departmentId,
       semester,
       credits,
-      batch: courseForm.batch.trim()
+      batch: selectedBatch || extractCohortStartYear(canonAcademicYear),
+      academic_year: canonAcademicYear,
     };
 
     if (
@@ -965,17 +1001,78 @@ function AcademicManagement() {
     }
   };
 
-  const handleOpenOfferingModal = (offering = null) => {
+  const loadOfferingDropdowns = useCallback(async () => {
+    setOfferingDropdownLoading(true);
+    setOfferingDropdownError("");
+
+    try {
+      const [courseResult, facultyResult] = await Promise.allSettled([
+        getAdminCourses(),
+        getAdminFaculty(),
+      ]);
+
+      let errorMsg = "";
+
+      if (
+        courseResult.status === "fulfilled" &&
+        courseResult.value?.success &&
+        Array.isArray(courseResult.value.data)
+      ) {
+        setCourses(courseResult.value.data);
+      } else {
+        const err =
+          courseResult.status === "rejected"
+            ? courseResult.reason
+            : new Error(courseResult.value?.message || "Unable to load courses.");
+        errorMsg = getErrorMessage(err, "Unable to load courses.");
+      }
+
+      if (
+        facultyResult.status === "fulfilled" &&
+        facultyResult.value?.success &&
+        Array.isArray(facultyResult.value.data)
+      ) {
+        setFaculty(facultyResult.value.data);
+      } else {
+        const err =
+          facultyResult.status === "rejected"
+            ? facultyResult.reason
+            : new Error(facultyResult.value?.message || "Unable to load faculty.");
+        const fMsg = getErrorMessage(err, "Unable to load faculty.");
+        errorMsg = errorMsg ? `${errorMsg} ${fMsg}` : fMsg;
+      }
+
+      if (errorMsg && (courses.length === 0 || faculty.length === 0)) {
+        setOfferingDropdownError(errorMsg);
+      }
+    } catch (err) {
+      setOfferingDropdownError(
+        getErrorMessage(err, "Unable to load course or faculty options.")
+      );
+    } finally {
+      setOfferingDropdownLoading(false);
+    }
+  }, [courses.length, faculty.length]);
+
+  const handleOpenOfferingModal = async (offering = null) => {
     setOfferingActionError("");
     setOfferingActionMessage("");
+    setOfferingDropdownError("");
     setEditingOfferingId(offering?.offering_id ?? null);
+
+    const initialBatch =
+      offering?.batch ||
+      (courses.find((c) => String(c.course_id) === String(offering?.course_id))?.batch || "");
 
     setOfferingForm(
       offering
         ? {
             course_id: String(offering.course_id ?? ""),
             faculty_id: String(offering.faculty_id ?? ""),
-            academic_year: offering.academic_year || "",
+            batch: initialBatch,
+            academic_year: offering.academic_year
+              ? toCanonicalAcademicYear(formatAcademicYear(offering.academic_year, offering.semester))
+              : "",
             semester: String(offering.semester ?? ""),
             section: offering.section || "",
           }
@@ -983,6 +1080,10 @@ function AcademicManagement() {
     );
 
     setShowOfferingModal(true);
+
+    if (courses.length === 0 || faculty.length === 0) {
+      await loadOfferingDropdowns();
+    }
   };
 
   const handleSaveOffering = async (event) => {
@@ -990,9 +1091,22 @@ function AcademicManagement() {
 
     const isEditing = editingOfferingId !== null;
 
+    const canonAcademicYear = toCanonicalAcademicYear(
+      offeringForm.academic_year.trim(),
+      Number(offeringForm.semester)
+    );
+
+    if (!isSingleAcademicSession(canonAcademicYear)) {
+      setOfferingActionError(
+        "Academic Year must be a 1-year academic session consisting of two consecutive calendar years (e.g. 2025-2026)."
+      );
+      return;
+    }
+
     const payload = {
       course_id: Number(offeringForm.course_id),
-      academic_year: offeringForm.academic_year.trim(),
+      batch: offeringForm.batch.trim(),
+      academic_year: canonAcademicYear,
       semester: Number(offeringForm.semester),
       section: offeringForm.section.trim(),
     };
@@ -1026,16 +1140,24 @@ function AcademicManagement() {
     setOfferingActionMessage("");
 
     try {
-      if (isEditing) {
-        await updateAdminCourseOffering(editingOfferingId, payload);
-      } else {
-        await createAdminCourseOffering(payload);
+      const result = isEditing
+        ? await updateAdminCourseOffering(editingOfferingId, payload)
+        : await createAdminCourseOffering(payload);
+
+      if (!result?.success) {
+        throw new Error(
+          result?.message ||
+            (isEditing
+              ? "Unable to update course offering."
+              : "Unable to create course offering.")
+        );
       }
 
       setOfferingActionMessage(
-        isEditing
-          ? "Course offering updated successfully."
-          : "Course offering created successfully."
+        result?.message ||
+          (isEditing
+            ? "Course offering updated successfully."
+            : "Course offering created successfully.")
       );
 
       setShowOfferingModal(false);
@@ -1046,7 +1168,12 @@ function AcademicManagement() {
       await loadOfferingData();
     } catch (error) {
       setOfferingActionError(
-        getErrorMessage(error, "Unable to save course offering.")
+        getErrorMessage(
+          error,
+          isEditing
+            ? "Unable to update course offering."
+            : "Unable to create course offering."
+        )
       );
     } finally {
       setSavingOffering(false);
@@ -1360,7 +1487,8 @@ function AcademicManagement() {
   );
 
   return (
-    <section className="academic-management-page">
+    <ErrorBoundary>
+      <section className="academic-management-page">
       <header className="academic-page-header">
         <div>
           <span className="academic-eyebrow">Admin Portal</span>
@@ -1774,6 +1902,7 @@ function AcademicManagement() {
                     <th>Semester</th>
                     <th>Credits</th>
                     <th>Batch</th>
+                    <th>Academic Year</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -1807,6 +1936,12 @@ function AcademicManagement() {
                         <td>{course.semester ?? "—"}</td>
                         <td>{course.credits ?? "—"}</td>
                         <td>{course.batch || "—"}</td>
+                        <td>
+                          {formatAcademicYear(
+                            course.academic_year || course.batch,
+                            course.semester
+                          )}
+                        </td>
                         <td>
                           <button
                             type="button"
@@ -1995,6 +2130,7 @@ function AcademicManagement() {
                     <th>ID</th>
                     <th>Course</th>
                     <th>Faculty</th>
+                    <th>Batch</th>
                     <th>Academic Year</th>
                     <th>Semester</th>
                     <th>Section</th>
@@ -2015,7 +2151,13 @@ function AcademicManagement() {
                         {offering.faculty_name ||
                           `Faculty #${offering.faculty_id}`}
                       </td>
-                      <td>{offering.academic_year || "—"}</td>
+                      <td>{offering.batch || "—"}</td>
+                      <td>
+                        {formatAcademicYear(
+                          offering.academic_year,
+                          offering.semester
+                        )}
+                      </td>
                       <td>{offering.semester ?? "—"}</td>
                       <td>{offering.section || "—"}</td>
                       <td>{offering.enrollment_count ?? 0}</td>
@@ -2875,45 +3017,73 @@ function AcademicManagement() {
                     />
                   </div>
                   <div className="academic-form-field">
-                    <label htmlFor="course-batch">Batch / Academic </label>
+                    <label htmlFor="course-batch">Batch *</label>
                     <select
                       id="course-batch"
                       name="batch"
                       value={courseForm.batch}
+                      onChange={(event) => {
+                        const newBatch = event.target.value;
+                        const semNum = Number(courseForm.semester) || 1;
+                        const autoAY = newBatch ? toCanonicalAcademicYear(newBatch, semNum) : "";
+                        setCourseForm((current) => ({
+                          ...current,
+                          batch: newBatch,
+                          academic_year: current.academic_year || autoAY,
+                        }));
+                      }}
+                      required
+                      disabled={savingCourse || batchesLoading}
+                    >
+                      <option value="">{batchesLoading ? "Loading batches..." : "Select batch"}</option>
+                      {batchOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                      {courseForm.batch &&
+                        !batchOptions.some((opt) => opt.value === courseForm.batch) && (
+                          <option value={courseForm.batch}>
+                            {courseForm.batch}
+                          </option>
+                        )}
+                    </select>
+                    <small style={{ fontSize: "11px", color: "#6b7280" }}>
+                      Admission cohort (e.g. 2024, 2025, 2026)
+                    </small>
+                  </div>
+
+                  <div className="academic-form-field">
+                    <label htmlFor="course-academic-year">Academic Year *</label>
+                    <select
+                      id="course-academic-year"
+                      name="academic_year"
+                      value={courseForm.academic_year}
                       onChange={(event) =>
                         setCourseForm((current) => ({
                           ...current,
-                          batch: event.target.value,
+                          academic_year: event.target.value,
                         }))
                       }
                       required
                       disabled={savingCourse}
                     >
-                      <option value="">Select batch</option>
-
-                      {batchesLoading && (
-                        <option value="" disabled>
-                          Loading batches...
+                      <option value="">Select academic year</option>
+                      {academicYearOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
                         </option>
-                      )}
-
-                      {!batchesLoading &&
-                        batches
-                          .filter((batch) => batch.is_active)
-                          .map((batch) => (
-                            <option
-                              key={batch.batch_id}
-                              value={batch.batch_name}
-                            >
-                              {batch.batch_name}
-                            </option>
-                          ))}
+                      ))}
+                      {courseForm.academic_year &&
+                        !academicYearOptions.some((opt) => opt.value === courseForm.academic_year) && (
+                          <option value={courseForm.academic_year}>
+                            {formatAcademicYear(courseForm.academic_year)}
+                          </option>
+                        )}
                     </select>
-                    {batchesError && (
-                      <p className="form-error" role="alert">
-                        {batchesError}
-                      </p>
-                    )}
+                    <small style={{ fontSize: "11px", color: "#6b7280" }}>
+                      1-year teaching session (e.g. 2025–2026)
+                    </small>
                   </div>
                 </div>
               </div>
@@ -3004,17 +3174,22 @@ function AcademicManagement() {
                     <select
                       id="offering-course"
                       value={offeringForm.course_id}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const cid = event.target.value;
+                        const selectedCourse = courses.find((c) => String(c.course_id) === String(cid));
                         setOfferingForm((current) => ({
                           ...current,
-                          course_id: event.target.value,
-                        }))
-                      }
+                          course_id: cid,
+                          batch: current.batch || selectedCourse?.batch || "",
+                        }));
+                      }}
                       required
-                      disabled={savingOffering}
+                      disabled={savingOffering || offeringDropdownLoading}
                     >
-                      <option value="">Select course</option>
-                      {courses.map((course) => (
+                      <option value="">
+                        {offeringDropdownLoading ? "Loading courses..." : "Select course"}
+                      </option>
+                      {(Array.isArray(courses) ? courses : []).map((course) => (
                         <option
                           key={course.course_id}
                           value={course.course_id}
@@ -3038,10 +3213,12 @@ function AcademicManagement() {
                           }))
                         }
                         required
-                        disabled={savingOffering}
+                        disabled={savingOffering || offeringDropdownLoading}
                       >
-                        <option value="">Select faculty</option>
-                        {faculty.map((member) => (
+                        <option value="">
+                          {offeringDropdownLoading ? "Loading faculty..." : "Select faculty"}
+                        </option>
+                        {(Array.isArray(faculty) ? faculty : []).map((member) => (
                           <option
                             key={member.faculty_id}
                             value={member.faculty_id}
@@ -3056,8 +3233,39 @@ function AcademicManagement() {
                   )}
 
                   <div className="academic-form-field">
+                    <label htmlFor="offering-batch">Batch</label>
+                    <select
+                      id="offering-batch"
+                      value={offeringForm.batch}
+                      onChange={(event) =>
+                        setOfferingForm((current) => ({
+                          ...current,
+                          batch: event.target.value,
+                        }))
+                      }
+                      disabled={savingOffering || batchesLoading}
+                    >
+                      <option value="">{batchesLoading ? "Loading batches..." : "Select batch"}</option>
+                      {batchOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                      {offeringForm.batch &&
+                        !batchOptions.some((opt) => opt.value === offeringForm.batch) && (
+                          <option value={offeringForm.batch}>
+                            {offeringForm.batch}
+                          </option>
+                        )}
+                    </select>
+                    <small style={{ fontSize: "11px", color: "#6b7280" }}>
+                      Admission cohort (e.g. 2024, 2025, 2026)
+                    </small>
+                  </div>
+
+                  <div className="academic-form-field">
                     <label htmlFor="offering-year">Academic Year *</label>
-                    <input
+                    <select
                       id="offering-year"
                       value={offeringForm.academic_year}
                       onChange={(event) =>
@@ -3066,12 +3274,24 @@ function AcademicManagement() {
                           academic_year: event.target.value,
                         }))
                       }
-                      placeholder="e.g. 2026-2027"
                       required
                       disabled={savingOffering}
-                    />
+                    >
+                      <option value="">Select academic year</option>
+                      {academicYearOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                      {offeringForm.academic_year &&
+                        !academicYearOptions.some((opt) => opt.value === offeringForm.academic_year) && (
+                          <option value={offeringForm.academic_year}>
+                            {formatAcademicYear(offeringForm.academic_year)}
+                          </option>
+                        )}
+                    </select>
                     <small style={{ fontSize: "11px", color: "#6b7280" }}>
-                      1-year academic session (e.g. 2026-2027), not student batch range
+                      1-year academic session (e.g. 2025-2026), not student batch range
                     </small>
                   </div>
 
@@ -3110,6 +3330,40 @@ function AcademicManagement() {
                       disabled={savingOffering}
                     />
                   </div>
+
+                  {offeringDropdownError && (
+                    <div
+                      className="academic-form-error"
+                      role="alert"
+                      style={{
+                        gridColumn: "1 / -1",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        padding: "8px 12px",
+                        backgroundColor: "#fef2f2",
+                        border: "1px solid #fee2e2",
+                        borderRadius: "6px",
+                        color: "#991b1b",
+                        fontSize: "13px",
+                      }}
+                    >
+                      <span>{offeringDropdownError}</span>
+                      <button
+                        type="button"
+                        className="academic-secondary-button"
+                        onClick={loadOfferingDropdowns}
+                        disabled={offeringDropdownLoading}
+                        style={{ padding: "4px 8px", fontSize: "12px" }}
+                      >
+                        <FontAwesomeIcon
+                          icon={offeringDropdownLoading ? faSpinner : faRotate}
+                          spin={offeringDropdownLoading}
+                        />{" "}
+                        Retry
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -3129,8 +3383,9 @@ function AcademicManagement() {
                   className="academic-primary-button"
                   disabled={
                     savingOffering ||
+                    offeringDropdownLoading ||
                     courses.length === 0 ||
-                    faculty.length === 0
+                    (!editingOfferingId && faculty.length === 0)
                   }
                 >
                   <FontAwesomeIcon
@@ -3148,7 +3403,8 @@ function AcademicManagement() {
           </div>
         </div>
       )}
-    </section>
+      </section>
+    </ErrorBoundary>
   );
 }
 

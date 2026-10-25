@@ -36,6 +36,7 @@ from app.services.face_identity_service import (
     cleanup_obsolete_face_profiles,
     detect_suspected_duplicate_students,
     reconcile_duplicate_students,
+    remove_student_face_profile,
 )
 from app.utils.auth import admin_required
 from app.utils.academic_year import (
@@ -46,6 +47,7 @@ from app.utils.academic_year import (
     get_current_academic_session,
     is_batch_cohort,
     is_single_academic_session,
+    resolve_offering_academic_year,
     resolve_student_academic_info,
     set_current_academic_session,
 )
@@ -2526,6 +2528,82 @@ def cleanup_obsolete_profiles_route():
         }), 500
 
 
+# ============================================================
+# REMOVE STUDENT FACE BIOMETRIC REGISTRATION
+# ============================================================
+
+@admin_bp.delete("/students/<int:student_id>/face")
+@admin_bp.delete("/students/<int:student_id>/face-profile")
+@admin_required
+def remove_student_face_registration(student_id):
+    """
+    Administrator-controlled removal / deactivation of a student's active face biometric.
+    Allows re-registration while maintaining student academic data and attendance history.
+    """
+    admin_user_id = int(get_jwt_identity())
+    data = request.get_json(silent=True) or {}
+    reason = data.get("reason") or request.args.get("reason")
+    face_id = data.get("face_id") or request.args.get("face_id", type=int)
+    permanent = data.get("permanent") if "permanent" in data else request.args.get("permanent", type=bool, default=False)
+
+    success, message, result_data, status = remove_student_face_profile(
+        student_id=student_id,
+        admin_user_id=admin_user_id,
+        face_id=face_id,
+        reason=reason,
+        permanent=permanent,
+    )
+
+    if not success:
+        if status in ("student_not_found", "face_profile_not_found", "not_registered"):
+            return jsonify({
+                "success": False,
+                "message": message,
+                "status": status,
+                "data": result_data,
+            }), 404
+        elif status in ("profile_student_mismatch", "invalid_face_id"):
+            return jsonify({
+                "success": False,
+                "message": message,
+                "status": status,
+            }), 400
+        return jsonify({
+            "success": False,
+            "message": message,
+            "status": status,
+        }), 500
+
+    return jsonify({
+        "success": True,
+        "message": message,
+        "data": result_data,
+    }), 200
+
+
+# ============================================================
+# ACADEMIC MANAGEMENT SUMMARY
+# ============================================================
+
+@admin_bp.get("/academic/summary")
+@admin_required
+def get_academic_summary():
+    total_courses = Course.query.count()
+    active_courses = Course.query.filter_by(is_active=True).count()
+    course_offerings = CourseOffering.query.count()
+    enrollments = Enrollment.query.filter_by(status="ACTIVE").count()
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_courses": total_courses,
+            "active_courses": active_courses,
+            "course_offerings": course_offerings,
+            "enrollments": enrollments,
+        },
+    }), 200
+
+
 # COURSE MANAGEMENT
 
 
@@ -2546,6 +2624,7 @@ def get_courses():
             "department_code": course.department.department_code,
             "semester": course.semester,
             "credits": course.credits,
+            "academic_year": resolve_offering_academic_year(course.batch, course.semester) if course.batch else "",
             "batch": course.batch,
             "is_active": course.is_active,
         }
@@ -2580,6 +2659,8 @@ def get_course(course_id):
             "department_code": course.department.department_code,
             "semester": course.semester,
             "credits": course.credits,
+            "academic_year": resolve_offering_academic_year(course.batch, course.semester) if course.batch else "",
+            "batch": course.batch,
         },
     }), 200
 
@@ -2594,7 +2675,11 @@ def create_course():
     department_id = data.get("department_id")
     semester = data.get("semester")
     credits = data.get("credits")
-    batch = str(data.get("batch") or "").strip()
+    raw_batch = str(data.get("batch") if ("batch" in data and data.get("batch")) else (data.get("academic_year") or "")).strip()
+    if is_single_academic_session(raw_batch):
+        batch = canonical_academic_year(raw_batch)
+    else:
+        batch = raw_batch
 
     if (
         not course_code
@@ -2751,6 +2836,7 @@ def update_course(course_id):
         "credits",
         "is_active",
         "batch",
+        "academic_year",
     }
 
     if not data or not set(data.keys()).issubset(allowed_fields):
@@ -2804,8 +2890,9 @@ def update_course(course_id):
 
         course.course_name = course_name
 
-    if "batch" in data:
-        batch = str(data.get("batch") or "").strip()
+    if "batch" in data or "academic_year" in data:
+        raw_val = data.get("batch") if ("batch" in data and data.get("batch")) else data.get("academic_year")
+        batch = str(raw_val or "").strip()
 
         if not batch:
             return jsonify({
@@ -2989,6 +3076,17 @@ def get_course_offerings():
         ).group_by(AttendanceSession.offering_id).all()
     )
 
+    enrollment_batches = dict(
+        db.session.query(
+            Enrollment.offering_id,
+            Batch.batch_name
+        )
+        .join(Student, Enrollment.student_id == Student.student_id)
+        .join(Batch, Student.batch_id == Batch.batch_id)
+        .distinct()
+        .all()
+    )
+
     data = []
     for offering in offerings:
         if offering.faculty_id:
@@ -3003,6 +3101,12 @@ def get_course_offerings():
         else:
             faculty_name = "Unassigned"
 
+        batch_val = (
+            (offering.course.batch if offering.course and offering.course.batch else None)
+            or enrollment_batches.get(offering.offering_id)
+            or ""
+        )
+
         data.append({
             "offering_id": offering.offering_id,
             "course_id": offering.course_id,
@@ -3010,7 +3114,9 @@ def get_course_offerings():
             "course_name": offering.course.course_name if offering.course else "",
             "faculty_id": offering.faculty_id,
             "faculty_name": faculty_name,
-            "academic_year": offering.academic_year,
+            "batch": batch_val,
+            "academic_year": resolve_offering_academic_year(offering.academic_year, offering.semester),
+            "raw_academic_year": offering.academic_year,
             "semester": offering.semester,
             "section": offering.section,
             "room": offering.room,
@@ -3071,10 +3177,10 @@ def create_course_offering():
     else:
         academic_year = canonical_academic_year(academic_year)
 
-    if is_batch_cohort(academic_year):
+    if not is_single_academic_session(academic_year):
         return jsonify({
             "success": False,
-            "message": "Academic year for course offerings must represent a 1-year academic session (e.g. '2026-2027'), not a cohort range.",
+            "message": "Academic year for course offerings must represent a 1-year academic session (e.g. '2025-2026'), not a cohort range.",
         }), 400
 
     section = str(data.get("section") or "").strip()
@@ -3096,6 +3202,11 @@ def create_course_offering():
             "message": "Course not found",
         }), 404
 
+
+    if "batch" in data and course:
+        raw_b = str(data.get("batch") or "").strip()
+        if raw_b and (not course.batch or course.batch != raw_b):
+            course.batch = raw_b
 
     offering = CourseOffering(
         course_id=course_id,
@@ -3131,7 +3242,7 @@ def create_course_offering():
     }), 201
 
 
-@admin_bp.patch("/course-offerings/<int:offering_id>")
+@admin_bp.route("/course-offerings/<int:offering_id>", methods=["PATCH", "PUT"])
 @admin_required
 def update_course_offering(offering_id):
     offering = db.session.get(CourseOffering, offering_id)
@@ -3216,10 +3327,10 @@ def update_course_offering(offering_id):
                 "message": "Academic year cannot be empty",
             }), 400
         canon_ay = canonical_academic_year(academic_year)
-        if is_batch_cohort(canon_ay):
+        if not is_single_academic_session(canon_ay):
             return jsonify({
                 "success": False,
-                "message": "Academic year for course offerings must represent a 1-year academic session (e.g. '2026-2027'), not a cohort range.",
+                "message": "Academic year for course offerings must represent a 1-year academic session (e.g. '2025-2026'), not a cohort range.",
             }), 400
         offering.academic_year = canon_ay
 
@@ -3234,6 +3345,11 @@ def update_course_offering(offering_id):
 
     if "room" in data:
         offering.room = str(data["room"] or "").strip() or None
+
+    if "batch" in data and offering.course:
+        raw_b = str(data.get("batch") or "").strip()
+        if raw_b:
+            offering.course.batch = raw_b
 
     try:
         db.session.commit()

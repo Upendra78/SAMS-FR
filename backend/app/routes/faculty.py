@@ -1,3 +1,4 @@
+from datetime import datetime, date
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 
@@ -16,7 +17,11 @@ from app.models import (
     FacultyAdjustment,
     TimetableEntry,
 )
-from app.utils.academic_year import canonical_academic_year, resolve_student_academic_info
+from app.utils.academic_year import (
+    canonical_academic_year,
+    resolve_student_academic_info,
+    resolve_offering_academic_year,
+)
 from app.utils.auth import faculty_required, faculty_or_admin_required
 
 
@@ -72,11 +77,119 @@ def serialize_faculty_profile(faculty):
 @faculty_bp.get("/dashboard")
 @faculty_or_admin_required
 def faculty_dashboard():
+    faculty = get_current_faculty()
+    if not faculty:
+        return jsonify({
+            "success": False,
+            "message": "Faculty profile not found. Please contact administration.",
+        }), 404
+
+    from app.routes.attendance import serialize_session
+
+    offerings = (
+        CourseOffering.query
+        .filter_by(faculty_id=faculty.faculty_id)
+        .order_by(CourseOffering.offering_id.asc())
+        .all()
+    )
+    assigned_courses_count = len(offerings)
+
+    # Today's classes
+    local_now = datetime.now()
+    today_weekday = local_now.strftime("%A")
+
+    substitute_entry_ids = [
+        adj.timetable_entry_id
+        for adj in FacultyAdjustment.query.filter_by(
+            substitute_faculty_id=faculty.faculty_id,
+            status="APPROVED",
+        ).all()
+    ]
+
+    tt_query = TimetableEntry.query.join(CourseOffering).filter(
+        db.or_(
+            CourseOffering.faculty_id == faculty.faculty_id,
+            TimetableEntry.timetable_entry_id.in_(substitute_entry_ids),
+        ) if substitute_entry_ids else (CourseOffering.faculty_id == faculty.faculty_id)
+    )
+    todays_entries = tt_query.filter(
+        db.func.lower(TimetableEntry.day_of_week) == today_weekday.lower()
+    ).order_by(TimetableEntry.start_time.asc()).all()
+    todays_classes_count = len(todays_entries)
+
+    # Active session
+    active_session = (
+        AttendanceSession.query
+        .filter_by(faculty_id=faculty.faculty_id, status="ACTIVE")
+        .order_by(AttendanceSession.session_id.desc())
+        .first()
+    )
+
+    # Attendance statistics across closed sessions
+    closed_sessions = (
+        AttendanceSession.query
+        .filter_by(faculty_id=faculty.faculty_id, status="CLOSED")
+        .order_by(AttendanceSession.session_date.desc(), AttendanceSession.session_id.desc())
+        .all()
+    )
+    closed_session_ids = [s.session_id for s in closed_sessions]
+    closed_sessions_count = len(closed_session_ids)
+
+    total_present = 0
+    total_absent = 0
+    if closed_session_ids:
+        total_present = (
+            AttendanceRecord.query
+            .filter(
+                AttendanceRecord.session_id.in_(closed_session_ids),
+                AttendanceRecord.status.in_(["PRESENT", "LATE"]),
+            )
+            .count()
+        )
+        total_absent = (
+            AttendanceRecord.query
+            .filter(
+                AttendanceRecord.session_id.in_(closed_session_ids),
+                AttendanceRecord.status == "ABSENT",
+            )
+            .count()
+        )
+
+    total_possible = total_present + total_absent
+    average_attendance_percentage = (
+        round((total_present / total_possible) * 100, 2)
+        if total_possible > 0
+        else None
+    )
+
+    recent_sessions = [
+        serialize_session(s)
+        for s in closed_sessions[:5]
+    ]
+
     return jsonify({
         "success": True,
-        "message": "Faculty access granted",
+        "message": "Faculty dashboard data retrieved successfully",
         "data": {
             "role": "FACULTY",
+            "faculty_id": faculty.faculty_id,
+            "faculty_name": faculty.user.name if faculty.user else None,
+            "employee_id": faculty.employee_id,
+            "assigned_courses_count": assigned_courses_count,
+            "todays_classes_count": todays_classes_count,
+            "active_sessions_count": 1 if active_session else 0,
+            "has_active_session": bool(active_session),
+            "active_session": serialize_session(active_session) if active_session else None,
+            "average_attendance_percentage": average_attendance_percentage,
+            "has_attendance_history": closed_sessions_count > 0,
+            "attendance_overview": {
+                "present": total_present,
+                "absent": total_absent,
+                "closed_sessions": closed_sessions_count,
+                "attendance_percentage": average_attendance_percentage,
+                "has_history": closed_sessions_count > 0,
+            },
+            "recent_sessions": recent_sessions,
         },
     }), 200
 
@@ -285,7 +398,15 @@ def get_faculty_classes_summary():
     if semester is not None:
         query = query.filter(CourseOffering.semester == semester)
     if academic_year and academic_year not in ["All", "all", ""]:
-        query = query.filter(CourseOffering.academic_year == academic_year)
+        canon_ay = canonical_academic_year(academic_year) or academic_year
+        start_year = canon_ay.split("-")[0].strip() if "-" in canon_ay else canon_ay.strip()
+        query = query.filter(
+            db.or_(
+                CourseOffering.academic_year == academic_year,
+                CourseOffering.academic_year == canon_ay,
+                CourseOffering.academic_year.like(f"{start_year}%"),
+            )
+        )
     if section and section not in ["All", "all", "All Sections", ""]:
         query = query.filter(CourseOffering.section == section)
     if day and day not in ["All", "all", "All Days", ""]:
@@ -341,7 +462,15 @@ def get_faculty_classes_summary():
     if semester is not None:
         tt_query = tt_query.filter(CourseOffering.semester == semester)
     if academic_year and academic_year not in ["All", "all", ""]:
-        tt_query = tt_query.filter(CourseOffering.academic_year == academic_year)
+        canon_ay = canonical_academic_year(academic_year) or academic_year
+        start_year = canon_ay.split("-")[0].strip() if "-" in canon_ay else canon_ay.strip()
+        tt_query = tt_query.filter(
+            db.or_(
+                CourseOffering.academic_year == academic_year,
+                CourseOffering.academic_year == canon_ay,
+                CourseOffering.academic_year.like(f"{start_year}%"),
+            )
+        )
     if section and section not in ["All", "all", "All Sections", ""]:
         tt_query = tt_query.filter(CourseOffering.section == section)
     if day and day not in ["All", "all", "All Days", ""]:
@@ -462,7 +591,15 @@ def get_faculty_courses():
     if semester is not None:
         query = query.filter(CourseOffering.semester == semester)
     if academic_year and academic_year not in ["All", "all", ""]:
-        query = query.filter(CourseOffering.academic_year == academic_year)
+        canon_ay = canonical_academic_year(academic_year) or academic_year
+        start_year = canon_ay.split("-")[0].strip() if "-" in canon_ay else canon_ay.strip()
+        query = query.filter(
+            db.or_(
+                CourseOffering.academic_year == academic_year,
+                CourseOffering.academic_year == canon_ay,
+                CourseOffering.academic_year.like(f"{start_year}%"),
+            )
+        )
     if section and section not in ["All", "all", "All Sections", ""]:
         query = query.filter(CourseOffering.section == section)
     if day and day not in ["All", "all", "All Days", ""]:
@@ -491,9 +628,12 @@ def get_faculty_courses():
                 Enrollment.offering_id,
                 db.func.count(Enrollment.enrollment_id),
             )
+            .join(Student, Enrollment.student_id == Student.student_id)
+            .join(User, Student.user_id == User.user_id)
             .filter(
                 Enrollment.offering_id.in_(offering_ids),
                 Enrollment.status == "ACTIVE",
+                User.is_active.is_(True),
             )
             .group_by(Enrollment.offering_id)
             .all()
@@ -514,6 +654,29 @@ def get_faculty_courses():
 
     for offering in offerings:
         active_student_count = active_student_counts.get(offering.offering_id, 0)
+        if active_student_count == 0:
+            sibling_ids = [
+                o.offering_id for o in CourseOffering.query.filter_by(
+                    course_id=offering.course_id,
+                    semester=offering.semester,
+                    section=offering.section,
+                ).all()
+                if o.offering_id != offering.offering_id
+            ]
+            if sibling_ids:
+                active_student_count = (
+                    db.session.query(Enrollment.enrollment_id)
+                    .join(Student, Enrollment.student_id == Student.student_id)
+                    .join(User, Student.user_id == User.user_id)
+                    .filter(
+                        Enrollment.offering_id.in_(sibling_ids),
+                        Enrollment.status == "ACTIVE",
+                        User.is_active.is_(True),
+                        Student.semester == offering.semester,
+                        Student.section == offering.section,
+                    )
+                    .count()
+                )
         tt_entries = sorted(
             offering.timetable_entries,
             key=lambda e: (e.day_of_week or "", e.start_time or "")
@@ -557,7 +720,8 @@ def get_faculty_courses():
             "credits": offering.course.credits,
             "semester": offering.semester,
             "section": offering.section,
-            "academic_year": offering.academic_year,
+            "batch": offering.course.batch if offering.course and offering.course.batch else "",
+            "academic_year": resolve_offering_academic_year(offering.academic_year, offering.semester),
             "room": room,
             "student_count": active_student_count,
             "days_display": days_display,
@@ -650,7 +814,7 @@ def get_faculty_course(course_id):
             "offering_id": offering.offering_id,
             "semester": offering.semester,
             "section": offering.section,
-            "academic_year": offering.academic_year,
+            "academic_year": resolve_offering_academic_year(offering.academic_year, offering.semester),
             "room": room,
             "student_count": len(students),
             "students": students,

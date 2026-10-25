@@ -5,10 +5,11 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import joinedload
 
 from app.extensions import db
 from app.services.activity_service import record_activity
-from app.models import Batch, Course, CourseOffering, Enrollment, Student
+from app.models import Batch, Course, CourseOffering, Department, Enrollment, Student, User
 from app.utils.academic_year import (
     canonical_academic_year,
     extract_cohort_start_year,
@@ -131,7 +132,10 @@ def _get_group_enrollment_context(group):
             Course.department_id == group["department_id"],
             Course.semester == group["semester"],
             Course.is_active.is_(True),
-            Course.batch == group["cohort_start_year"],
+            db.or_(
+                Course.batch == group["cohort_start_year"],
+                Course.batch.like(f"{group['cohort_start_year']}%"),
+            ),
             CourseOffering.semester == group["semester"],
             CourseOffering.section == group["section"],
         )
@@ -147,7 +151,10 @@ def _get_group_enrollment_context(group):
             Course.department_id == group["department_id"],
             Course.semester == group["semester"],
             Course.is_active.is_(True),
-            Course.batch == group["cohort_start_year"],
+            db.or_(
+                Course.batch == group["cohort_start_year"],
+                Course.batch.like(f"{group['cohort_start_year']}%"),
+            ),
         )
         .order_by(Course.course_code.asc())
         .all()
@@ -252,7 +259,13 @@ def _existing_enrollment_pairs(student_ids, offering_ids):
 def get_enrollments():
     enrollments = (
         Enrollment.query
-        .order_by(Enrollment.enrollment_id.asc())
+        .options(
+            joinedload(Enrollment.student).joinedload(Student.user),
+            joinedload(Enrollment.student).joinedload(Student.department),
+            joinedload(Enrollment.student).joinedload(Student.batch),
+            joinedload(Enrollment.offering).joinedload(CourseOffering.course),
+        )
+        .order_by(Enrollment.enrollment_id.desc())
         .all()
     )
 
@@ -260,6 +273,71 @@ def get_enrollments():
         {
             "enrollment_id": enrollment.enrollment_id,
             "student_id": enrollment.student_id,
+            "student_name": (
+                enrollment.student.user.name
+                if enrollment.student and enrollment.student.user
+                else None
+            ),
+            "enrollment_no": (
+                enrollment.student.enrollment_no
+                if enrollment.student
+                else None
+            ),
+            "department_id": (
+                enrollment.student.department_id
+                if enrollment.student
+                else None
+            ),
+            "department_code": (
+                enrollment.student.department.department_code
+                if enrollment.student and enrollment.student.department
+                else None
+            ),
+            "department_name": (
+                enrollment.student.department.department_name
+                if enrollment.student and enrollment.student.department
+                else None
+            ),
+            "batch_name": (
+                enrollment.student.batch.batch_name
+                if enrollment.student and enrollment.student.batch
+                else (enrollment.student.academic_year if enrollment.student else None)
+            ),
+            "academic_year": (
+                enrollment.offering.academic_year
+                if enrollment.offering
+                else (enrollment.student.academic_year if enrollment.student else None)
+            ),
+            "semester": (
+                enrollment.offering.semester
+                if enrollment.offering
+                else (enrollment.student.semester if enrollment.student else None)
+            ),
+            "section": (
+                enrollment.offering.section
+                if enrollment.offering
+                else (enrollment.student.section if enrollment.student else None)
+            ),
+            "course_id": (
+                enrollment.offering.course.course_id
+                if enrollment.offering and enrollment.offering.course
+                else None
+            ),
+            "course_code": (
+                enrollment.offering.course.course_code
+                if enrollment.offering and enrollment.offering.course
+                else None
+            ),
+            "course_name": (
+                enrollment.offering.course.course_name
+                if enrollment.offering and enrollment.offering.course
+                else None
+            ),
+            "credits": (
+                enrollment.offering.course.credits
+                if enrollment.offering and enrollment.offering.course
+                else None
+            ),
             "offering_id": enrollment.offering_id,
             "status": enrollment.status,
             "enrolled_at": (
@@ -274,6 +352,127 @@ def get_enrollments():
     return jsonify({
         "success": True,
         "data": data,
+    }), 200
+
+
+# ---------------------------------------------------------------------------
+# Admin: summary statistics and student group aggregation
+# ---------------------------------------------------------------------------
+
+@enrollment_bp.get("/admin/enrollments/summary")
+@admin_required
+def get_enrollments_summary():
+    """Return summary statistics and student group breakdown for Course Enrollments."""
+    from collections import defaultdict
+
+    total_enrollments = Enrollment.query.count()
+    active_enrollments = Enrollment.query.filter_by(status="ACTIVE").count()
+
+    courses = Course.query.filter_by(is_active=True).all()
+    offerings = (
+        CourseOffering.query
+        .options(joinedload(CourseOffering.course))
+        .all()
+    )
+    students = (
+        Student.query
+        .join(Student.user)
+        .filter(User.is_active.is_(True))
+        .options(
+            joinedload(Student.user),
+            joinedload(Student.department),
+            joinedload(Student.batch),
+        )
+        .all()
+    )
+
+    enrollment_pairs = (
+        db.session.query(Enrollment.student_id, Enrollment.offering_id)
+        .filter(Enrollment.status == "ACTIVE")
+        .all()
+    )
+    student_enrolled_offerings = defaultdict(set)
+    for s_id, o_id in enrollment_pairs:
+        student_enrolled_offerings[s_id].add(o_id)
+
+    grouped = defaultdict(list)
+    for s in students:
+        batch_val = s.batch.batch_name if s.batch else (s.academic_year or "")
+        start_year = extract_cohort_start_year(batch_val) or (batch_val[:4] if len(batch_val) >= 4 else "2024")
+        grouped[(s.department_id, start_year, s.semester, s.section)].append(s)
+
+    group_list = []
+    total_pending = 0
+
+    for (dept_id, start_year, sem, sec), s_list in sorted(
+        grouped.items(),
+        key=lambda x: (x[0][0], x[0][2], x[0][3], x[0][1]),
+    ):
+        dept = s_list[0].department if s_list else None
+        dept_code = dept.department_code if dept else "CSE"
+        dept_name = dept.department_name if dept else "Computer Science Engineering"
+
+        grp_offerings = [
+            o for o in offerings
+            if o.course and o.course.department_id == dept_id and o.semester == sem and o.section == sec
+        ]
+        grp_offering_ids = set(o.offering_id for o in grp_offerings)
+
+        grp_courses = [
+            c for c in courses
+            if c.department_id == dept_id and c.semester == sem and (
+                not start_year or (c.batch and c.batch.startswith(start_year))
+            )
+        ]
+
+        enrolled_count = 0
+        for s in s_list:
+            enrolled_offs = student_enrolled_offerings.get(s.student_id, set())
+            if grp_offering_ids and (enrolled_offs & grp_offering_ids):
+                enrolled_count += 1
+
+        pending_count = max(0, len(s_list) - enrolled_count)
+        total_pending += pending_count
+
+        courses_count = len(grp_courses) or len(grp_offerings)
+        status = (
+            "Complete"
+            if (enrolled_count >= len(s_list) and len(s_list) > 0 and courses_count > 0)
+            else "Incomplete"
+        )
+
+        ay_display = (
+            grp_offerings[0].academic_year
+            if grp_offerings and grp_offerings[0].academic_year
+            else (s_list[0].academic_year or get_current_academic_session())
+        )
+
+        group_list.append({
+            "group_id": f"{dept_code}-{start_year}-S{sem}-{sec}",
+            "department_id": dept_id,
+            "department_code": dept_code,
+            "department_name": dept_name,
+            "batch": start_year,
+            "batch_name": f"{start_year} Batch",
+            "academic_year": ay_display,
+            "semester": sem,
+            "section": sec,
+            "total_students": len(s_list),
+            "enrolled_students": enrolled_count,
+            "courses_count": courses_count,
+            "pending_students": pending_count,
+            "status": status,
+        })
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "total_enrollments": total_enrollments,
+            "active_enrollments": active_enrollments,
+            "pending_enrollments": total_pending or max(0, total_enrollments - active_enrollments),
+            "total_groups": len(group_list),
+            "groups": group_list,
+        },
     }), 200
 
 
@@ -342,7 +541,10 @@ def preview_group_enrollment():
             Course.department_id == group["department_id"],
             Course.semester == group["semester"],
             Course.is_active.is_(True),
-            Course.batch == group["cohort_start_year"],
+            db.or_(
+                Course.batch == group["cohort_start_year"],
+                Course.batch.like(f"{group['cohort_start_year']}%"),
+            ),
         )
         .order_by(Course.course_code.asc())
         .all()
@@ -364,6 +566,7 @@ def preview_group_enrollment():
             "course_id": course.course_id,
             "course_code": course.course_code,
             "course_name": course.course_name,
+            "credits": course.credits or 3,
             "offerings": [
                 _offering_to_dict(offering)
                 for offering in matching
@@ -444,17 +647,35 @@ def preview_group_enrollment():
         if not course["has_offering"]
     ]
 
+    students_data = [
+        {
+            "student_id": s.student_id,
+            "user_id": s.user_id,
+            "name": s.user.name if s.user else f"Student #{s.student_id}",
+            "enrollment_no": s.enrollment_no,
+            "email": s.user.email if s.user else "",
+            "is_enrolled": any((s.student_id, oid) in existing_pairs for oid in offering_ids),
+            "enrolled_offerings_count": len([oid for oid in offering_ids if (s.student_id, oid) in existing_pairs]),
+            "total_offerings_count": len(offering_ids),
+        }
+        for s in students
+    ]
+    distinct_already_enrolled = len([s for s in students_data if s["is_enrolled"]])
+    pending_students_count = max(0, len(students) - distinct_already_enrolled)
+
     return jsonify({
         "success": True,
         "message": "Enrollment preview generated successfully",
         "data": {
             **group,
             "eligible_students": len(students),
+            "already_enrolled": distinct_already_enrolled,
+            "pending_enrollment": pending_students_count,
+            "available_courses": len(courses),
             "active_courses": len(active_courses),
             "available_offerings": len(available_offerings),
             "matched_offerings": len(selected_offerings),
             "total_matching_enrollment_pairs": total_pairs,
-            "already_enrolled": already_enrolled,
             "to_create": total_pairs - already_enrolled,
             "courses": courses,
             "courses_without_offerings": courses_without_offerings,
@@ -462,6 +683,7 @@ def preview_group_enrollment():
                 _offering_to_dict(offering)
                 for offering in selected_offerings
             ],
+            "students": students_data,
         },
     }), 200
 
@@ -492,17 +714,38 @@ def bulk_enroll_group():
             Course.department_id == group["department_id"],
             Course.semester == group["semester"],
             Course.is_active.is_(True),
-            Course.batch == group["cohort_start_year"],
+            db.or_(
+                Course.batch == group["cohort_start_year"],
+                Course.batch.like(f"{group['cohort_start_year']}%"),
+            ),
         )
         .order_by(Course.course_code.asc())
         .all()
     )
+
+    # Optional course_ids filter from Step 2
+    selected_course_ids = data.get("course_ids")
+    if selected_course_ids and isinstance(selected_course_ids, list):
+        try:
+            cid_set = {int(cid) for cid in selected_course_ids}
+            courses = [c for c in courses if c.course_id in cid_set]
+        except (TypeError, ValueError):
+            pass
 
     if not courses:
         return jsonify({
             "success": False,
             "message": "No active courses were found for this group.",
         }), 400
+
+    # Optional student_ids filter from Step 3
+    selected_student_ids = data.get("student_ids")
+    if selected_student_ids and isinstance(selected_student_ids, list):
+        try:
+            sid_set = {int(sid) for sid in selected_student_ids}
+            students = [s for s in students if s.student_id in sid_set]
+        except (TypeError, ValueError):
+            pass
 
     if not students:
         return jsonify({
@@ -556,6 +799,15 @@ def bulk_enroll_group():
                 created_offerings.append(offering)
 
             matched_offerings.append(offering)
+
+        # Optional offering_ids filter
+        selected_offering_ids = data.get("offering_ids")
+        if selected_offering_ids and isinstance(selected_offering_ids, list):
+            try:
+                oid_set = {int(oid) for oid in selected_offering_ids}
+                matched_offerings = [o for o in matched_offerings if o.offering_id in oid_set]
+            except (TypeError, ValueError):
+                pass
 
         offering_ids = [
             offering.offering_id for offering in matched_offerings

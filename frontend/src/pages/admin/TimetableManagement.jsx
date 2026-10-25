@@ -41,10 +41,13 @@ import {
   getFacultyAdjustments,
   createFacultyAdjustment,
   cancelFacultyAdjustment,
+  updateTimetableEntry,
 } from "../../services/timetableService";
+import EditTimetableModal from "../../components/EditTimetableModal";
 import { getAdminFaculty } from "../../services/adminService";
 
 import campusBannerImage from "../../../image/admin_campus_banner.jpg";
+import { formatAcademicYear } from "../../utils/academicYearUtils";
 import "./TimetableManagement.css";
 
 const steps = [
@@ -173,6 +176,10 @@ function TimetableManagement() {
   const [commitResult, setCommitResult] = useState(null);
   const [commitError, setCommitError] = useState("");
   const [notice, setNotice] = useState("");
+
+  // Edit Timetable Entry Modal
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [selectedEntryForEdit, setSelectedEntryForEdit] = useState(null);
 
   // Persisted Database Timetable
   const [activeTab, setActiveTab] = useState("Timetable");
@@ -423,6 +430,12 @@ function TimetableManagement() {
         override.section !== undefined ? override.section : item.section;
       const semesterVal =
         override.semester !== undefined ? override.semester : item.semester;
+      const dayOfWeek =
+        override.day_of_week !== undefined ? override.day_of_week : item.day_of_week;
+      const startTime =
+        override.start_time !== undefined ? override.start_time : item.start_time;
+      const endTime =
+        override.end_time !== undefined ? override.end_time : item.end_time;
 
       const courseObj = (analysisResult.available_courses || []).find(
         (c) => c.course_id === Number(courseId)
@@ -438,6 +451,9 @@ function TimetableManagement() {
 
       return {
         ...item,
+        day_of_week: dayOfWeek,
+        start_time: startTime,
+        end_time: endTime,
         course_id: courseId,
         course_code: courseObj ? courseObj.course_code : item.course_code,
         course_name: courseObj ? courseObj.course_name : item.course_name,
@@ -847,6 +863,55 @@ function TimetableManagement() {
     }
   }
 
+  // Edit Timetable Entry Modal handlers
+  function handleOpenEditModal(targetRow) {
+    setSelectedEntryForEdit(targetRow);
+    setEditModalOpen(true);
+  }
+
+  function handleCloseEditModal() {
+    setEditModalOpen(false);
+    setSelectedEntryForEdit(null);
+  }
+
+  async function handleSaveTimetableEdit({ day, startTime, endTime, room, entry, isPersisted }) {
+    if (isPersisted) {
+      const payload = {
+        day_of_week: day,
+        start_time: startTime,
+        end_time: endTime,
+        room: room.trim() || null,
+        offering_id: entry.offeringId || entry.offering_id || null,
+      };
+
+      const res = await updateTimetableEntry(entry.id, payload);
+      if (!res?.success) {
+        throw new Error(res?.message || "Failed to update timetable entry.");
+      }
+
+      setEntries((prev) =>
+        prev.map((e) => (e.id === entry.id ? mapTimetableEntry(res.data) : e))
+      );
+      void loadTimetable();
+
+      setNotice(
+        `Timetable entry updated successfully (${titleCase(day)} ${startTime}–${endTime}, Room ${room.trim() || "Not assigned"}).`
+      );
+    } else {
+      const dayName = titleCase(day);
+      updateEntryOverride(entry.index, {
+        day_of_week: dayName,
+        start_time: startTime,
+        end_time: endTime,
+        room: room.trim(),
+      });
+
+      setNotice(
+        `Extracted timetable entry updated for import (${dayName} ${startTime}–${endTime}, Room ${room.trim() || "Not assigned"}).`
+      );
+    }
+  }
+
   // Emergency Faculty Replacement handlers
   function openAdjustment(entry = null) {
     setAdjustmentOpen(true);
@@ -1192,7 +1257,7 @@ function TimetableManagement() {
                   >
                     {academicYears.map((yr) => (
                       <option key={yr} value={yr}>
-                        {yr}
+                        {formatAcademicYear(yr)}
                       </option>
                     ))}
                   </select>
@@ -1363,6 +1428,7 @@ function TimetableManagement() {
                   <th>Faculty</th>
                   <th>Room</th>
                   <th>Extracted Raw Cell</th>
+                  <th style={{ width: 80, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1382,6 +1448,17 @@ function TimetableManagement() {
                     <td>{row.room || "—"}</td>
                     <td>
                       <small>{row.raw_cell}</small>
+                    </td>
+                    <td style={{ textAlign: "center" }}>
+                      <button
+                        type="button"
+                        id={`edit-preview-row-${row.index}`}
+                        className="timetable-row-edit-btn"
+                        onClick={() => handleOpenEditModal(row)}
+                        title="Edit extracted time and room"
+                      >
+                        Edit
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -1622,6 +1699,15 @@ function TimetableManagement() {
                           {row.period && (
                             <span className="timetable-period-pill">Period {row.period}</span>
                           )}
+                          <button
+                            type="button"
+                            id={`edit-mapping-row-${row.index}`}
+                            className="timetable-cell-adjust-link"
+                            onClick={() => handleOpenEditModal(row)}
+                            title="Edit extracted day, time, or room"
+                          >
+                            Edit Time/Room
+                          </button>
                         </div>
                       </td>
                       <td>
@@ -2210,12 +2296,22 @@ function TimetableManagement() {
                               </span>
                             )}
                           </td>
-                          <td>
+                          <td className="timetable-actions-cell">
                             <button
                               type="button"
+                              id={`edit-entry-${entry.id}`}
+                              className="timetable-row-edit-btn"
+                              onClick={() => handleOpenEditModal(entry)}
+                              title="Edit time, room, and schedule"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              id={`adjust-entry-${entry.id}`}
                               className="timetable-row-adjust-btn"
                               onClick={() => openAdjustment(entry)}
-                              title="Replace faculty for this class"
+                              title="Faculty adjustment / replacement"
                             >
                               Adjust
                             </button>
@@ -2839,6 +2935,14 @@ function TimetableManagement() {
           </div>
         </div>
       </section>
+
+      {/* Edit Timetable Entry Modal */}
+      <EditTimetableModal
+        isOpen={editModalOpen}
+        entry={selectedEntryForEdit}
+        onClose={handleCloseEditModal}
+        onSave={handleSaveTimetableEdit}
+      />
     </section>
   );
 }

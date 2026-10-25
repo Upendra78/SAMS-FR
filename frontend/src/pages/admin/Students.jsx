@@ -46,6 +46,7 @@ import {
 
 import { enrollStudentFace } from "../../services/faceService";
 import LiveFaceCapture from "../../components/LiveFaceCapture";
+import RemoveFaceModal from "../../components/RemoveFaceModal";
 
 import "./Student.css";
 
@@ -165,6 +166,7 @@ function Students() {
   const [faceEnrollmentLoading, setFaceEnrollmentLoading] = useState(false);
   const [faceEnrollmentError, setFaceEnrollmentError] = useState("");
   const [faceEnrollmentSuccess, setFaceEnrollmentSuccess] = useState("");
+  const [studentToRemoveFace, setStudentToRemoveFace] = useState(null);
 
   // =========================================================
   // FETCH SUMMARY
@@ -1563,14 +1565,35 @@ function Students() {
                         : "No biometric face data found. Register face via camera to enable attendance."}
                     </p>
 
-                    <button
-                      type="button"
-                      className="student-panel-face-btn"
-                      onClick={() => handleOpenFaceEnrollment(selectedStudent)}
-                    >
-                      <FontAwesomeIcon icon={faCamera} />
-                      {selectedStudent.face_registered ? "Replace Face" : "Register Face"}
-                    </button>
+                    {selectedStudent.face_registered ? (
+                      <>
+                        <button
+                          type="button"
+                          className="student-panel-face-btn"
+                          onClick={() => handleOpenFaceEnrollment(selectedStudent)}
+                        >
+                          <FontAwesomeIcon icon={faCamera} />
+                          Replace Face
+                        </button>
+                        <button
+                          type="button"
+                          className="student-panel-face-remove-btn"
+                          onClick={() => setStudentToRemoveFace(selectedStudent)}
+                        >
+                          <FontAwesomeIcon icon={faUserXmark} />
+                          Remove Face Registration
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="student-panel-face-btn"
+                        onClick={() => handleOpenFaceEnrollment(selectedStudent)}
+                      >
+                        <FontAwesomeIcon icon={faCamera} />
+                        Register Face
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -2044,6 +2067,66 @@ function Students() {
               </button>
             </div>
 
+            {faceEnrollmentStudent.face_registered && (
+              <div className="face-existing-preview-banner">
+                <div className="face-existing-preview-info">
+                  {faceEnrollmentStudent.photo_url ? (
+                    <img
+                      src={faceEnrollmentStudent.photo_url}
+                      alt={faceEnrollmentStudent.name}
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: "50%",
+                        objectFit: "cover",
+                        border: "2px solid #e2e8f0",
+                        flexShrink: 0,
+                      }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: "50%",
+                        background: "#dbeafe",
+                        color: "#1e40af",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 700,
+                        fontSize: 14,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {getInitials(faceEnrollmentStudent.name)}
+                    </div>
+                  )}
+                  <div className="face-existing-preview-text">
+                    <strong>Active Face Biometric Registered</strong>
+                    <span>Replace the face biometric below, or remove it entirely.</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="face-reg-action-btn btn-remove"
+                  onClick={() => {
+                    const target = faceEnrollmentStudent;
+                    setShowFaceRegistrationView(false);
+                    setFaceCaptureBlob(null);
+                    setStudentToRemoveFace(target);
+                  }}
+                  title="Remove existing biometric registration"
+                >
+                  <FontAwesomeIcon icon={faUserXmark} />
+                  Remove Registration
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleEnrollFaceSubmit}>
               <div className="student-live-camera-wrap">
                 <LiveFaceCapture
@@ -2107,6 +2190,21 @@ function Students() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialog for Face Removal */}
+      <RemoveFaceModal
+        isOpen={Boolean(studentToRemoveFace)}
+        student={studentToRemoveFace}
+        onClose={() => setStudentToRemoveFace(null)}
+        onSuccess={async () => {
+          setSelectedStudent((prev) =>
+            prev && prev.student_id === studentToRemoveFace?.student_id
+              ? { ...prev, face_registered: false }
+              : prev
+          );
+          await Promise.all([fetchStudents(), fetchSummary()]);
+        }}
+      />
     </div>
   );
 }

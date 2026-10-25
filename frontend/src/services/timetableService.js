@@ -65,3 +65,20 @@ export async function cancelFacultyAdjustment(adjustmentId) {
   const response = await api.post(`/timetable/adjustments/${adjustmentId}/cancel`);
   return response.data;
 }
+
+export async function updateTimetableEntry(entryId, payload) {
+  const response = await api.put(`/timetable/${entryId}`, payload);
+  if (typeof window !== "undefined") {
+    try {
+      window.dispatchEvent(
+        new CustomEvent("sams:timetable-updated", {
+          detail: { entryId, payload, data: response.data },
+        })
+      );
+      localStorage.setItem("sams_timetable_last_updated", String(Date.now()));
+    } catch {
+      // ignore errors in storage or event dispatch
+    }
+  }
+  return response.data;
+}

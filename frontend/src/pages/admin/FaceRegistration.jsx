@@ -31,6 +31,7 @@ import {
 
 import { enrollStudentFace } from "../../services/faceService";
 import LiveFaceCapture from "../../components/LiveFaceCapture";
+import RemoveFaceModal from "../../components/RemoveFaceModal";
 
 import "./FaceRegistration.css";
 
@@ -102,6 +103,7 @@ function FaceRegistration() {
   const [submittingEnrollment, setSubmittingEnrollment] = useState(false);
   const [enrollmentError, setEnrollmentError] = useState("");
   const [enrollmentSuccess, setEnrollmentSuccess] = useState("");
+  const [studentToRemove, setStudentToRemove] = useState(null);
 
   // Fetch summary counts
   const fetchSummary = useCallback(async () => {
@@ -734,23 +736,38 @@ function FaceRegistration() {
                         </span>
                       </td>
                       <td style={{ textAlign: "center" }}>
-                        <button
-                          type="button"
-                          className={`face-reg-action-btn ${
-                            student.face_registered ? "btn-update" : "btn-register"
-                          }`}
-                          onClick={() => handleOpenEnrollment(student)}
-                          title={
-                            student.face_registered
-                              ? "Update existing biometric face template"
-                              : "Register student biometric face"
-                          }
-                        >
-                          <FontAwesomeIcon
-                            icon={student.face_registered ? faCameraRotate : faCamera}
-                          />
-                          {student.face_registered ? "Update Face" : "Register Face"}
-                        </button>
+                        {student.face_registered ? (
+                          <div className="face-reg-btn-group">
+                            <button
+                              type="button"
+                              className="face-reg-action-btn btn-update"
+                              onClick={() => handleOpenEnrollment(student)}
+                              title="Replace existing biometric face template"
+                            >
+                              <FontAwesomeIcon icon={faCameraRotate} />
+                              Replace Face
+                            </button>
+                            <button
+                              type="button"
+                              className="face-reg-action-btn btn-remove"
+                              onClick={() => setStudentToRemove(student)}
+                              title="Remove incorrect biometric face registration"
+                            >
+                              <FontAwesomeIcon icon={faUserXmark} />
+                              Remove Face
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            className="face-reg-action-btn btn-register"
+                            onClick={() => handleOpenEnrollment(student)}
+                            title="Register student biometric face"
+                          >
+                            <FontAwesomeIcon icon={faCamera} />
+                            Register Face
+                          </button>
+                        )}
                       </td>
                     </tr>
                   );
@@ -884,6 +901,65 @@ function FaceRegistration() {
               </button>
             </div>
 
+            {enrollingStudent.face_registered && (
+              <div className="face-existing-preview-banner">
+                <div className="face-existing-preview-info">
+                  {enrollingStudent.photo_url ? (
+                    <img
+                      src={enrollingStudent.photo_url}
+                      alt={enrollingStudent.name}
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: "50%",
+                        objectFit: "cover",
+                        border: "2px solid #e2e8f0",
+                        flexShrink: 0,
+                      }}
+                      onError={(e) => {
+                        e.currentTarget.style.display = "none";
+                      }}
+                    />
+                  ) : (
+                    <div
+                      style={{
+                        width: 44,
+                        height: 44,
+                        borderRadius: "50%",
+                        background: "#dbeafe",
+                        color: "#1e40af",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontWeight: 700,
+                        fontSize: 14,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {getInitials(enrollingStudent.name)}
+                    </div>
+                  )}
+                  <div className="face-existing-preview-text">
+                    <strong>Active Face Biometric Registered</strong>
+                    <span>You can replace the face template below, or remove it if incorrect.</span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="face-reg-action-btn btn-remove"
+                  onClick={() => {
+                    const target = enrollingStudent;
+                    handleCloseModal();
+                    setStudentToRemove(target);
+                  }}
+                  title="Remove existing biometric registration"
+                >
+                  <FontAwesomeIcon icon={faUserXmark} />
+                  Remove Registration
+                </button>
+              </div>
+            )}
+
             <form onSubmit={handleEnrollSubmit}>
               <div className="student-live-camera-wrap">
                 <LiveFaceCapture
@@ -944,6 +1020,16 @@ function FaceRegistration() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Dialog for Face Removal */}
+      <RemoveFaceModal
+        isOpen={Boolean(studentToRemove)}
+        student={studentToRemove}
+        onClose={() => setStudentToRemove(null)}
+        onSuccess={async () => {
+          await Promise.all([fetchStudents(), fetchSummary()]);
+        }}
+      />
     </div>
   );
 }

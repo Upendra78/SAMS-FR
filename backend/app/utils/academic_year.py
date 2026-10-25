@@ -49,6 +49,40 @@ def is_batch_cohort(val):
     return bool(m4)
 
 
+def resolve_offering_academic_year(val, semester=None):
+    """
+    Resolves any course offering academic_year value into a canonical 1-year
+    teaching academic session (e.g. '2025-2026').
+    If a legacy multi-year cohort range (e.g. '2026-2030' or '2026-2032') or a single
+    batch year (e.g. '2026') was stored, normalizes it using progression semester:
+      offset = (semester - 1) // 2
+      teaching_session = f"{start_year + offset}-{start_year + offset + 1}"
+    """
+    if not val:
+        return get_current_academic_session()
+
+    s = str(val).strip()
+    canon = canonical_academic_year(s)
+    if is_single_academic_session(canon):
+        return canon
+
+    # Cohort or single year fallback
+    start_year_str = extract_cohort_start_year(s)
+    if start_year_str and len(start_year_str) == 4 and start_year_str.isdigit():
+        start_year = int(start_year_str)
+        try:
+            sem_num = int(semester) if semester is not None else 1
+            if sem_num < 1:
+                sem_num = 1
+        except (ValueError, TypeError):
+            sem_num = 1
+        year_offset = (sem_num - 1) // 2
+        teaching_start = start_year + year_offset
+        return f"{teaching_start}-{teaching_start + 1}"
+
+    return canon
+
+
 def format_batch_cohort(val, duration_years=4):
     """
     Standardizes a batch cohort to YYYY-YYYY format (e.g. '2024-2028').
