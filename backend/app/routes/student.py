@@ -1,10 +1,11 @@
 import base64
 import os
+import re
 import time
 from datetime import date, datetime, timedelta
 
 from flask import Blueprint, jsonify, request, send_from_directory
-from flask_jwt_extended import get_jwt_identity
+from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 from sqlalchemy import func
 from sqlalchemy.orm import joinedload
 from werkzeug.utils import secure_filename
@@ -765,17 +766,90 @@ def upload_student_signature():
 # ============================================================
 
 @student_bp.get("/uploads/<folder>/<filename>")
+@jwt_required()
 def serve_student_upload(folder, filename):
-    safe_filename = secure_filename(filename)
-    if folder == "photos":
-        return send_from_directory(PHOTOS_DIR, safe_filename)
-    elif folder == "signatures":
-        return send_from_directory(SIGNATURES_DIR, safe_filename)
-    else:
+    if folder not in ("photos", "signatures"):
         return jsonify({
             "success": False,
             "message": "Invalid upload category",
         }), 404
+
+    # Strict path traversal checks: reject traversal tokens or slashes
+    if ".." in filename or "/" in filename or "\\" in filename or "\0" in filename:
+        return jsonify({
+            "success": False,
+            "message": "Invalid filename",
+        }), 400
+
+    safe_filename = secure_filename(filename)
+    if not safe_filename or safe_filename != filename:
+        return jsonify({
+            "success": False,
+            "message": "Invalid filename",
+        }), 400
+
+    # Extract target student ID from strict filename pattern
+    if folder == "photos":
+        match = re.match(r"^student_photo_(\d+)_(\d+)\.(?:jpg|jpeg|png|webp)$", safe_filename, re.IGNORECASE)
+    else:
+        match = re.match(r"^student_sig_(\d+)_(\d+)\.(?:jpg|jpeg|png|webp)$", safe_filename, re.IGNORECASE)
+
+    if not match:
+        return jsonify({
+            "success": False,
+            "message": "File not found",
+        }), 404
+
+    target_student_id = int(match.group(1))
+
+    # Evaluate caller authorization
+    claims = get_jwt()
+    user_role = (claims.get("role") or "").strip().upper()
+    identity = get_jwt_identity()
+
+    authorized = False
+    if user_role == "ADMIN":
+        # Admin can access all student uploads
+        authorized = True
+    elif folder == "photos" and user_role == "FACULTY":
+        # Faculty can view student profile photos for attendance and academic rosters
+        authorized = True
+    elif user_role == "STUDENT":
+        # Students can only access their own photo and signature
+        try:
+            user_id = int(identity)
+        except (ValueError, TypeError):
+            user_id = None
+
+        if user_id:
+            current_student = Student.query.filter_by(user_id=user_id).first()
+            if current_student and current_student.student_id == target_student_id:
+                authorized = True
+
+    if not authorized:
+        return jsonify({
+            "success": False,
+            "message": "Access forbidden",
+        }), 403
+
+    target_dir = PHOTOS_DIR if folder == "photos" else SIGNATURES_DIR
+    target_path = os.path.realpath(os.path.join(target_dir, safe_filename))
+    base_canonical = os.path.realpath(target_dir)
+
+    # Symlink escape / jail check
+    if not target_path.startswith(base_canonical + os.path.sep) and target_path != base_canonical:
+        return jsonify({
+            "success": False,
+            "message": "Access denied",
+        }), 400
+
+    if not os.path.isfile(target_path):
+        return jsonify({
+            "success": False,
+            "message": "File not found",
+        }), 404
+
+    return send_from_directory(target_dir, safe_filename)
 
 
 # ============================================================

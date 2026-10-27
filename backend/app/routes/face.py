@@ -187,6 +187,17 @@ def enroll_face():
 @role_required("ADMIN", "FACULTY", "STUDENT")
 def face_registration_status(student_id):
     """Return the active face registration status for a student."""
+    claims = get_jwt()
+    user_role = claims.get("role")
+    if user_role == "STUDENT":
+        user_id = int(get_jwt_identity())
+        current_student = Student.query.filter_by(user_id=user_id).first()
+        if not current_student or current_student.student_id != student_id:
+            return jsonify({
+                "success": False,
+                "message": "You can only view your own face registration status",
+            }), 403
+
     student = db.session.get(Student, student_id)
 
     if not student:

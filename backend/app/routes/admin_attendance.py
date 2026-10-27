@@ -700,6 +700,15 @@ def get_single_attendance_record(attendance_id):
     }), 200
 
 
+def _sanitize_csv_cell(val):
+    if val is None:
+        return ""
+    s = str(val)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{s}"
+    return s
+
+
 # =========================================================================
 # EXPORT ATTENDANCE REPORT AS CSV
 # =========================================================================
@@ -795,16 +804,17 @@ def export_attendance_records():
 
         writer.writerow([
             sess.session_date.strftime("%Y-%m-%d"),
-            usr.name,
-            stu.enrollment_no,
-            crs.course_code,
-            crs.course_name,
+            _sanitize_csv_cell(usr.name),
+            _sanitize_csv_cell(stu.enrollment_no),
+            _sanitize_csv_cell(crs.course_code),
+            _sanitize_csv_cell(crs.course_name),
             sem_sec_display,
             status_display,
             rec.marked_at.strftime("%I:%M %p") if (is_attended and rec.marked_at) else "-",
             "Face Recognition" if rec.recognition_method == "FACE" else ("Manual" if is_attended else "-"),
             f"{rec.confidence_score:.1f}%" if (is_attended and rec.confidence_score is not None) else "-",
         ])
+
 
     csv_data = output.getvalue()
     response = make_response(csv_data)

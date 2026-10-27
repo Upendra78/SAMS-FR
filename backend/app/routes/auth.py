@@ -4,16 +4,19 @@ from app.models import User
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import (
     create_access_token,
+    get_jwt,
     get_jwt_identity,
     jwt_required,
     set_access_cookies,
     unset_jwt_cookies,
+    verify_jwt_in_request,
 )
 
 from app.extensions import db
 from app.models import User
 from app.services.activity_service import record_activity
 from app.services.auth_service import authenticate_user
+from app.utils.token_blocklist import token_blocklist
 
 from datetime import datetime, timedelta
 
@@ -84,6 +87,16 @@ def login():
 
 @auth_bp.post("/logout")
 def logout():
+    try:
+        verify_jwt_in_request(optional=True)
+        claims = get_jwt()
+        if claims and "jti" in claims:
+            jti = claims["jti"]
+            exp = claims.get("exp")
+            token_blocklist.revoke(jti, exp)
+    except Exception:
+        pass
+
     response = jsonify({
         "success": True,
         "message": "Logout successful",
