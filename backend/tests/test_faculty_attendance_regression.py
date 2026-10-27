@@ -1,6 +1,8 @@
 import unittest
 import uuid
-from datetime import date, time
+from datetime import date, datetime, time
+from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from flask import Flask
 from flask_jwt_extended import JWTManager, create_access_token
@@ -50,11 +52,17 @@ class TestFacultyAttendanceRegression(unittest.TestCase):
         cls.app.register_blueprint(timetable_bp)
         cls.app.register_blueprint(analytics_bp)
 
+        cls.tz = ZoneInfo("Asia/Kolkata")
+        cls.frozen_time = datetime(2026, 10, 21, 10, 0, 0, tzinfo=cls.tz)
+        cls.clock_patcher = patch("app.utils.schedule.get_current_institution_time", return_value=cls.frozen_time)
+        cls.clock_patcher.start()
+
         with cls.app.app_context():
             db.create_all()
 
     @classmethod
     def tearDownClass(cls):
+        cls.clock_patcher.stop()
         with cls.app.app_context():
             db.session.remove()
             db.drop_all()
@@ -137,10 +145,10 @@ class TestFacultyAttendanceRegression(unittest.TestCase):
             db.session.flush()
             self.offering_id = offering.offering_id
 
-            # Create Timetable Entry for Sunday (full-day window for tests)
+            # Create Timetable Entry for fixed test day (Wednesday, matching frozen clock 2026-10-21)
             tt = TimetableEntry(
                 offering_id=self.offering_id,
-                day_of_week="Sunday",
+                day_of_week="Wednesday",
                 start_time=time(0, 0),
                 end_time=time(23, 59, 59),
                 room="CSE-7A-07",

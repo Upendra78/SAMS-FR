@@ -67,14 +67,24 @@ export function toCanonicalAcademicYear(val) {
  *
  * @param {string|null|undefined} val - Raw academic year or cohort string
  * @param {number|string|null} [semester=null] - Progression semester (1-8)
+ * @param {string|null} [batch=null] - Cohort admission batch (e.g. "2024" or "2024-2028")
  * @returns {string} E.g. "2025–2026"
  */
-export function formatAcademicYear(val, semester = null) {
+export function formatAcademicYear(val, semester = null, batch = null) {
   if (val === null || val === undefined || String(val).trim() === "") {
     return "—";
   }
 
   const s = String(val).trim().replace(/\s*[\u2013\u2014-]\s*/g, "-");
+  const semNum = Number(semester);
+  const hasSem = Number.isFinite(semNum) && semNum >= 1;
+  const yearOffset = hasSem ? Math.floor((semNum - 1) / 2) : 0;
+
+  let batchStart = null;
+  if (batch) {
+    const bMatch = String(batch).trim().match(/^(\d{4})/);
+    if (bMatch) batchStart = Number(bMatch[1]);
+  }
 
   // 1. Check if it's already a 1-year session YYYY-YYYY
   const singleMatch = s.match(/^(\d{4})-(\d{4})$/);
@@ -82,13 +92,16 @@ export function formatAcademicYear(val, semester = null) {
     const start = Number(singleMatch[1]);
     const end = Number(singleMatch[2]);
     if (end - start === 1) {
+      if (batchStart && hasSem && start < batchStart + yearOffset) {
+        const sessionStart = batchStart + yearOffset;
+        return `${sessionStart}–${sessionStart + 1}`;
+      }
       return `${start}–${end}`;
     }
 
-    // It's a multi-year cohort range (e.g. 2026-2030)
-    const semNum = Number(semester);
-    const yearOffset = Number.isFinite(semNum) && semNum >= 1 ? Math.floor((semNum - 1) / 2) : 0;
-    const sessionStart = start + yearOffset;
+    // It's a multi-year cohort range (e.g. 2026-2030 or 2026-2032)
+    const effectiveStart = batchStart || start;
+    const sessionStart = effectiveStart + yearOffset;
     return `${sessionStart}–${sessionStart + 1}`;
   }
 
@@ -98,6 +111,10 @@ export function formatAcademicYear(val, semester = null) {
     const start = Number(shortMatch[1]);
     const end = Number(`${shortMatch[1].slice(0, 2)}${shortMatch[2]}`);
     if (end - start === 1) {
+      if (batchStart && hasSem && start < batchStart + yearOffset) {
+        const sessionStart = batchStart + yearOffset;
+        return `${sessionStart}–${sessionStart + 1}`;
+      }
       return `${start}–${end}`;
     }
   }
@@ -106,9 +123,8 @@ export function formatAcademicYear(val, semester = null) {
   const singleYearMatch = s.match(/^(\d{4})$/);
   if (singleYearMatch) {
     const start = Number(singleYearMatch[1]);
-    const semNum = Number(semester);
-    const yearOffset = Number.isFinite(semNum) && semNum >= 1 ? Math.floor((semNum - 1) / 2) : 0;
-    const sessionStart = start + yearOffset;
+    const effectiveStart = batchStart || start;
+    const sessionStart = effectiveStart + yearOffset;
     return `${sessionStart}–${sessionStart + 1}`;
   }
 
@@ -152,3 +168,67 @@ export function extractCohortStartYear(val) {
   const m = s.match(/^(\d{4})/);
   return m ? m[1] : "";
 }
+
+/**
+ * Normalizes a batch or cohort string (e.g. "2025", "2025-2029", "2025–2029")
+ * to match available batch option values (e.g. "2025-2029").
+ * If batches is supplied, returns the matching batch_name.
+ * Otherwise returns canonical "YYYY-YYYY" if 4-digit start year exists, or the original string.
+ *
+ * @param {string|null|undefined} val
+ * @param {Array<Object>} [batches=[]]
+ * @returns {string} E.g. "2025-2029"
+ */
+export function normalizeBatchCohort(val, batches = []) {
+  if (!val) return "";
+  const s = String(val).trim();
+  const startYear = extractCohortStartYear(s);
+  if (!startYear) return s;
+
+  if (Array.isArray(batches) && batches.length > 0) {
+    const matched = batches.find((b) => {
+      const bName = String(b.batch_name || b.name || "");
+      const bRaw = String(b.raw_name || "");
+      return (
+        bName === s ||
+        bName.startsWith(startYear) ||
+        bRaw === startYear ||
+        extractCohortStartYear(bName) === startYear
+      );
+    });
+    if (matched?.batch_name) {
+      return matched.batch_name;
+    }
+  }
+
+  const startNum = Number(startYear);
+  if (Number.isFinite(startNum) && startNum >= 2000 && startNum <= 2100) {
+    return `${startNum}-${startNum + 4}`;
+  }
+
+  return s;
+}
+
+/**
+ * Suggests the expected student admission batch cohort for a given semester
+ * in a running academic teaching session, based on college progression:
+ * Batch Start Year = Session Start Year - Math.floor((semester - 1) / 2).
+ *
+ * @param {number|string|null} semester
+ * @param {string|null} academicSession - E.g. "2026-2027"
+ * @param {Array<Object>} [batches=[]]
+ * @returns {string} E.g. "2025-2029"
+ */
+export function suggestBatchForSemester(semester, academicSession, batches = []) {
+  const semNum = Number(semester);
+  if (!Number.isFinite(semNum) || semNum < 1) return "";
+
+  const sessionStart = extractCohortStartYear(academicSession) || String(new Date().getFullYear());
+  const startNum = Number(sessionStart);
+  if (!Number.isFinite(startNum)) return "";
+
+  const offset = Math.floor((semNum - 1) / 2);
+  const cohortStart = String(startNum - offset);
+  return normalizeBatchCohort(cohortStart, batches);
+}
+

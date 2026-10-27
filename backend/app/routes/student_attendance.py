@@ -15,6 +15,12 @@ from app.models import (
     Enrollment,
     Student,
 )
+from app.utils.academic_year import (
+    are_offerings_academically_compatible,
+    canonical_academic_year,
+    is_single_academic_session,
+    resolve_offering_academic_year,
+)
 from app.utils.auth import student_required
 
 
@@ -294,31 +300,59 @@ def get_attendance_summary():
         .all()
     )
 
-    offering_ids = [
-        enrollment.offering_id
-        for enrollment in enrollments
-        if enrollment.offering_id
-    ]
-
-    offering_sessions_map = defaultdict(list)
+    offering_sessions_map = defaultdict(set)
     all_closed_session_ids = set()
 
-    if offering_ids:
-        all_sessions = (
+    for enrollment in enrollments:
+        offering = enrollment.offering
+        if not offering:
+            continue
+
+        # Direct sessions for this offering
+        direct_sessions = (
             AttendanceSession.query
             .filter(
-                AttendanceSession.offering_id.in_(offering_ids),
+                AttendanceSession.offering_id == offering.offering_id,
                 AttendanceSession.status == "CLOSED",
             )
             .all()
         )
+        for s in direct_sessions:
+            offering_sessions_map[offering.offering_id].add(s.session_id)
+            all_closed_session_ids.add(s.session_id)
 
-        for session in all_sessions:
-            offering_sessions_map[
-                session.offering_id
-            ].append(session.session_id)
-
-            all_closed_session_ids.add(session.session_id)
+        # Sibling sessions for equivalent course, semester, section offerings
+        # Enforce strict academic-year compatibility so historical sessions do not leak
+        candidate_siblings = (
+            CourseOffering.query
+            .filter(
+                CourseOffering.course_id == offering.course_id,
+                CourseOffering.semester == offering.semester,
+                CourseOffering.section == offering.section,
+                CourseOffering.offering_id != offering.offering_id,
+            )
+            .all()
+        )
+        sibling_offerings = [
+            s for s in candidate_siblings
+            if are_offerings_academically_compatible(
+                s.academic_year, s.semester,
+                offering.academic_year, offering.semester,
+            )
+        ]
+        sibling_ids = [s.offering_id for s in sibling_offerings]
+        if sibling_ids:
+            sibling_sessions = (
+                AttendanceSession.query
+                .filter(
+                    AttendanceSession.offering_id.in_(sibling_ids),
+                    AttendanceSession.status == "CLOSED",
+                )
+                .all()
+            )
+            for s in sibling_sessions:
+                offering_sessions_map[offering.offering_id].add(s.session_id)
+                all_closed_session_ids.add(s.session_id)
 
     student_present_session_ids = set()
 
@@ -360,7 +394,7 @@ def get_attendance_summary():
 
         total_sessions = len(session_ids)
         present_count = len(
-            set(session_ids) & student_present_session_ids
+            session_ids & student_present_session_ids
         )
 
         present_count = min(present_count, total_sessions)
@@ -375,12 +409,19 @@ def get_attendance_summary():
         overall_total += total_sessions
         overall_present += present_count
 
+        ay_raw = offering.academic_year
+        if ay_raw and is_single_academic_session(ay_raw):
+            ay_val = canonical_academic_year(ay_raw)
+        else:
+            ay_val = resolve_offering_academic_year(ay_raw, offering.semester)
+
         data.append({
             "offering_id": offering.offering_id,
             "course_code": course.course_code,
             "course_name": course.course_name,
             "semester": offering.semester,
             "section": offering.section,
+            "academic_year": ay_val,
             "total_sessions": total_sessions,
             "present_sessions": present_count,
             "absent_sessions": absent_count,

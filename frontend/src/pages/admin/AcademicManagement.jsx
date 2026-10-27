@@ -1071,7 +1071,7 @@ function AcademicManagement() {
             faculty_id: String(offering.faculty_id ?? ""),
             batch: initialBatch,
             academic_year: offering.academic_year
-              ? toCanonicalAcademicYear(formatAcademicYear(offering.academic_year, offering.semester))
+              ? toCanonicalAcademicYear(formatAcademicYear(offering.academic_year, offering.semester, offering.batch || initialBatch))
               : "",
             semester: String(offering.semester ?? ""),
             section: offering.section || "",
@@ -2155,7 +2155,8 @@ function AcademicManagement() {
                       <td>
                         {formatAcademicYear(
                           offering.academic_year,
-                          offering.semester
+                          offering.semester,
+                          offering.batch
                         )}
                       </td>
                       <td>{offering.semester ?? "—"}</td>
