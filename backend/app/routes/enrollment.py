@@ -17,6 +17,7 @@ from app.utils.academic_year import (
     get_current_academic_session,
     is_batch_cohort,
     is_single_academic_session,
+    resolve_offering_academic_year,
 )
 from app.utils.auth import admin_required, student_required
 
@@ -44,12 +45,6 @@ def _parse_group_request(data):
     except (TypeError, ValueError):
         return None, "department_id and semester must be valid integers"
 
-    cohort = (
-        data.get("batch_year")
-        or data.get("batch_name")
-        or data.get("cohort")
-        or data.get("academic_year")
-    )
     section = data.get("section")
     session_ay = data.get("academic_session") or data.get("session_academic_year")
 
@@ -59,11 +54,36 @@ def _parse_group_request(data):
     if semester < 1:
         return None, "semester must be greater than 0"
 
-    if not isinstance(cohort, str) or not isinstance(section, str):
-        return None, "A cohort and section are required"
+    if not isinstance(section, str) or not section.strip():
+        return None, "A valid section is required"
 
-    normalized_cohort = format_batch_cohort(cohort)
-    cohort_start_year = extract_cohort_start_year(cohort)
+    normalized_section = section.strip()
+
+    # 1. Resolve running academic teaching session (e.g. '2026-2027')
+    if session_ay and is_single_academic_session(session_ay):
+        offering_session = canonical_academic_year(session_ay)
+    elif data.get("academic_year") and is_single_academic_session(data.get("academic_year")):
+        offering_session = canonical_academic_year(data.get("academic_year"))
+    else:
+        offering_session = get_current_academic_session()
+
+    # 2. Resolve admission cohort without conflating single-year session with cohort
+    raw_cohort = (
+        data.get("batch_year")
+        or data.get("batch_name")
+        or data.get("cohort")
+    )
+    if not raw_cohort and data.get("academic_year") and not is_single_academic_session(data.get("academic_year")):
+        raw_cohort = data.get("academic_year")
+
+    if not raw_cohort or is_single_academic_session(raw_cohort):
+        session_start = int(offering_session.split("-")[0])
+        derived_start = session_start - ((semester - 1) // 2)
+        cohort_start_year = str(derived_start)
+        normalized_cohort = format_batch_cohort(cohort_start_year)
+    else:
+        normalized_cohort = format_batch_cohort(raw_cohort)
+        cohort_start_year = extract_cohort_start_year(raw_cohort)
 
     if not cohort_start_year or not re.match(r"^\d{4}-\d{4}$", normalized_cohort):
         return None, (
@@ -71,18 +91,9 @@ def _parse_group_request(data):
             "for example 2026-2030"
         )
 
-    normalized_section = section.strip()
-
-    if not normalized_section:
-        return None, "Section cannot be empty"
-
-    if session_ay and is_single_academic_session(session_ay):
-        offering_session = canonical_academic_year(session_ay)
-    else:
-        offering_session = get_current_academic_session()
-
     group = {
         "department_id": department_id,
+        "cohort": normalized_cohort,
         "academic_year": normalized_cohort,
         "batch_year": normalized_cohort,
         "cohort_start_year": cohort_start_year,
@@ -138,6 +149,7 @@ def _get_group_enrollment_context(group):
             ),
             CourseOffering.semester == group["semester"],
             CourseOffering.section == group["section"],
+            CourseOffering.academic_year == group["academic_session"],
         )
         .order_by(Course.course_code.asc(), CourseOffering.offering_id.asc())
         .all()
@@ -304,7 +316,10 @@ def get_enrollments():
                 else (enrollment.student.academic_year if enrollment.student else None)
             ),
             "academic_year": (
-                enrollment.offering.academic_year
+                resolve_offering_academic_year(
+                    enrollment.offering.academic_year,
+                    enrollment.offering.semester,
+                )
                 if enrollment.offering
                 else (enrollment.student.academic_year if enrollment.student else None)
             ),
@@ -415,6 +430,7 @@ def get_enrollments_summary():
         grp_offerings = [
             o for o in offerings
             if o.course and o.course.department_id == dept_id and o.semester == sem and o.section == sec
+            and (not start_year or not o.course.batch or o.course.batch.startswith(start_year))
         ]
         grp_offering_ids = set(o.offering_id for o in grp_offerings)
 
@@ -441,11 +457,23 @@ def get_enrollments_summary():
             else "Incomplete"
         )
 
-        ay_display = (
-            grp_offerings[0].academic_year
-            if grp_offerings and grp_offerings[0].academic_year
-            else (s_list[0].academic_year or get_current_academic_session())
+        active_offering = next(
+            (
+                o for o in grp_offerings
+                if (o.academic_year and canonical_academic_year(o.academic_year) == get_current_academic_session())
+                or o.faculty_id is not None
+            ),
+            grp_offerings[0] if grp_offerings else None,
         )
+        raw_ay = (
+            active_offering.academic_year
+            if active_offering and active_offering.academic_year
+            else (s_list[0].academic_year if s_list and s_list[0].academic_year else None)
+        )
+        if raw_ay and is_single_academic_session(raw_ay):
+            ay_display = canonical_academic_year(raw_ay)
+        else:
+            ay_display = None
 
         group_list.append({
             "group_id": f"{dept_code}-{start_year}-S{sem}-{sec}",
@@ -453,6 +481,7 @@ def get_enrollments_summary():
             "department_code": dept_code,
             "department_name": dept_name,
             "batch": start_year,
+            "cohort": format_batch_cohort(start_year),
             "batch_name": f"{start_year} Batch",
             "academic_year": ay_display,
             "semester": sem,
@@ -774,6 +803,7 @@ def bulk_enroll_group():
                 CourseOffering.query
                 .filter(
                     CourseOffering.course_id == course.course_id,
+                    CourseOffering.academic_year == session,
                     CourseOffering.semester == group["semester"],
                     CourseOffering.section == group["section"],
                 )
@@ -874,54 +904,3 @@ def bulk_enroll_group():
             "offering_ids": offering_ids,
         },
     }), 201 if rows or created_offerings else 200
-
-
-
-# ---------------------------------------------------------------------------
-# Student: list courses for the logged-in student
-# ---------------------------------------------------------------------------
-
-@enrollment_bp.get("/student/courses")
-@student_required
-def get_student_courses():
-    user_id = int(get_jwt_identity())
-
-    student = Student.query.filter_by(user_id=user_id).first()
-
-    if not student:
-        return jsonify({
-            "success": False,
-            "message": "Student profile not found",
-        }), 404
-
-    enrollments = (
-        Enrollment.query
-        .filter_by(
-            student_id=student.student_id,
-            status="ACTIVE",
-        )
-        .all()
-    )
-
-    data = []
-
-    for enrollment in enrollments:
-        offering = enrollment.offering
-        course = offering.course
-
-        data.append({
-            "enrollment_id": enrollment.enrollment_id,
-            "offering_id": offering.offering_id,
-            "course_id": course.course_id,
-            "course_code": course.course_code,
-            "course_name": course.course_name,
-            "semester": offering.semester,
-            "section": offering.section,
-            "academic_year": offering.academic_year,
-            "room": offering.room,
-        })
-
-    return jsonify({
-        "success": True,
-        "data": data,
-    }), 200

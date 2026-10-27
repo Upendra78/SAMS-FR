@@ -49,7 +49,7 @@ def is_batch_cohort(val):
     return bool(m4)
 
 
-def resolve_offering_academic_year(val, semester=None):
+def resolve_offering_academic_year(val, semester=None, batch=None):
     """
     Resolves any course offering academic_year value into a canonical 1-year
     teaching academic session (e.g. '2025-2026').
@@ -57,30 +57,74 @@ def resolve_offering_academic_year(val, semester=None):
     batch year (e.g. '2026') was stored, normalizes it using progression semester:
       offset = (semester - 1) // 2
       teaching_session = f"{start_year + offset}-{start_year + offset + 1}"
+    If a 1-year session was mistakenly stamped with the cohort admission year (e.g. '2024-2025'
+    for Semester 5 of Batch 2024), advances it according to progression offset.
     """
+    if not val and not batch:
+        return get_current_academic_session()
+
+    sem_num = 1
+    if semester is not None:
+        try:
+            sem_num = max(1, int(semester))
+        except (ValueError, TypeError):
+            sem_num = 1
+    year_offset = (sem_num - 1) // 2
+
+    batch_start = None
+    if batch:
+        b_str = extract_cohort_start_year(str(batch))
+        if b_str and b_str.isdigit() and len(b_str) == 4:
+            batch_start = int(b_str)
+
     if not val:
+        if batch_start:
+            teaching_start = batch_start + year_offset
+            return f"{teaching_start}-{teaching_start + 1}"
         return get_current_academic_session()
 
     s = str(val).strip()
     canon = canonical_academic_year(s)
+
+    val_start_str = extract_cohort_start_year(s)
+    val_start = int(val_start_str) if val_start_str and val_start_str.isdigit() and len(val_start_str) == 4 else None
+
+    # If canon is a single 1-year academic session:
     if is_single_academic_session(canon):
+        if batch_start and val_start and val_start < (batch_start + year_offset):
+            teaching_start = batch_start + year_offset
+            return f"{teaching_start}-{teaching_start + 1}"
         return canon
 
-    # Cohort or single year fallback
-    start_year_str = extract_cohort_start_year(s)
-    if start_year_str and len(start_year_str) == 4 and start_year_str.isdigit():
-        start_year = int(start_year_str)
-        try:
-            sem_num = int(semester) if semester is not None else 1
-            if sem_num < 1:
-                sem_num = 1
-        except (ValueError, TypeError):
-            sem_num = 1
-        year_offset = (sem_num - 1) // 2
-        teaching_start = start_year + year_offset
+    # Otherwise multi-year cohort range (e.g. '2026 -2032') or single year:
+    effective_start = val_start or batch_start
+    if effective_start:
+        teaching_start = effective_start + year_offset
         return f"{teaching_start}-{teaching_start + 1}"
 
     return canon
+
+
+def are_offerings_academically_compatible(ay1, sem1, ay2, sem2) -> bool:
+    """
+    Determines whether two course offerings belong to the same academic teaching session.
+    - Normalizes and compares 1-year sessions (e.g. '2026-2027' and '2026 - 2027').
+    - Disallows cross-session matching between distinct academic years (e.g. '2024-2025' and '2026-2027').
+    - If both offerings have valid academic sessions, they must be canonically identical.
+    - If either is unassigned (None or empty), they are treated as compatible (no conflict).
+    """
+    if not ay1 or not ay2:
+        return True
+
+    canon1 = canonical_academic_year(ay1)
+    canon2 = canonical_academic_year(ay2)
+
+    if is_single_academic_session(canon1) and is_single_academic_session(canon2):
+        return canon1 == canon2
+
+    res1 = resolve_offering_academic_year(ay1, sem1)
+    res2 = resolve_offering_academic_year(ay2, sem2)
+    return res1 == res2
 
 
 def format_batch_cohort(val, duration_years=4):

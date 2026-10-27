@@ -3115,7 +3115,11 @@ def get_course_offerings():
             "faculty_id": offering.faculty_id,
             "faculty_name": faculty_name,
             "batch": batch_val,
-            "academic_year": resolve_offering_academic_year(offering.academic_year, offering.semester),
+            "academic_year": resolve_offering_academic_year(
+                offering.academic_year,
+                offering.semester,
+                batch=batch_val,
+            ),
             "raw_academic_year": offering.academic_year,
             "semester": offering.semester,
             "section": offering.section,

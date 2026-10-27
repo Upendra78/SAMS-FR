@@ -18,6 +18,7 @@ from app.models import (
     TimetableEntry,
 )
 from app.utils.academic_year import (
+    are_offerings_academically_compatible,
     canonical_academic_year,
     resolve_student_academic_info,
     resolve_offering_academic_year,
@@ -849,20 +850,6 @@ def get_faculty_students():
 
     offering_id_filter = request.args.get("offering_id", type=int)
 
-    query = (
-        Enrollment.query
-        .join(CourseOffering, Enrollment.offering_id == CourseOffering.offering_id)
-        .options(
-            joinedload(Enrollment.student).joinedload(Student.user),
-            joinedload(Enrollment.student).joinedload(Student.department),
-            joinedload(Enrollment.student).selectinload(Student.face_profiles),
-        )
-        .filter(
-            CourseOffering.faculty_id == faculty.faculty_id,
-            Enrollment.status == "ACTIVE",
-        )
-    )
-
     if offering_id_filter:
         offering = db.session.get(CourseOffering, offering_id_filter)
         if not offering:
@@ -877,44 +864,124 @@ def get_faculty_students():
                 "message": "You are not authorized for this course offering",
             }), 403
 
-        query = query.filter(Enrollment.offering_id == offering_id_filter)
-
-    enrollments = query.all()
+        target_offerings = [offering]
+    else:
+        target_offerings = (
+            CourseOffering.query
+            .filter_by(faculty_id=faculty.faculty_id)
+            .order_by(CourseOffering.offering_id.asc())
+            .all()
+        )
 
     students = {}
 
-    for enrollment in enrollments:
-        student = enrollment.student
-        has_face = any(fp.is_active for fp in student.face_profiles)
+    for offering in target_offerings:
+        # 1. Direct active enrollments on this faculty offering
+        direct_enrollments = (
+            Enrollment.query
+            .options(
+                joinedload(Enrollment.student).joinedload(Student.user),
+                joinedload(Enrollment.student).joinedload(Student.department),
+                joinedload(Enrollment.student).selectinload(Student.face_profiles),
+            )
+            .join(Student, Enrollment.student_id == Student.student_id)
+            .join(User, Student.user_id == User.user_id)
+            .filter(
+                Enrollment.offering_id == offering.offering_id,
+                Enrollment.status == "ACTIVE",
+                User.is_active.is_(True),
+            )
+            .all()
+        )
 
-        if student.student_id in students:
-            if enrollment.offering_id not in students[student.student_id]["offering_ids"]:
-                students[student.student_id]["offering_ids"].append(enrollment.offering_id)
-            continue
+        enrollments_to_process = direct_enrollments
 
-        acad_info = resolve_student_academic_info(student)
+        # 2. Sibling fallback: if no direct enrollments, check equivalent sibling offerings
+        if not direct_enrollments:
+            sibling_candidates = (
+                CourseOffering.query
+                .filter(
+                    CourseOffering.course_id == offering.course_id,
+                    CourseOffering.semester == offering.semester,
+                    CourseOffering.section == offering.section,
+                    CourseOffering.offering_id != offering.offering_id,
+                    db.or_(
+                        CourseOffering.faculty_id.is_(None),
+                        CourseOffering.faculty_id == faculty.faculty_id,
+                    ),
+                )
+                .all()
+            )
+            sibling_offerings = [
+                s for s in sibling_candidates
+                if are_offerings_academically_compatible(
+                    s.academic_year, s.semester,
+                    offering.academic_year, offering.semester,
+                )
+            ]
+            sibling_ids = [s.offering_id for s in sibling_offerings]
+            if sibling_ids:
+                enrollments_to_process = (
+                    Enrollment.query
+                    .options(
+                        joinedload(Enrollment.student).joinedload(Student.user),
+                        joinedload(Enrollment.student).joinedload(Student.department),
+                        joinedload(Enrollment.student).selectinload(Student.face_profiles),
+                    )
+                    .join(Student, Enrollment.student_id == Student.student_id)
+                    .join(User, Student.user_id == User.user_id)
+                    .filter(
+                        Enrollment.offering_id.in_(sibling_ids),
+                        Enrollment.status == "ACTIVE",
+                        User.is_active.is_(True),
+                        Student.semester == offering.semester,
+                        Student.section == offering.section,
+                    )
+                    .all()
+                )
 
-        students[student.student_id] = {
-            "student_id": student.student_id,
-            "user_id": student.user_id,
-            "name": student.user.name,
-            "email": student.user.email,
-            "enrollment_no": student.enrollment_no,
-            "semester": acad_info["semester"],
-            "section": acad_info["section"],
-            "academic_year": acad_info["academic_year"],
-            "batch_year": acad_info["batch_year"],
-            "admission_year": acad_info["admission_year"],
-            "offering_id": enrollment.offering_id,
-            "offering_ids": [enrollment.offering_id],
-            "has_face_profile": has_face,
-            "face_registered": has_face,
-            "department": {
-                "department_id": student.department.department_id,
-                "department_name": student.department.department_name,
-                "department_code": student.department.department_code,
-            },
-        }
+        for enrollment in enrollments_to_process:
+            student = enrollment.student
+            has_face = any(fp.is_active for fp in student.face_profiles)
+            real_enrollment_id = enrollment.offering_id
+            faculty_teaching_id = offering.offering_id
+
+            if student.student_id in students:
+                curr_ids = students[student.student_id]["offering_ids"]
+                if real_enrollment_id not in curr_ids:
+                    curr_ids.append(real_enrollment_id)
+                if faculty_teaching_id not in curr_ids:
+                    curr_ids.append(faculty_teaching_id)
+                continue
+
+            acad_info = resolve_student_academic_info(student)
+
+            offering_ids_list = [real_enrollment_id]
+            if faculty_teaching_id != real_enrollment_id:
+                offering_ids_list.append(faculty_teaching_id)
+
+            students[student.student_id] = {
+                "student_id": student.student_id,
+                "user_id": student.user_id,
+                "name": student.user.name,
+                "email": student.user.email,
+                "enrollment_no": student.enrollment_no,
+                "semester": acad_info["semester"],
+                "section": acad_info["section"],
+                "academic_year": acad_info["academic_year"],
+                "batch_year": acad_info["batch_year"],
+                "admission_year": acad_info["admission_year"],
+                "offering_id": real_enrollment_id,
+                "offering_ids": offering_ids_list,
+                "teaching_offering_id": faculty_teaching_id,
+                "has_face_profile": has_face,
+                "face_registered": has_face,
+                "department": {
+                    "department_id": student.department.department_id,
+                    "department_name": student.department.department_name,
+                    "department_code": student.department.department_code,
+                },
+            }
 
     return jsonify({
         "success": True,

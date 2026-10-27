@@ -686,6 +686,74 @@ class TestAcademicYearBatchStandardization(unittest.TestCase):
         self.assertEqual(resolved_offering["batch"], "2024")
         self.assertEqual(resolved_offering["academic_year"], "2026-2027")
 
+    def test_course_offerings_resolves_teaching_session_and_preserves_historical_records(self):
+        """
+        Regression test:
+        1. Affected offerings stamped with batch admission year (e.g. 2024-2025 for Sem 5,
+           or 2023-2024 for Sem 7) are resolved to their current teaching session (2026-2027).
+        2. Valid historical offerings (e.g. Batch 2024 in Sem 1 in 2024-2025, or Batch 2023 in Sem 3 in 2024-2025)
+           preserve their historical academic year (2024-2025) and are NOT forced to 2026-2027.
+        3. Offerings already set to 2026-2027 remain unchanged.
+        """
+        with self.app.app_context():
+            # Courses
+            c_sem5 = Course(course_code="BCSE-514", course_name="Big Data", department_id=self.dept_id, semester=5, credits=3, batch="2024")
+            c_sem7 = Course(course_code="CS103", course_name="Networks", department_id=self.dept_id, semester=7, credits=3, batch="2023")
+            c_hist_sem1 = Course(course_code="BCSE-101", course_name="Intro CS", department_id=self.dept_id, semester=1, credits=3, batch="2024")
+            c_hist_sem3 = Course(course_code="BCSE-301", course_name="Data Structures", department_id=self.dept_id, semester=3, credits=3, batch="2023")
+            c_curr_sem1 = Course(course_code="BCSE-001", course_name="Problem Solving", department_id=self.dept_id, semester=1, credits=3, batch="2026")
+
+            db.session.add_all([c_sem5, c_sem7, c_hist_sem1, c_hist_sem3, c_curr_sem1])
+            db.session.flush()
+
+            # Offerings
+            # 1. Affected Offering: Batch 2024, Sem 5, stored as cohort admission session '2024 -2025'
+            off_affected_sem5 = CourseOffering(course_id=c_sem5.course_id, semester=5, section="B", academic_year="2024 -2025")
+            # 2. Affected Offering: Batch 2023, Sem 7, stored as cohort admission session '2023 -2024'
+            off_affected_sem7 = CourseOffering(course_id=c_sem7.course_id, semester=7, section="A", academic_year="2023 -2024")
+            # 3. Historical Offering: Batch 2024, Sem 1, taught in '2024-2025'
+            off_hist_sem1 = CourseOffering(course_id=c_hist_sem1.course_id, semester=1, section="A", academic_year="2024-2025")
+            # 4. Historical Offering: Batch 2023, Sem 3, taught in '2024-2025'
+            off_hist_sem3 = CourseOffering(course_id=c_hist_sem3.course_id, semester=3, section="A", academic_year="2024-2025")
+            # 5. Current Offering: Batch 2026, Sem 1, '2026-2027'
+            off_curr_sem1 = CourseOffering(course_id=c_curr_sem1.course_id, semester=1, section="A", academic_year="2026-2027")
+
+            db.session.add_all([off_affected_sem5, off_affected_sem7, off_hist_sem1, off_hist_sem3, off_curr_sem1])
+            db.session.commit()
+
+            id_aff_sem5 = off_affected_sem5.offering_id
+            id_aff_sem7 = off_affected_sem7.offering_id
+            id_hist_sem1 = off_hist_sem1.offering_id
+            id_hist_sem3 = off_hist_sem3.offering_id
+            id_curr_sem1 = off_curr_sem1.offering_id
+
+        res = self.client.get("/api/admin/course-offerings", headers=self.admin_headers())
+        self.assertEqual(res.status_code, 200)
+        all_offs = {o["offering_id"]: o for o in res.get_json()["data"]}
+
+        # 1. Affected sem 5 offering resolves to current teaching session 2026-2027
+        self.assertEqual(all_offs[id_aff_sem5]["academic_year"], "2026-2027")
+        self.assertEqual(all_offs[id_aff_sem5]["batch"], "2024")
+        self.assertEqual(all_offs[id_aff_sem5]["raw_academic_year"], "2024 -2025")
+
+        # 2. Affected sem 7 offering resolves to current teaching session 2026-2027
+        self.assertEqual(all_offs[id_aff_sem7]["academic_year"], "2026-2027")
+        self.assertEqual(all_offs[id_aff_sem7]["batch"], "2023")
+        self.assertEqual(all_offs[id_aff_sem7]["raw_academic_year"], "2023 -2024")
+
+        # 3. Historical sem 1 offering preserves 2024-2025
+        self.assertEqual(all_offs[id_hist_sem1]["academic_year"], "2024-2025")
+        self.assertEqual(all_offs[id_hist_sem1]["batch"], "2024")
+
+        # 4. Historical sem 3 offering preserves 2024-2025
+        self.assertEqual(all_offs[id_hist_sem3]["academic_year"], "2024-2025")
+        self.assertEqual(all_offs[id_hist_sem3]["batch"], "2023")
+
+        # 5. Current sem 1 offering remains 2026-2027
+        self.assertEqual(all_offs[id_curr_sem1]["academic_year"], "2026-2027")
+        self.assertEqual(all_offs[id_curr_sem1]["batch"], "2026")
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -28,7 +28,13 @@ import {
   getAdminDepartments,
   getAdminBatches,
 } from "../../services/adminService";
-import { getAcademicYearOptions } from "../../utils/academicYearUtils";
+import {
+  formatAcademicYear,
+  getAcademicYearOptions,
+  normalizeBatchCohort,
+  suggestBatchForSemester,
+  extractCohortStartYear,
+} from "../../utils/academicYearUtils";
 import "./CourseEnrollments.css";
 
 const RECORDS_PER_PAGE = 10;
@@ -75,6 +81,7 @@ export default function CourseEnrollments() {
     semester: "",
     section: "",
   });
+  const [isBatchUserSelected, setIsBatchUserSelected] = useState(false);
 
   // Preview Data State
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -205,7 +212,8 @@ export default function CourseEnrollments() {
   const availableGroupBatches = useMemo(() => {
     const set = new Set();
     studentGroups.forEach((g) => {
-      if (g.batch) set.add(g.batch);
+      const b = g.cohort || g.batch;
+      if (b) set.add(String(b));
     });
     return Array.from(set).sort();
   }, [studentGroups]);
@@ -222,8 +230,14 @@ export default function CourseEnrollments() {
   const filteredStudentGroups = useMemo(() => {
     return studentGroups.filter((group) => {
       // Batch filter
-      if (selectedBatchFilter !== "ALL" && String(group.batch) !== String(selectedBatchFilter)) {
-        return false;
+      if (selectedBatchFilter !== "ALL") {
+        const filterStart = extractCohortStartYear(selectedBatchFilter);
+        const groupStart = extractCohortStartYear(group.cohort || group.batch);
+        if (filterStart && groupStart) {
+          if (filterStart !== groupStart) return false;
+        } else if (String(group.batch) !== String(selectedBatchFilter)) {
+          return false;
+        }
       }
       // Semester filter
       if (selectedSemesterFilter !== "ALL" && String(group.semester) !== String(selectedSemesterFilter)) {
@@ -320,10 +334,11 @@ export default function CourseEnrollments() {
       setEnrollmentSuccessMessage("");
       setEnrollmentErrorMessage("");
 
+      const normalizedCohort = normalizeBatchCohort(targetGroup.batch_year, batches);
       const payload = {
         department_id: targetGroup.department_id,
-        cohort: targetGroup.batch_year,
-        academic_year: targetGroup.academic_year || targetGroup.batch_year,
+        cohort: normalizedCohort,
+        academic_year: targetGroup.academic_year || "2026-2027",
         semester: targetGroup.semester,
         section: targetGroup.section,
       };
@@ -351,20 +366,22 @@ export default function CourseEnrollments() {
     } finally {
       setPreviewLoading(false);
     }
-  }, []);
+  }, [batches]);
 
   // Open Modal via Primary "+ Add Enrollment" Button
   const handleOpenAddEnrollment = () => {
     const defaultDept = departments[0]?.department_id || (studentGroups[0]?.department_id || "");
-    const defaultBatch = batches[0]?.batch_name || (studentGroups[0]?.batch || "2024");
-    const defaultAy = getAcademicYearOptions()[2]?.value || "2025-2026";
+    const defaultAy = getAcademicYearOptions()[2]?.value || "2026-2027";
+    const defaultSem = "5";
+    const suggestedBatch = suggestBatchForSemester(defaultSem, defaultAy, batches) || batches[0]?.batch_name || "2024-2028";
     const initialGroup = {
       department_id: String(defaultDept),
-      batch_year: String(defaultBatch),
+      batch_year: String(suggestedBatch),
       academic_year: String(defaultAy),
-      semester: "5",
+      semester: defaultSem,
       section: "A",
     };
+    setIsBatchUserSelected(false);
     setFormGroup(initialGroup);
     setIsModalOpen(true);
     setEnrollmentSuccessMessage("");
@@ -374,13 +391,15 @@ export default function CourseEnrollments() {
 
   // Open Modal via "Manage Group" Button on a Group Card
   const handleManageGroup = (group) => {
+    const normalizedCohort = normalizeBatchCohort(group.cohort || group.batch, batches);
     const initialGroup = {
       department_id: String(group.department_id),
-      batch_year: String(group.batch),
-      academic_year: String(group.academic_year || "2025-2026"),
+      batch_year: String(normalizedCohort),
+      academic_year: String(group.academic_year || "2026-2027"),
       semester: String(group.semester),
       section: String(group.section),
     };
+    setIsBatchUserSelected(true);
     setFormGroup(initialGroup);
     setIsModalOpen(true);
     setEnrollmentSuccessMessage("");
@@ -390,7 +409,26 @@ export default function CourseEnrollments() {
 
   // Handle cascading form input changes
   const handleFormChange = (field, value) => {
-    const updated = { ...formGroup, [field]: value };
+    let updated = { ...formGroup, [field]: value };
+
+    if (field === "batch_year") {
+      setIsBatchUserSelected(Boolean(value));
+    } else if (field === "semester") {
+      if (!isBatchUserSelected || !formGroup.batch_year) {
+        const suggested = suggestBatchForSemester(value, updated.academic_year, batches);
+        if (suggested) {
+          updated.batch_year = suggested;
+        }
+      }
+    } else if (field === "academic_year") {
+      if (!isBatchUserSelected || !formGroup.batch_year) {
+        const suggested = suggestBatchForSemester(updated.semester, value, batches);
+        if (suggested) {
+          updated.batch_year = suggested;
+        }
+      }
+    }
+
     setFormGroup(updated);
     fetchGroupPreview(updated);
   };
@@ -753,10 +791,10 @@ export default function CourseEnrollments() {
                             {group.department_code} · Section {group.section}
                           </h3>
                           <p className="group-card-subtitle">
-                            Batch {group.batch} · Semester {group.semester}
+                            Batch {group.cohort || group.batch} · Semester {group.semester}
                           </p>
                           <p className="group-card-subtitle">
-                            Academic year {group.academic_year}
+                            Academic year {formatAcademicYear(group.academic_year, group.semester)}
                           </p>
                         </div>
                       </div>
@@ -931,7 +969,7 @@ export default function CourseEnrollments() {
                       <td>{rec.enrollment_no || "N/A"}</td>
                       <td>{rec.department_code || "CSE"}</td>
                       <td>{rec.batch_name || "N/A"}</td>
-                      <td>{rec.academic_year || "N/A"}</td>
+                      <td>{formatAcademicYear(rec.academic_year, rec.semester)}</td>
                       <td>{rec.semester ?? "N/A"}</td>
                       <td>{rec.section || "N/A"}</td>
                       <td>
@@ -1093,7 +1131,7 @@ export default function CourseEnrollments() {
                   <label htmlFor="modal-batch-select">Admission Batch</label>
                   <select
                     id="modal-batch-select"
-                    value={formGroup.batch_year}
+                    value={normalizeBatchCohort(formGroup.batch_year, batches)}
                     onChange={(e) => handleFormChange("batch_year", e.target.value)}
                   >
                     <option value="">Select Batch</option>
@@ -1104,7 +1142,7 @@ export default function CourseEnrollments() {
                         </option>
                       ))
                     ) : (
-                      ["2023", "2024", "2025", "2026"].map((y) => (
+                      ["2023-2027", "2024-2028", "2025-2029", "2026-2030"].map((y) => (
                         <option key={y} value={y}>
                           {y} Batch
                         </option>
@@ -1169,7 +1207,7 @@ export default function CourseEnrollments() {
                 <div className="selected-group-preview-title">
                   {departments.find((d) => String(d.department_id) === String(formGroup.department_id))
                     ?.department_code || "Program"}{" "}
-                  · Batch {formGroup.batch_year || "YYYY"} · Semester {formGroup.semester || "S"} · Section{" "}
+                  · Batch {normalizeBatchCohort(formGroup.batch_year, batches) || "YYYY"} · Semester {formGroup.semester || "S"} · Section{" "}
                   {formGroup.section || "Sec"}
                 </div>
                 <div className="selected-group-preview-sub">

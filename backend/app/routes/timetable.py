@@ -16,7 +16,7 @@ from app.models import (
     User,
 )
 from app.utils.auth import admin_required, faculty_required, student_required
-from app.utils.academic_year import canonical_academic_year
+from app.utils.academic_year import are_offerings_academically_compatible, canonical_academic_year
 from app.services.activity_service import record_activity
 
 timetable_bp = Blueprint(
@@ -205,15 +205,49 @@ def get_student_timetable():
             "message": "Student profile not found",
         }), 404
 
-    offering_ids = [
-        enrollment.offering_id
-        for enrollment in Enrollment.query.filter_by(
+    enrollments = (
+        Enrollment.query
+        .options(joinedload(Enrollment.offering))
+        .filter_by(
             student_id=student.student_id,
             status="ACTIVE",
-        ).all()
-    ]
-    if not offering_ids:
+        )
+        .all()
+    )
+    if not enrollments:
         return success_response([])
+
+    enrolled_offering_ids = [e.offering_id for e in enrollments if e.offering_id]
+
+    direct_tts = (
+        TimetableEntry.query
+        .filter(TimetableEntry.offering_id.in_(enrolled_offering_ids))
+        .all()
+    )
+    direct_covered_offering_ids = {tt.offering_id for tt in direct_tts}
+
+    all_target_offering_ids = set(enrolled_offering_ids)
+
+    for enr in enrollments:
+        off = enr.offering
+        if not off or off.offering_id in direct_covered_offering_ids:
+            continue
+        candidate_siblings = (
+            CourseOffering.query
+            .filter(
+                CourseOffering.course_id == off.course_id,
+                CourseOffering.semester == off.semester,
+                CourseOffering.section == off.section,
+                CourseOffering.offering_id != off.offering_id,
+            )
+            .all()
+        )
+        for sib in candidate_siblings:
+            if are_offerings_academically_compatible(
+                sib.academic_year, sib.semester,
+                off.academic_year, off.semester,
+            ):
+                all_target_offering_ids.add(sib.offering_id)
 
     entries = (
         TimetableEntry.query
@@ -222,14 +256,34 @@ def get_student_timetable():
             joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
             joinedload(TimetableEntry.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.department),
         )
-        .filter(TimetableEntry.offering_id.in_(offering_ids))
+        .filter(TimetableEntry.offering_id.in_(all_target_offering_ids))
         .order_by(
             TimetableEntry.day_of_week,
             TimetableEntry.start_time,
         )
         .all()
     )
-    return success_response(entries)
+
+    seen = set()
+    deduped_entries = []
+    for entry in entries:
+        off = entry.offering
+        course_id = off.course_id if off else None
+        section = (off.section or "").strip().upper() if off else ""
+        room = (entry.room or "").strip().upper()
+        faculty_id = off.faculty_id if off else None
+        day = (entry.day_of_week or "").strip().capitalize()
+        start = entry.start_time.strftime("%H:%M:%S") if entry.start_time else ""
+        end = entry.end_time.strftime("%H:%M:%S") if entry.end_time else ""
+
+        # Logical slot identity: course, section, day, start, end, room, and faculty
+        # Distinct rooms or distinct faculty at the same time represent distinct legitimate sessions
+        slot_key = (course_id, section, day, start, end, room, faculty_id)
+        if slot_key not in seen:
+            seen.add(slot_key)
+            deduped_entries.append(entry)
+
+    return success_response(deduped_entries)
 
 
 # =========================================================
