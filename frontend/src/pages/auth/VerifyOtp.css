@@ -351,3 +351,28 @@
     font-size: 17px;
   }
 }
+
+/* Advisory notice box */
+
+.otp-notice-box {
+  margin: 16px 0 20px;
+  padding: 14px 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.otp-notice-box p {
+  margin: 0;
+}
+
+.otp-notice-box code {
+  font-family: monospace;
+  background: #ffedd5;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: #c2410c;
+}

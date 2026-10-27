@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import {
   faArrowLeft,
   faEnvelope,
+  faInfoCircle,
   faMobileScreenButton,
   faShieldHalved,
 } from "@fortawesome/free-solid-svg-icons";
@@ -17,16 +18,19 @@ function ForgotPassword() {
   const [identifier, setIdentifier] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [submittedNotice, setSubmittedNotice] = useState(false);
 
   function handleMethodChange(nextMethod) {
     setMethod(nextMethod);
     setIdentifier("");
     setError("");
+    setSubmittedNotice(false);
   }
 
   function handleIdentifierChange(event) {
     setIdentifier(event.target.value);
     setError("");
+    setSubmittedNotice(false);
   }
 
   function validateIdentifier() {
@@ -62,7 +66,7 @@ function ForgotPassword() {
     return true;
   }
 
-  async function handleSubmit(event) {
+  function handleSubmit(event) {
     event.preventDefault();
 
     if (!validateIdentifier()) {
@@ -70,21 +74,15 @@ function ForgotPassword() {
     }
 
     /*
-     * Backend password-reset API is not implemented yet.
-     * This loading state is kept ready for the real API integration.
+     * Backend email/SMS delivery is not configured.
+     * We display the explicit institutional notice instead of a fake OTP progression.
      */
     setLoading(true);
 
     setTimeout(() => {
       setLoading(false);
-
-      navigate("/auth/verify-otp", {
-        state: {
-          method,
-          identifier: identifier.trim(),
-        },
-      });
-    }, 500);
+      setSubmittedNotice(true);
+    }, 200);
   }
 
   return (
@@ -116,111 +114,137 @@ function ForgotPassword() {
           </p>
         </div>
 
-        <form
-          className="forgot-password-form"
-          onSubmit={handleSubmit}
-          noValidate
-        >
-          <div className="recovery-method">
-            <span className="recovery-label">
-              Recovery Method
-            </span>
-
-            <div className="recovery-options">
-              <button
-                type="button"
-                className={`recovery-option ${
-                  method === "email"
-                    ? "recovery-option-active"
-                    : ""
-                }`}
-                onClick={() => handleMethodChange("email")}
-                disabled={loading}
-                aria-pressed={method === "email"}
-              >
-                <FontAwesomeIcon icon={faEnvelope} />
-                <span>Email</span>
-              </button>
-
-              <button
-                type="button"
-                className={`recovery-option ${
-                  method === "phone"
-                    ? "recovery-option-active"
-                    : ""
-                }`}
-                onClick={() => handleMethodChange("phone")}
-                disabled={loading}
-                aria-pressed={method === "phone"}
-              >
-                <FontAwesomeIcon icon={faMobileScreenButton} />
-                <span>Phone</span>
-              </button>
-            </div>
-          </div>
-
-          <div className="recovery-field">
-            <label htmlFor="recovery-identifier">
-              {method === "email"
-                ? "Registered Email"
-                : "Registered Phone Number"}
-            </label>
-
-            <div
-              className={`recovery-input-wrapper ${
-                error ? "recovery-input-error" : ""
-              }`}
-            >
-              <FontAwesomeIcon
-                icon={
-                  method === "email"
-                    ? faEnvelope
-                    : faMobileScreenButton
-                }
-                className="recovery-input-icon"
-              />
-
-              <input
-                id="recovery-identifier"
-                type={method === "email" ? "email" : "tel"}
-                value={identifier}
-                onChange={handleIdentifierChange}
-                placeholder={
-                  method === "email"
-                    ? "Enter your registered email"
-                    : "Enter your 10-digit phone number"
-                }
-                disabled={loading}
-                autoComplete={
-                  method === "email"
-                    ? "email"
-                    : "tel"
-                }
-                aria-invalid={Boolean(error)}
-                aria-describedby={
-                  error ? "recovery-error" : undefined
-                }
-              />
-            </div>
-
-            {error && (
-              <p
-                id="recovery-error"
-                className="recovery-field-error"
-              >
-                {error}
+        {submittedNotice ? (
+          <div className="recovery-notice-box" role="status">
+            <FontAwesomeIcon icon={faInfoCircle} className="recovery-notice-icon" />
+            <div className="recovery-notice-text">
+              <h4>Self-Service Reset Unavailable</h4>
+              <p>
+                Automated email/SMS delivery is currently not configured for self-service password reset.
+                Please contact the institutional administrator or IT helpdesk to reset your password for:
               </p>
-            )}
+              <p className="recovery-identifier-badge">{identifier.trim()}</p>
+              <div className="recovery-helpdesk-info">
+                <span>Support Contact:</span>
+                <strong>admin@sams.institution.edu</strong>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="forgot-password-submit"
+              onClick={() => setSubmittedNotice(false)}
+              style={{ marginTop: "14px" }}
+            >
+              Try Another Account
+            </button>
           </div>
-
-          <button
-            type="submit"
-            className="forgot-password-submit"
-            disabled={loading}
+        ) : (
+          <form
+            className="forgot-password-form"
+            onSubmit={handleSubmit}
+            noValidate
           >
-            {loading ? "Processing..." : "Send OTP"}
-          </button>
-        </form>
+            <div className="recovery-method">
+              <span className="recovery-label">
+                Recovery Method
+              </span>
+
+              <div className="recovery-options">
+                <button
+                  type="button"
+                  className={`recovery-option ${
+                    method === "email"
+                      ? "recovery-option-active"
+                      : ""
+                  }`}
+                  onClick={() => handleMethodChange("email")}
+                  disabled={loading}
+                  aria-pressed={method === "email"}
+                >
+                  <FontAwesomeIcon icon={faEnvelope} />
+                  <span>Email</span>
+                </button>
+
+                <button
+                  type="button"
+                  className={`recovery-option ${
+                    method === "phone"
+                      ? "recovery-option-active"
+                      : ""
+                  }`}
+                  onClick={() => handleMethodChange("phone")}
+                  disabled={loading}
+                  aria-pressed={method === "phone"}
+                >
+                  <FontAwesomeIcon icon={faMobileScreenButton} />
+                  <span>Phone</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="recovery-field">
+              <label htmlFor="recovery-identifier">
+                {method === "email"
+                  ? "Registered Email"
+                  : "Registered Phone Number"}
+              </label>
+
+              <div
+                className={`recovery-input-wrapper ${
+                  error ? "recovery-input-error" : ""
+                }`}
+              >
+                <FontAwesomeIcon
+                  icon={
+                    method === "email"
+                      ? faEnvelope
+                      : faMobileScreenButton
+                  }
+                  className="recovery-input-icon"
+                />
+
+                <input
+                  id="recovery-identifier"
+                  type={method === "email" ? "email" : "tel"}
+                  value={identifier}
+                  onChange={handleIdentifierChange}
+                  placeholder={
+                    method === "email"
+                      ? "Enter your registered email"
+                      : "Enter your 10-digit phone number"
+                  }
+                  disabled={loading}
+                  autoComplete={
+                    method === "email"
+                      ? "email"
+                      : "tel"
+                  }
+                  aria-invalid={Boolean(error)}
+                  aria-describedby={
+                    error ? "recovery-error" : undefined
+                  }
+                />
+              </div>
+
+              {error && (
+                <p
+                  id="recovery-error"
+                  className="recovery-field-error"
+                >
+                  {error}
+                </p>
+              )}
+            </div>
+
+            <button
+              type="submit"
+              className="forgot-password-submit"
+              disabled={loading}
+            >
+              {loading ? "Processing..." : "Request Password Reset"}
+            </button>
+          </form>
+        )}
 
         <button
           type="button"

@@ -1,5 +1,6 @@
-from flask import Flask
+from flask import Flask, jsonify
 from flask_cors import CORS
+from app.utils.token_blocklist import token_blocklist
 
 from app.models import (
     User,
@@ -45,12 +46,32 @@ def create_app():
     jwt.init_app(app)
     bcrypt.init_app(app)
 
+    @jwt.token_in_blocklist_loader
+    def check_if_token_is_revoked(jwt_header, jwt_payload: dict):
+        jti = jwt_payload.get("jti")
+        return token_blocklist.is_revoked(jti)
+
+    @jwt.revoked_token_loader
+    def revoked_token_callback(jwt_header, jwt_payload):
+        return jsonify({
+            "success": False,
+            "message": "Token has been revoked",
+        }), 401
+
     # Initialize CORS
     CORS(
         app,
         origins=app.config["CORS_ORIGINS"],
         supports_credentials=True,
     )
+
+    # Defensive Security Headers
+    @app.after_request
+    def set_security_headers(response):
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        return response
 
     # Register routes
     app.register_blueprint(health_bp)

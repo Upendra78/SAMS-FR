@@ -177,6 +177,12 @@ function VerifyOtp() {
           )}
         </div>
 
+        <div className="otp-notice-box" role="status">
+          <p>
+            <strong>Advisory:</strong> Automated email/SMS OTP delivery is currently not configured. If you require an account password reset, please contact the administrator at <code>admin@sams.institution.edu</code>.
+          </p>
+        </div>
+
         <form
           className="verify-otp-form"
           onSubmit={handleSubmit}
