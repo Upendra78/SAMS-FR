@@ -25,7 +25,11 @@ import {
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { faChalkboardUser } from "@fortawesome/free-solid-svg-icons";
 
-import { getAdminDashboard, getRecentActivity } from "../../services/adminService";
+import {
+  getAdminDashboard,
+  getRecentActivity,
+  getAdminAttendanceAnalytics,
+} from "../../services/adminService";
 import { formatActivityTime } from "../../utils/dateUtils";
 import useAuth from "../../hooks/useAuth";
 import "./AdminDashboard.css";
@@ -124,43 +128,87 @@ function AdminDashboard() {
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState("");
 
+  const [analyticsData, setAnalyticsData] = useState(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [analyticsError, setAnalyticsError] = useState("");
+
+  const handleRetryAnalytics = async () => {
+    try {
+      setAnalyticsLoading(true);
+      setAnalyticsError("");
+      const res = await getAdminAttendanceAnalytics();
+      if (res?.success) {
+        setAnalyticsData(res.data || null);
+      } else {
+        setAnalyticsData(null);
+        setAnalyticsError(res?.message || "Failed to load attendance analytics.");
+      }
+    } catch (err) {
+      setAnalyticsData(null);
+      setAnalyticsError(
+        err?.response?.data?.message ||
+          err?.message ||
+          "Unable to load attendance analytics."
+      );
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
 
-    async function fetchDashboard() {
+    async function loadInitialData() {
       try {
-        const result = await getAdminDashboard();
+        const [dashRes, analyticsRes] = await Promise.allSettled([
+          getAdminDashboard(),
+          getAdminAttendanceAnalytics(),
+        ]);
 
         if (cancelled) return;
 
-        if (!result?.success) {
-          throw new Error(
-            result?.message || "Failed to load admin dashboard."
+        if (dashRes.status === "fulfilled" && dashRes.value?.success) {
+          setDashboardData(dashRes.value.data || null);
+          setRecentActivities(dashRes.value.data?.recent_activity || []);
+          setErrorMessage("");
+          setActivityError("");
+        } else {
+          const err = dashRes.status === "rejected" ? dashRes.reason : null;
+          setDashboardData(null);
+          setRecentActivities([]);
+          setErrorMessage(
+            err?.response?.data?.message ||
+              err?.message ||
+              (dashRes.status === "fulfilled" && dashRes.value?.message) ||
+              "Unable to load dashboard data."
           );
         }
 
-        setDashboardData(result.data || null);
-        setRecentActivities(result.data?.recent_activity || []);
-        setErrorMessage("");
-        setActivityError("");
-      } catch (error) {
+        if (analyticsRes.status === "fulfilled" && analyticsRes.value?.success) {
+          setAnalyticsData(analyticsRes.value.data || null);
+          setAnalyticsError("");
+        } else {
+          const err = analyticsRes.status === "rejected" ? analyticsRes.reason : null;
+          setAnalyticsData(null);
+          setAnalyticsError(
+            err?.response?.data?.message ||
+              err?.message ||
+              (analyticsRes.status === "fulfilled" && analyticsRes.value?.message) ||
+              "Failed to load attendance analytics."
+          );
+        }
+      } catch (err) {
         if (cancelled) return;
-
-        setDashboardData(null);
-        setRecentActivities([]);
-        setErrorMessage(
-          error?.response?.data?.message ||
-            error?.message ||
-            "Unable to load dashboard data."
-        );
+        setErrorMessage(err?.message || "Unexpected error loading dashboard.");
       } finally {
         if (!cancelled) {
           setLoading(false);
+          setAnalyticsLoading(false);
         }
       }
     }
 
-    fetchDashboard();
+    loadInitialData();
 
     return () => {
       cancelled = true;
@@ -343,7 +391,7 @@ function AdminDashboard() {
               <BarChart3 size={18} className="admin-panel-header-icon text-blue" />
               <div>
                 <h2>Attendance Overview</h2>
-                <p>Attendance trend analytics require a dedicated trend API.</p>
+                <p>Course-wise attendance performance across active offerings.</p>
               </div>
             </div>
             <Link to="/admin/attendance-reports" className="admin-panel-link-badge">
@@ -352,17 +400,121 @@ function AdminDashboard() {
             </Link>
           </div>
 
-          <div className="admin-panel-inner-box">
-            <div className="admin-empty-icon-circle blue-circle">
-              <BarChart3 size={24} />
+          {analyticsLoading ? (
+            <div className="admin-panel-inner-box">
+              <div
+                className="admin-loading-icon"
+                style={{ fontSize: "20px", color: "#3b82f6", marginBottom: "8px" }}
+              >
+                <i className="fa-solid fa-spinner fa-spin" />
+              </div>
+              <p>Loading attendance analytics...</p>
             </div>
-            <h3>No attendance trend data</h3>
-            <p>API integration is pending for historical attendance trend data.</p>
-            <Link to="/admin/attendance-reports" className="admin-btn-primary">
-              <span>Open attendance reports</span>
-              <ArrowRight size={13} />
-            </Link>
-          </div>
+          ) : analyticsError ? (
+            <div className="admin-panel-inner-box">
+              <div
+                className="admin-empty-icon-circle"
+                style={{ background: "#fef2f2", color: "#ef4444" }}
+              >
+                <AlertTriangle size={24} />
+              </div>
+              <h3>Unable to load analytics</h3>
+              <p>{analyticsError}</p>
+              <button
+                type="button"
+                className="admin-btn-primary"
+                onClick={handleRetryAnalytics}
+                style={{ marginTop: "12px", padding: "6px 14px", fontSize: "12px" }}
+              >
+                <span>Retry</span>
+              </button>
+            </div>
+          ) : !analyticsData ||
+            !Array.isArray(analyticsData.courses) ||
+            analyticsData.courses.length === 0 ? (
+            <div className="admin-panel-inner-box">
+              <div className="admin-empty-icon-circle blue-circle">
+                <BarChart3 size={24} />
+              </div>
+              <h3>No closed sessions yet</h3>
+              <p>
+                Attendance analytics will appear once attendance sessions are completed
+                and closed.
+              </p>
+              <Link to="/admin/attendance-reports" className="admin-btn-primary">
+                <span>Open attendance reports</span>
+                <ArrowRight size={13} />
+              </Link>
+            </div>
+          ) : (
+            <div className="admin-analytics-list">
+              {analyticsData.courses.slice(0, 4).map((c) => {
+                const pct =
+                  typeof c.attendance_percentage === "number"
+                    ? c.attendance_percentage
+                    : 0;
+                const badgeClass =
+                  pct >= 75 ? "badge-high" : pct >= 60 ? "badge-mid" : "badge-low";
+                const barColor =
+                  pct >= 75 ? "#10b981" : pct >= 60 ? "#f59e0b" : "#ef4444";
+                const totalAtt =
+                  (c.total_present || 0) + (c.total_absent || 0);
+
+                return (
+                  <div key={c.offering_id} className="admin-analytics-item">
+                    <div className="admin-analytics-item-header">
+                      <span
+                        className="admin-analytics-course-name"
+                        title={c.course?.course_name}
+                      >
+                        {c.course?.course_code} • {c.course?.course_name}
+                      </span>
+                      <span className={`admin-analytics-badge ${badgeClass}`}>
+                        {pct}%
+                      </span>
+                    </div>
+
+                    <div
+                      className="admin-analytics-bar-bg"
+                      role="progressbar"
+                      aria-valuenow={pct}
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                    >
+                      <div
+                        className="admin-analytics-bar-fill"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, pct))}%`,
+                          backgroundColor: barColor,
+                        }}
+                      />
+                    </div>
+
+                    <div className="admin-analytics-meta">
+                      <span>
+                        {c.faculty?.name
+                          ? `Faculty: ${c.faculty.name}`
+                          : `Sec ${c.section || "A"}`}
+                      </span>
+                      <span>
+                        {c.total_present || 0} / {totalAtt} attended (
+                        {c.total_sessions || 0} sessions)
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <Link
+                to="/admin/attendance-reports"
+                className="admin-btn-primary"
+                style={{ marginTop: "4px", justifyContent: "center" }}
+              >
+                <span>View Full Analytics</span>
+                <ArrowRight size={13} />
+              </Link>
+            </div>
+          )}
         </section>
 
         {/* Panel 2: Current Status */}

@@ -23,6 +23,7 @@ const Faculty = lazy(() => import("../pages/admin/Faculty"));
 const Departments = lazy(() => import("../pages/admin/Departments"));
 const AcademicManagement = lazy(() => import("../pages/admin/AcademicManagement"));
 const CourseEnrollments = lazy(() => import("../pages/admin/CourseEnrollments"));
+const AcademicResults = lazy(() => import("../pages/admin/AcademicResults"));
 const AttendanceReports = lazy(() => import("../pages/admin/AttendanceReports"));
 const AdminManagement = lazy(() => import("../pages/admin/AdminManagement"));
 const BatchManagement = lazy(() => import("../pages/admin/BatchManagement"));
@@ -37,6 +38,7 @@ const Classes = lazy(() => import("../pages/faculty/Classes"));
 const FacultyStudents = lazy(() => import("../pages/faculty/Students"));
 const Attendance = lazy(() => import("../pages/faculty/Attendance"));
 const Reports = lazy(() => import("../pages/faculty/Reports"));
+const ResultUpload = lazy(() => import("../pages/faculty/ResultUpload"));
 const FacultyProfile = lazy(() => import("../pages/faculty/Profile"));
 const FacultySettings = lazy(() => import("../pages/faculty/Settings"));
 
@@ -46,6 +48,7 @@ const Profile = lazy(() => import("../pages/student/Profile"));
 const StudentAttendance = lazy(() => import("../pages/student/Attendance"));
 const AttendanceHistory = lazy(() => import("../pages/student/AttendanceHistory"));
 const Courses = lazy(() => import("../pages/student/Courses"));
+const AcademicReport = lazy(() => import("../pages/student/AcademicReport"));
 const Schedule = lazy(() => import("../pages/student/Schedule"));
 const StudentReports = lazy(() => import("../pages/student/Reports"));
 const StudentSettings = lazy(() => import("../pages/student/Settings"));
@@ -173,11 +176,13 @@ function AppRoutes() {
           <Route
             path="academic-management/courses"
             element={<AcademicManagement />}
+
           />
 
           <Route
             path="academic-management/course-offerings"
             element={<AcademicManagement />}
+
           />
 
           <Route
@@ -188,6 +193,23 @@ function AppRoutes() {
           <Route
             path="academic-management/assignments"
             element={<AcademicManagement />}
+
+          />
+
+          <Route
+            path="academic-management/results"
+            element={<AcademicResults />}
+          />
+
+          <Route
+            path="academic-results"
+            element={
+              <Navigate
+                to="/admin/academic-management/results"
+                replace
+              />
+            }
+
           />
 
           {/* Keep the original batch URL working */}
@@ -286,6 +308,15 @@ function AppRoutes() {
           />
 
           <Route
+            path="results"
+            element={<ResultUpload />}
+          />
+          <Route
+            path="result-upload"
+            element={<Navigate to="/faculty/results" replace />}
+          />
+
+          <Route
             path="profile"
             element={<FacultyProfile />}
           />
@@ -321,6 +352,11 @@ function AppRoutes() {
           />
 
           <Route
+            path="daily-punch"
+            element={<StudentAttendance />}
+          />
+
+          <Route
             path="attendance-history"
             element={<AttendanceHistory />}
           />
@@ -331,8 +367,23 @@ function AppRoutes() {
           />
 
           <Route
+            path="academic-records"
+            element={<AcademicReport />}
+          />
+
+          <Route
+            path="academic-report"
+            element={<AcademicReport />}
+          />
+
+          <Route
             path="profile"
             element={<Profile />}
+          />
+
+          <Route
+            path="timetable"
+            element={<Schedule />}
           />
 
           <Route
@@ -342,6 +393,16 @@ function AppRoutes() {
 
           <Route
             path="reports"
+            element={<StudentReports />}
+          />
+
+          <Route
+            path="attendance/subject-wise"
+            element={<StudentReports />}
+          />
+
+          <Route
+            path="subject-wise-report"
             element={<StudentReports />}
           />
 

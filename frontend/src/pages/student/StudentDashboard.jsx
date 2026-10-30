@@ -754,7 +754,7 @@ function StudentDashboard() {
             <button
               type="button"
               className="student-action-item"
-              onClick={() => navigate("/student/schedule")}
+              onClick={() => navigate("/student/timetable")}
             >
               <div className="action-icon-wrap blue-action">
                 <CalendarDays size={18} strokeWidth={2.2} />

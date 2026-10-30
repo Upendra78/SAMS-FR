@@ -1292,11 +1292,23 @@
 .fc-modal-footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   padding: 16px 24px;
   border-top: 1px solid #e2e8f0;
   background: #f8fafc;
+}
+
+.fc-modal-footer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fc-modal-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .fc-modal-secondary-btn {
@@ -1401,5 +1413,191 @@
 
   .fc-modal-meta-grid {
     grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* ==========================================================================
+   Class Roster Export Controls & Modal Enhancements (Phase 2E)
+   ========================================================================== */
+
+.fc-roster-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fc-roster-quick-export-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fc-btn-quick-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #334155;
+  background: #f1f5f9;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fc-btn-quick-export:hover:not(:disabled) {
+  background: #e2e8f0;
+  color: #0f172a;
+  border-color: #94a3b8;
+}
+
+.fc-btn-quick-export:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fc-export-dropdown-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.fc-modal-export-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fc-modal-export-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.fc-modal-export-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.fc-export-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  min-width: 210px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12), 0 8px 10px -6px rgba(15, 23, 42, 0.08);
+  padding: 6px;
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: fc-menu-slide-up 0.15s ease-out;
+}
+
+@keyframes fc-menu-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fc-export-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+
+.fc-export-menu-item:hover {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.fc-modal-link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #2563eb;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fc-modal-link-btn:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.fc-modal-feedback-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.fc-feedback-success {
+  background: #f0fdf4;
+  color: #15803d;
+  border-top: 1px solid #bbf7d0;
+}
+
+.fc-feedback-error {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-top: 1px solid #fecaca;
+}
+
+@media (max-width: 640px) {
+  .fc-modal-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .fc-modal-footer-left,
+  .fc-modal-footer-right {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .fc-modal-footer-left button,
+  .fc-modal-footer-right button {
+    flex: 1;
+    justify-content: center;
+  }
+  .fc-export-menu {
+    left: 0;
+    right: 0;
+    width: 100%;
   }
 }

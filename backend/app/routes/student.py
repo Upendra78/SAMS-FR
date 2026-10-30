@@ -14,7 +14,9 @@ from app.extensions import bcrypt, db
 from app.models import (
     AttendanceRecord,
     AttendanceSession,
+    Course,
     CourseOffering,
+    Department,
     Enrollment,
     Faculty,
     Student,
@@ -909,6 +911,96 @@ def change_student_password():
 # STUDENT COURSES
 # ============================================================
 
+DAY_ORDER = {
+    "monday": 1,
+    "tuesday": 2,
+    "wednesday": 3,
+    "thursday": 4,
+    "friday": 5,
+    "saturday": 6,
+    "sunday": 7,
+}
+
+DAY_ABBR = {
+    "monday": "Mon",
+    "tuesday": "Tue",
+    "wednesday": "Wed",
+    "thursday": "Thu",
+    "friday": "Fri",
+    "saturday": "Sat",
+    "sunday": "Sun",
+}
+
+
+def format_timetable_schedules(timetable_entries):
+    if not timetable_entries:
+        return "Schedule not assigned", []
+
+    sorted_entries = sorted(
+        timetable_entries,
+        key=lambda e: (
+            DAY_ORDER.get((e.day_of_week or "").strip().lower(), 99),
+            e.start_time or datetime.min.time(),
+        ),
+    )
+
+    schedules_list = []
+    from collections import OrderedDict
+    slot_days = OrderedDict()
+
+    for entry in sorted_entries:
+        day_clean = (entry.day_of_week or "").strip().capitalize()
+        day_key = day_clean.lower()
+        abbr = DAY_ABBR.get(day_key, day_clean[:3])
+
+        st_str = (
+            datetime.combine(date.today(), entry.start_time).strftime("%I:%M %p")
+            if entry.start_time
+            else ""
+        )
+        et_str = (
+            datetime.combine(date.today(), entry.end_time).strftime("%I:%M %p")
+            if entry.end_time
+            else ""
+        )
+        time_slot = f"{st_str} - {et_str}" if st_str and et_str else ""
+
+        schedules_list.append({
+            "timetable_entry_id": entry.timetable_entry_id,
+            "day_of_week": day_clean,
+            "day_abbr": abbr,
+            "start_time": st_str,
+            "end_time": et_str,
+            "time_slot": time_slot,
+            "room": entry.room or None,
+        })
+
+        if time_slot:
+            if time_slot not in slot_days:
+                slot_days[time_slot] = []
+            if abbr not in slot_days[time_slot]:
+                slot_days[time_slot].append(abbr)
+
+    if not slot_days:
+        return "Schedule not assigned", schedules_list
+
+    parts = []
+    for slot, days in slot_days.items():
+        parts.append(f"{', '.join(days)} {slot}")
+
+    if len(parts) > 2:
+        all_days = list(OrderedDict.fromkeys([s["day_abbr"] for s in schedules_list]))
+        summary = f"{', '.join(all_days)} (Multiple slots)"
+    else:
+        summary = "; ".join(parts)
+
+    return summary, schedules_list
+
+
+# ============================================================
+# STUDENT COURSES
+# ============================================================
+
 @student_bp.get("/courses")
 @student_or_admin_required
 def get_student_courses():
@@ -920,11 +1012,37 @@ def get_student_courses():
             "message": "Student profile not found",
         }), 404
 
+    # Validate query parameters
+    semester_arg = request.args.get("semester")
+    dept_id_arg = request.args.get("department_id")
+    search_arg = (request.args.get("search") or request.args.get("q") or "").strip().lower()
+
+    filter_semester = None
+    if semester_arg is not None and semester_arg.strip() != "" and semester_arg.strip().lower() != "all":
+        try:
+            filter_semester = int(semester_arg)
+        except (ValueError, TypeError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid semester parameter. Must be an integer.",
+            }), 400
+
+    filter_dept_id = None
+    if dept_id_arg is not None and dept_id_arg.strip() != "" and dept_id_arg.strip().lower() != "all":
+        try:
+            filter_dept_id = int(dept_id_arg)
+        except (ValueError, TypeError):
+            return jsonify({
+                "success": False,
+                "message": "Invalid department_id parameter. Must be an integer.",
+            }), 400
+
     enrollments = (
         Enrollment.query
         .options(
-            joinedload(Enrollment.offering).joinedload(CourseOffering.course),
+            joinedload(Enrollment.offering).joinedload(CourseOffering.course).joinedload(Course.department),
             joinedload(Enrollment.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+            joinedload(Enrollment.offering).joinedload(CourseOffering.timetable_entries),
         )
         .filter_by(
             student_id=student.student_id,
@@ -933,13 +1051,149 @@ def get_student_courses():
         .all()
     )
 
-    data = []
+    offering_ids = [e.offering_id for e in enrollments if e.offering_id]
+
+    # Pre-fetch closed sessions and student's present records in batch
+    from collections import defaultdict
+    offering_sessions_map = defaultdict(set)
+    all_closed_session_ids = set()
+
+    if offering_ids:
+        closed_sessions = (
+            AttendanceSession.query
+            .filter(
+                AttendanceSession.offering_id.in_(offering_ids),
+                AttendanceSession.status == "CLOSED",
+            )
+            .all()
+        )
+        for s in closed_sessions:
+            offering_sessions_map[s.offering_id].add(s.session_id)
+            all_closed_session_ids.add(s.session_id)
+
+    student_present_session_ids = set()
+    if all_closed_session_ids:
+        pres_rows = (
+            db.session.query(AttendanceRecord.session_id)
+            .filter(
+                AttendanceRecord.student_id == student.student_id,
+                AttendanceRecord.session_id.in_(all_closed_session_ids),
+                AttendanceRecord.status == "PRESENT",
+            )
+            .all()
+        )
+        student_present_session_ids = {r[0] for r in pres_rows}
+
+    # Upcoming classes calculation for next 7 calendar days
+    today = date.today()
+    now_time = datetime.now().time()
+    upcoming_classes_count = 0
+
+    for day_offset in range(7):
+        target_date = today + timedelta(days=day_offset)
+        target_day_name = target_date.strftime("%A").lower()
+
+        for enr in enrollments:
+            off = enr.offering
+            if not off:
+                continue
+            for tt in off.timetable_entries:
+                if (tt.day_of_week or "").strip().lower() == target_day_name:
+                    if day_offset == 0:
+                        if tt.start_time > now_time:
+                            upcoming_classes_count += 1
+                    else:
+                        upcoming_classes_count += 1
+
+    # Today's schedule entries
+    today_weekday = datetime.now().strftime("%A").lower()
+    today_schedule_entries = []
+
+    for enr in enrollments:
+        off = enr.offering
+        if not off:
+            continue
+        c = off.course
+        for tt in off.timetable_entries:
+            if (tt.day_of_week or "").strip().lower() == today_weekday:
+                if now_time > tt.end_time:
+                    slot_status = "COMPLETED"
+                elif tt.start_time <= now_time <= tt.end_time:
+                    slot_status = "ONGOING"
+                else:
+                    slot_status = "UPCOMING"
+
+                st_str = datetime.combine(today, tt.start_time).strftime("%I:%M %p")
+                et_str = datetime.combine(today, tt.end_time).strftime("%I:%M %p")
+
+                today_schedule_entries.append({
+                    "timetable_entry_id": tt.timetable_entry_id,
+                    "offering_id": off.offering_id,
+                    "course_code": c.course_code if c else "",
+                    "course_name": c.course_name if c else "",
+                    "time_slot": f"{st_str} - {et_str}",
+                    "start_time": st_str,
+                    "end_time": et_str,
+                    "raw_start_time": str(tt.start_time),
+                    "room": tt.room or off.room or "TBD",
+                    "status": slot_status,
+                })
+
+    today_schedule_entries.sort(key=lambda x: x["raw_start_time"])
+
+    # Build course records and distinct department/semester filters
+    all_courses_data = []
+    seen_departments = {}
+    seen_semesters = set()
+
+    total_sessions_all = 0
+    total_present_all = 0
 
     for enrollment in enrollments:
         offering = enrollment.offering
-        course = offering.course
+        course = offering.course if offering else None
+        if not course:
+            continue
 
-        data.append({
+        dept = course.department
+        if dept and dept.department_id not in seen_departments:
+            seen_departments[dept.department_id] = {
+                "department_id": dept.department_id,
+                "department_name": dept.department_name,
+                "department_code": dept.department_code,
+            }
+
+        if offering.semester is not None:
+            seen_semesters.add(offering.semester)
+
+        session_ids = offering_sessions_map[offering.offering_id]
+        course_total_sessions = len(session_ids)
+        course_present = len(session_ids & student_present_session_ids)
+        course_absent = max(0, course_total_sessions - course_present)
+
+        total_sessions_all += course_total_sessions
+        total_present_all += course_present
+
+        course_pct = (
+            round((course_present / course_total_sessions) * 100, 1)
+            if course_total_sessions > 0
+            else None
+        )
+
+        sched_summary, sched_list = format_timetable_schedules(offering.timetable_entries)
+
+        faculty_payload = None
+        if offering.faculty:
+            fac_user = offering.faculty.user
+            faculty_payload = {
+                "faculty_id": offering.faculty.faculty_id,
+                "name": fac_user.name if fac_user else None,
+                "employee_id": offering.faculty.employee_id,
+                "designation": offering.faculty.designation,
+                "email": fac_user.email if fac_user else None,
+            }
+
+        all_courses_data.append({
             "enrollment_id": enrollment.enrollment_id,
             "offering_id": offering.offering_id,
             "course_id": course.course_id,
@@ -949,24 +1203,205 @@ def get_student_courses():
             "semester": offering.semester,
             "section": offering.section,
             "academic_year": offering.academic_year,
-            "room": offering.room,
-            "faculty": (
+            "room": offering.room or (sched_list[0]["room"] if sched_list else None) or "TBD",
+            "department": (
                 {
-                    "faculty_id": offering.faculty.faculty_id,
-                    "name": (
-                        offering.faculty.user.name
-                        if offering.faculty.user
-                        else None
-                    ),
-                    "employee_id": offering.faculty.employee_id,
-                    "designation": offering.faculty.designation,
+                    "department_id": dept.department_id,
+                    "department_name": dept.department_name,
+                    "department_code": dept.department_code,
                 }
-                if offering.faculty
+                if dept
                 else None
             ),
+            "faculty": faculty_payload,
+            "schedule_summary": sched_summary,
+            "schedules": sched_list,
+            "attendance": {
+                "total_sessions": course_total_sessions,
+                "present_sessions": course_present,
+                "absent_sessions": course_absent,
+                "attendance_percentage": course_pct,
+            },
         })
+
+    all_courses_data.sort(key=lambda c: c["course_code"])
+
+    overall_attendance = (
+        round((total_present_all / total_sessions_all) * 100, 1)
+        if total_sessions_all > 0
+        else None
+    )
+
+    stats_payload = {
+        "total_courses": len(all_courses_data),
+        "upcoming_classes_7_days": upcoming_classes_count,
+        "completed_classes_semester": len(all_closed_session_ids),
+        "overall_attendance_rate": overall_attendance,
+        "has_attendance_data": total_sessions_all > 0,
+    }
+
+    # Apply filters if provided
+    filtered_courses = all_courses_data
+    if filter_semester is not None:
+        filtered_courses = [c for c in filtered_courses if c["semester"] == filter_semester]
+    if filter_dept_id is not None:
+        filtered_courses = [
+            c for c in filtered_courses
+            if c["department"] and c["department"]["department_id"] == filter_dept_id
+        ]
+    if search_arg:
+        filtered_courses = [
+            c for c in filtered_courses
+            if search_arg in (c["course_code"] or "").lower()
+            or search_arg in (c["course_name"] or "").lower()
+            or (c["faculty"] and search_arg in (c["faculty"]["name"] or "").lower())
+            or (c["department"] and search_arg in (c["department"]["department_name"] or "").lower())
+        ]
+
+    departments_list = sorted(list(seen_departments.values()), key=lambda d: d["department_name"])
+    semesters_list = sorted(list(seen_semesters))
 
     return jsonify({
         "success": True,
-        "data": data,
+        "data": filtered_courses,
+        "stats": stats_payload,
+        "today_schedule": today_schedule_entries,
+        "departments": departments_list,
+        "semesters": semesters_list,
+    }), 200
+
+
+# ============================================================
+# STUDENT COURSE DETAIL
+# ============================================================
+
+@student_bp.get("/courses/<int:offering_id>")
+@student_or_admin_required
+def get_student_course_detail(offering_id):
+    student = get_current_student()
+
+    if not student:
+        return jsonify({
+            "success": False,
+            "message": "Student profile not found",
+        }), 404
+
+    claims = get_jwt()
+    user_role = (claims.get("role") or "").strip().upper()
+
+    enrollment = (
+        Enrollment.query
+        .options(
+            joinedload(Enrollment.offering).joinedload(CourseOffering.course).joinedload(Course.department),
+            joinedload(Enrollment.offering).joinedload(CourseOffering.faculty).joinedload(Faculty.user),
+            joinedload(Enrollment.offering).joinedload(CourseOffering.timetable_entries),
+        )
+        .filter_by(
+            student_id=student.student_id,
+            offering_id=offering_id,
+            status="ACTIVE",
+        )
+        .first()
+    )
+
+    if not enrollment:
+        offering_exists = CourseOffering.query.filter_by(offering_id=offering_id).first()
+        if not offering_exists:
+            return jsonify({
+                "success": False,
+                "message": "Course offering not found",
+            }), 404
+
+        if user_role != "ADMIN":
+            return jsonify({
+                "success": False,
+                "message": "You are not enrolled in this course offering",
+            }), 403
+
+        offering = offering_exists
+    else:
+        offering = enrollment.offering
+
+    course = offering.course if offering else None
+    if not course:
+        return jsonify({
+            "success": False,
+            "message": "Course not found for offering",
+        }), 404
+
+    # Attendance for this offering
+    closed_sessions = (
+        AttendanceSession.query
+        .filter_by(offering_id=offering.offering_id, status="CLOSED")
+        .all()
+    )
+    closed_session_ids = [s.session_id for s in closed_sessions]
+    present_records_count = 0
+    if closed_session_ids:
+        present_records_count = (
+            AttendanceRecord.query
+            .filter(
+                AttendanceRecord.student_id == student.student_id,
+                AttendanceRecord.session_id.in_(closed_session_ids),
+                AttendanceRecord.status == "PRESENT",
+            )
+            .count()
+        )
+
+    total_sessions = len(closed_session_ids)
+    absent_count = max(0, total_sessions - present_records_count)
+    attendance_pct = (
+        round((present_records_count / total_sessions) * 100, 1)
+        if total_sessions > 0
+        else None
+    )
+
+    sched_summary, sched_list = format_timetable_schedules(offering.timetable_entries)
+
+    faculty_payload = None
+    if offering.faculty:
+        fac_user = offering.faculty.user
+        faculty_payload = {
+            "faculty_id": offering.faculty.faculty_id,
+            "name": fac_user.name if fac_user else None,
+            "employee_id": offering.faculty.employee_id,
+            "designation": offering.faculty.designation,
+            "email": fac_user.email if fac_user else None,
+            "phone": offering.faculty.phone or (fac_user.phone if fac_user else None),
+        }
+
+    dept = course.department
+
+    return jsonify({
+        "success": True,
+        "data": {
+            "enrollment_id": enrollment.enrollment_id if enrollment else None,
+            "offering_id": offering.offering_id,
+            "course_id": course.course_id,
+            "course_code": course.course_code,
+            "course_name": course.course_name,
+            "credits": course.credits,
+            "semester": offering.semester,
+            "section": offering.section,
+            "academic_year": offering.academic_year,
+            "room": offering.room or (sched_list[0]["room"] if sched_list else None) or "TBD",
+            "department": (
+                {
+                    "department_id": dept.department_id,
+                    "department_name": dept.department_name,
+                    "department_code": dept.department_code,
+                }
+                if dept
+                else None
+            ),
+            "faculty": faculty_payload,
+            "schedule_summary": sched_summary,
+            "schedules": sched_list,
+            "attendance": {
+                "total_sessions": total_sessions,
+                "present_sessions": present_records_count,
+                "absent_sessions": absent_count,
+                "attendance_percentage": attendance_pct,
+            },
+        },
     }), 200
