@@ -1115,7 +1115,7 @@ function TimetableManagement() {
               </span>
               <div>
                 <h4>Upload Timetable File</h4>
-                <p>Supports Excel (.xlsx, .xls) and PDF files</p>
+                <p>Supports Excel (.xlsx) workbook files</p>
               </div>
             </div>
 
@@ -1135,7 +1135,7 @@ function TimetableManagement() {
                 ref={fileInputRef}
                 type="file"
                 className="timetable-hidden-input"
-                accept=".xlsx,.xls,.pdf"
+                accept=".xlsx"
                 onChange={handleFileChange}
               />
               <button

@@ -43,8 +43,13 @@ export async function changeStudentPassword(passwordData) {
 
 // ==================== COURSES & ACADEMICS ====================
 
-export async function getStudentCourses() {
-  const response = await api.get("/student/courses");
+export async function getStudentCourses(params = {}) {
+  const response = await api.get("/student/courses", { params });
+  return response.data;
+}
+
+export async function getStudentCourseDetails(offeringId) {
+  const response = await api.get(`/student/courses/${offeringId}`);
   return response.data;
 }
 

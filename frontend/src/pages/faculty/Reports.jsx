@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   getFacultyAttendanceAnalytics,
   getFacultyAttendanceReports,
+  exportFacultyAttendanceReport,
 } from "../../services/reportService";
 
 import { faXmark } from "@fortawesome/free-solid-svg-icons";
@@ -78,6 +79,8 @@ function Reports() {
 
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState(null);
+  const [exportError, setExportError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -282,57 +285,72 @@ function Reports() {
     dateFrom && dateTo && dateFrom > dateTo
   );
 
-  const exportCSV = () => {
-    const headers = [
-      "Student Name",
-      "Student ID",
-      "Class",
-      "Total Sessions",
-      "Present",
-      "Absent",
-      "Attendance Percentage",
-      "Low Attendance",
-    ];
+  const handleExport = async (format) => {
+    if (exportingFormat) return;
+    setExportingFormat(format);
+    setExportError("");
 
-    const escapeCSV = (value) => {
-      const text = String(value ?? "");
-      return `"${text.replace(/"/g, '""')}"`;
-    };
+    try {
+      const offeringId =
+        selectedClass !== "All Classes" ? selectedClass : undefined;
+      const params = {
+        format,
+        offering_id: offeringId,
+        from_date: dateFrom || undefined,
+        to_date: dateTo || undefined,
+        status: status !== "All" ? status : undefined,
+        search: searchTerm.trim() || undefined,
+      };
 
-    const rows = filteredStudents.map((student) => [
-      student.studentName,
-      student.studentId,
-      student.className,
-      student.sessions,
-      student.present,
-      student.absent,
-      student.attendanceRate,
-      student.isLowAttendance === null
-        ? "Unknown"
-        : student.isLowAttendance
-          ? "Yes"
-          : "No",
-    ]);
+      const response = await exportFacultyAttendanceReport(params);
 
-    const csvContent = [headers, ...rows]
-      .map((row) => row.map(escapeCSV).join(","))
-      .join("\r\n");
+      let filename = `Faculty_Attendance_Report_${new Date().toISOString().slice(0, 10)}.${format}`;
+      const disposition =
+        response.headers?.["content-disposition"] ||
+        response.headers?.get?.("content-disposition");
+      if (disposition) {
+        const match = disposition.match(/filename\*?=['"]?(?:UTF-\d['"])?([^;\r\n'"]*)['"]?/i);
+        if (match && match[1]) {
+          filename = match[1];
+        }
+      }
 
-    const blob = new Blob(["\uFEFF", csvContent], {
-      type: "text/csv;charset=utf-8;",
-    });
+      const mimeType =
+        format === "pdf"
+          ? "application/pdf"
+          : format === "xlsx"
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : "text/csv;charset=utf-8;";
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
+      const blob = new Blob([response.data], { type: mimeType });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
 
-    link.href = url;
-    link.download = "faculty-attendance-report.csv";
-
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-
-    URL.revokeObjectURL(url);
+      setShowExportModal(false);
+    } catch (err) {
+      console.error("Export failed:", err);
+      let message = "Failed to export report. Please try again.";
+      if (err?.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) message = json.message;
+        } catch {
+          // fallback message
+        }
+      } else if (err?.response?.data?.message) {
+        message = err.response.data.message;
+      }
+      setExportError(message);
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const metrics = [
@@ -950,32 +968,47 @@ function Reports() {
 
             <div className="reports-modal-body">
               <p>
-                Export the currently filtered attendance report as a CSV
-                file.
+                Export the currently filtered attendance report in your preferred format.
               </p>
 
               <div className="reports-export-options">
                 <button
                   type="button"
-                  onClick={exportCSV}
-                  disabled={loading || filteredStudents.length === 0}
+                  onClick={() => handleExport("csv")}
+                  disabled={Boolean(exportingFormat) || filteredStudents.length === 0}
+                  className={exportingFormat === "csv" ? "exporting" : ""}
                 >
-                  CSV
+                  {exportingFormat === "csv" ? "Exporting CSV..." : "CSV (.csv)"}
                 </button>
 
-                <button type="button" disabled>
-                  Excel
+                <button
+                  type="button"
+                  onClick={() => handleExport("xlsx")}
+                  disabled={Boolean(exportingFormat) || filteredStudents.length === 0}
+                  className={exportingFormat === "xlsx" ? "exporting" : ""}
+                >
+                  {exportingFormat === "xlsx" ? "Exporting Excel..." : "Excel (.xlsx)"}
                 </button>
 
-                <button type="button" disabled>
-                  PDF
+                <button
+                  type="button"
+                  onClick={() => handleExport("pdf")}
+                  disabled={Boolean(exportingFormat) || filteredStudents.length === 0}
+                  className={exportingFormat === "pdf" ? "exporting" : ""}
+                >
+                  {exportingFormat === "pdf" ? "Exporting PDF..." : "PDF (.pdf)"}
                 </button>
               </div>
 
-              <div className="reports-export-pending">
-                CSV export is available. Excel and PDF export are not
-                implemented yet.
-              </div>
+              {exportError ? (
+                <div className="reports-export-error" role="alert">
+                  {exportError}
+                </div>
+              ) : (
+                <div className="reports-export-info">
+                  Export reflects active filters ({filteredStudents.length} student{filteredStudents.length === 1 ? "" : "s"}).
+                </div>
+              )}
             </div>
 
             <div className="reports-modal-footer">

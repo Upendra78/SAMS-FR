@@ -209,3 +209,18 @@ export async function getSystemHealth() {
 
   return response.data;
 }
+
+export async function exportClassRoster(offeringId, params = {}) {
+  const response = await api.get(`/faculty/classes/${offeringId}/roster/export`, {
+    params,
+    responseType: "blob",
+  });
+
+  return response;
+}
+
+export async function getOfferingRoster(offeringId) {
+  const response = await api.get(`/faculty/classes/${offeringId}/roster`);
+
+  return response.data;
+}

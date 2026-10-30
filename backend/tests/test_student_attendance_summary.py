@@ -442,5 +442,96 @@ class TestStudentAttendanceSummary(unittest.TestCase):
 
 
 
+
+    def test_summary_distinguishes_no_sessions_from_genuine_zero(self):
+        """Verify summary distinguishes subjects with zero eligible sessions from genuine 0% attendance."""
+        with self.app.app_context():
+            faculty = Faculty.query.first()
+            student = Student.query.filter_by(user_id=self.student_user_id).first()
+            dept = Department.query.first()
+
+            # Create a second course offering with closed sessions where student attended 0
+            course_b = Course(
+                course_code="BCSE-550",
+                course_name="Internet of Things",
+                credits=3,
+                department_id=dept.department_id,
+                semester=6,
+            )
+            db.session.add(course_b)
+            db.session.flush()
+
+            offering_b = CourseOffering(
+                course_id=course_b.course_id,
+                faculty_id=faculty.faculty_id,
+                academic_year="2026-27",
+                semester=6,
+                section="A",
+            )
+            db.session.add(offering_b)
+            db.session.flush()
+
+            enrollment_b = Enrollment(
+                student_id=student.student_id,
+                offering_id=offering_b.offering_id,
+                status="ACTIVE",
+            )
+            db.session.add(enrollment_b)
+            db.session.flush()
+
+            # Session 1 for course B: CLOSED, record is ABSENT
+            sess_b1 = AttendanceSession(
+                offering_id=offering_b.offering_id,
+                faculty_id=faculty.faculty_id,
+                session_date=date(2026, 9, 1),
+                start_time=time(9, 0),
+                end_time=time(10, 0),
+                status="CLOSED",
+            )
+            db.session.add(sess_b1)
+            db.session.flush()
+
+            rec_b1 = AttendanceRecord(
+                session_id=sess_b1.session_id,
+                student_id=student.student_id,
+                status="ABSENT",
+                confidence_score=0.9,
+            )
+            db.session.add(rec_b1)
+
+            # Ensure offering self.offering_id has NO closed sessions
+            active_sessions = AttendanceSession.query.filter_by(offering_id=self.offering_id).all()
+            for s in active_sessions:
+                s.status = "ACTIVE"
+
+            db.session.commit()
+
+            off_b_id = offering_b.offering_id
+
+        response = self.client.get(
+            "/api/student/attendance/summary",
+            headers=self._headers(),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["success"])
+
+        # Course A (self.offering_id): 0 closed sessions -> has_eligible_sessions=False, display_percentage="N/A"
+        item_a = next(item for item in payload["data"] if item["offering_id"] == self.offering_id)
+        self.assertEqual(item_a["total_sessions"], 0)
+        self.assertFalse(item_a["has_eligible_sessions"])
+        self.assertEqual(item_a["display_percentage"], "N/A")
+
+        # Course B (off_b_id): 1 closed session, 0 attended -> genuine 0%, has_eligible_sessions=True, display_percentage="0.0%"
+        item_b = next(item for item in payload["data"] if item["offering_id"] == off_b_id)
+        self.assertEqual(item_b["total_sessions"], 1)
+        self.assertEqual(item_b["present_sessions"], 0)
+        self.assertEqual(item_b["absent_sessions"], 1)
+        self.assertTrue(item_b["has_eligible_sessions"])
+        self.assertEqual(item_b["attendance_percentage"], 0)
+        self.assertEqual(item_b["display_percentage"], "0.0%")
+
+
 if __name__ == "__main__":
     unittest.main()

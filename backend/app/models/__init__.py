@@ -16,6 +16,13 @@ from app.models.batch import Batch
 from app.models.system_setting import SystemSetting
 from app.models.activity_log import ActivityLog
 
+from app.models.examination import Examination
+from app.models.academic_result import AcademicResult
+from app.models.academic_document import AcademicDocument
+from app.models.assessment import Assessment
+from app.models.result_submission import ResultSubmission
+from app.models.result_correction import ResultCorrection
+
 __all__ = [
     "User",
     "Department",
@@ -32,4 +39,10 @@ __all__ = [
     "Batch",
     "SystemSetting",
     "ActivityLog",
+    "Examination",
+    "AcademicResult",
+    "AcademicDocument",
+    "Assessment",
+    "ResultSubmission",
+    "ResultCorrection",
 ]

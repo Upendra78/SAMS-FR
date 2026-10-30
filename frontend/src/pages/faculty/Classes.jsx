@@ -16,6 +16,11 @@ import {
   CalendarDays,
   MapPin,
   CheckCircle2,
+  Download,
+  FileSpreadsheet,
+  FileText,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 
 import {
@@ -23,6 +28,7 @@ import {
   getFacultyCourseDetails,
   getFacultyTimetable,
   getFacultyClassesSummary,
+  exportClassRoster,
 } from "../../services/facultyService";
 import { invalidateApiCache } from "../../services/api";
 import { formatAcademicYear } from "../../utils/academicYearUtils";
@@ -112,11 +118,21 @@ function Classes() {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [detailsError, setDetailsError] = useState("");
 
+  // Roster Export State
+  const [exportingFormat, setExportingFormat] = useState(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState("");
+  const [exportError, setExportError] = useState("");
+  const exportMenuRef = useRef(null);
+
   // Close menus on outside click
   useEffect(() => {
     function handleClickOutside(event) {
       if (menuRef.current && !menuRef.current.contains(event.target)) {
         setActiveMenuId(null);
+      }
+      if (exportMenuRef.current && !exportMenuRef.current.contains(event.target)) {
+        setExportMenuOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -390,6 +406,9 @@ function Classes() {
     setCourseDetails(null);
     setDetailsLoading(true);
     setDetailsError("");
+    setExportError("");
+    setExportSuccess("");
+    setExportMenuOpen(false);
     setActiveMenuId(null);
 
     try {
@@ -416,6 +435,76 @@ function Classes() {
     setSelectedOffering(null);
     setCourseDetails(null);
     setDetailsError("");
+    setExportError("");
+    setExportSuccess("");
+    setExportMenuOpen(false);
+  };
+
+  // Export Class Roster
+  const handleExportRoster = async (format) => {
+    if (!selectedOffering?.offering_id || exportingFormat) return;
+    setExportingFormat(format);
+    setExportError("");
+    setExportSuccess("");
+    setExportMenuOpen(false);
+
+    try {
+      const response = await exportClassRoster(selectedOffering.offering_id, {
+        format,
+      });
+
+      let filename = `Class_Roster_${selectedOffering.course_code || "Class"}_${selectedOffering.section || "Sec"}_${new Date().toISOString().slice(0, 10)}.${format}`;
+      const disposition =
+        response.headers?.["content-disposition"] ||
+        response.headers?.get?.("content-disposition");
+      if (disposition) {
+        const match = disposition.match(
+          /filename\*?=['"]?(?:UTF-\d['"])?([^;\r\n'"]*)['"]?/i
+        );
+        if (match && match[1]) {
+          filename = match[1];
+        }
+      }
+
+      const mimeType =
+        format === "pdf"
+          ? "application/pdf"
+          : format === "xlsx"
+          ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          : "text/csv;charset=utf-8;";
+
+      const blob = new Blob([response.data], { type: mimeType });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+
+      setExportSuccess(`Roster exported successfully (${format.toUpperCase()}).`);
+      setTimeout(() => setExportSuccess(""), 4000);
+    } catch (err) {
+      console.error("Export roster failed:", err);
+      let message = "Failed to export class roster. Please try again.";
+      if (err?.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const parsed = JSON.parse(text);
+          if (parsed?.message) message = parsed.message;
+        } catch {
+          // fallback
+        }
+      } else if (err?.response?.data?.message) {
+        message = err.response.data.message;
+      } else if (err?.message) {
+        message = err.message;
+      }
+      setExportError(message);
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   return (
@@ -1109,15 +1198,49 @@ function Classes() {
               {/* Enrolled Students Roster */}
               <div className="fc-modal-section">
                 <div className="fc-section-header-row">
-                  <h3 className="fc-section-title">Enrolled Students</h3>
-                  <span className="fc-badge-count">
-                    {courseDetails?.offerings?.find(
-                      (o) => o.offering_id === selectedOffering.offering_id
-                    )?.students?.length ??
-                      selectedOffering.student_count ??
-                      0}{" "}
-                    Students
-                  </span>
+                  <div className="fc-roster-title-group">
+                    <h3 className="fc-section-title">Enrolled Students</h3>
+                    <span className="fc-badge-count">
+                      {courseDetails?.offerings?.find(
+                        (o) => o.offering_id === selectedOffering.offering_id
+                      )?.students?.length ??
+                        selectedOffering.student_count ??
+                        0}{" "}
+                      Students
+                    </span>
+                  </div>
+                  <div className="fc-roster-quick-export-actions">
+                    <button
+                      type="button"
+                      className="fc-btn-quick-export"
+                      onClick={() => handleExportRoster("xlsx")}
+                      disabled={Boolean(exportingFormat)}
+                      title="Export Roster as Excel (.xlsx)"
+                    >
+                      <FileSpreadsheet size={13} color="#16a34a" />
+                      <span>Excel</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="fc-btn-quick-export"
+                      onClick={() => handleExportRoster("pdf")}
+                      disabled={Boolean(exportingFormat)}
+                      title="Export Roster as PDF (.pdf)"
+                    >
+                      <FileText size={13} color="#dc2626" />
+                      <span>PDF</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="fc-btn-quick-export"
+                      onClick={() => handleExportRoster("csv")}
+                      disabled={Boolean(exportingFormat)}
+                      title="Export Roster as CSV (.csv)"
+                    >
+                      <Download size={13} color="#2563eb" />
+                      <span>CSV</span>
+                    </button>
+                  </div>
                 </div>
 
                 {detailsLoading ? (
@@ -1184,25 +1307,107 @@ function Classes() {
               </div>
             </div>
 
+            {/* Feedback notifications */}
+            {exportSuccess && (
+              <div className="fc-modal-feedback-strip fc-feedback-success" role="status">
+                <Check size={14} />
+                <span>{exportSuccess}</span>
+              </div>
+            )}
+            {exportError && (
+              <div className="fc-modal-feedback-strip fc-feedback-error" role="alert">
+                <Info size={14} />
+                <span>{exportError}</span>
+              </div>
+            )}
+
             <footer className="fc-modal-footer">
-              <button
-                type="button"
-                className="fc-modal-secondary-btn"
-                onClick={handleCloseDetails}
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                className="fc-modal-primary-btn"
-                onClick={() => {
-                  handleCloseDetails();
-                  navigate("/faculty/attendance");
-                }}
-              >
-                <CheckCircle2 size={16} />
-                <span>Take Attendance</span>
-              </button>
+              <div className="fc-modal-footer-left">
+                <div className="fc-export-dropdown-wrap" ref={exportMenuRef}>
+                  <button
+                    type="button"
+                    className="fc-modal-export-btn"
+                    onClick={() => setExportMenuOpen((prev) => !prev)}
+                    disabled={Boolean(exportingFormat)}
+                    aria-haspopup="true"
+                    aria-expanded={exportMenuOpen}
+                  >
+                    <Download size={14} />
+                    <span>
+                      {exportingFormat
+                        ? `Exporting ${exportingFormat.toUpperCase()}...`
+                        : "Export Roster"}
+                    </span>
+                    <ChevronDown size={13} />
+                  </button>
+
+                  {exportMenuOpen && (
+                    <div className="fc-export-menu" role="menu">
+                      <button
+                        type="button"
+                        className="fc-export-menu-item"
+                        role="menuitem"
+                        onClick={() => handleExportRoster("xlsx")}
+                      >
+                        <FileSpreadsheet size={15} color="#16a34a" />
+                        <span>Excel Spreadsheet (.xlsx)</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="fc-export-menu-item"
+                        role="menuitem"
+                        onClick={() => handleExportRoster("pdf")}
+                      >
+                        <FileText size={15} color="#dc2626" />
+                        <span>PDF Document (.pdf)</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="fc-export-menu-item"
+                        role="menuitem"
+                        onClick={() => handleExportRoster("csv")}
+                      >
+                        <Download size={15} color="#2563eb" />
+                        <span>CSV Spreadsheet (.csv)</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  className="fc-modal-link-btn"
+                  onClick={() => {
+                    handleCloseDetails();
+                    navigate(`/faculty/reports?offering_id=${selectedOffering.offering_id}`);
+                  }}
+                  title="View and export full attendance reports for this offering"
+                >
+                  <FileText size={14} />
+                  <span>Attendance Reports</span>
+                </button>
+              </div>
+
+              <div className="fc-modal-footer-right">
+                <button
+                  type="button"
+                  className="fc-modal-secondary-btn"
+                  onClick={handleCloseDetails}
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  className="fc-modal-primary-btn"
+                  onClick={() => {
+                    handleCloseDetails();
+                    navigate("/faculty/attendance");
+                  }}
+                >
+                  <CheckCircle2 size={16} />
+                  <span>Take Attendance</span>
+                </button>
+              </div>
             </footer>
           </div>
         </div>

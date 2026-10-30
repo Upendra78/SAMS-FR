@@ -227,6 +227,13 @@ export async function getAdminAttendanceDashboard(params = {}) {
   return response.data;
 }
 
+export async function getAdminAttendanceAnalytics(params = {}) {
+  const response = await api.get("/admin/attendance/analytics", {
+    params,
+  });
+  return response.data;
+}
+
 export async function getAdminAttendanceRecordsList(params = {}) {
   const response = await api.get("/admin/attendance/records", {
     params,
@@ -384,5 +391,3 @@ export async function getActivityLogs(params = {}) {
   const response = await api.get("/admin/activity", { params });
   return response.data;
 }
-
-

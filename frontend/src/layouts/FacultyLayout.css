@@ -271,8 +271,6 @@
   display: flex;
   align-items: center;
   gap: 16px;
-  flex: 1;
-  max-width: 540px;
 }
 
 .faculty-mobile-menu-button {
@@ -289,79 +287,11 @@
   cursor: pointer;
 }
 
-.faculty-search-container {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  max-width: 440px;
-}
-
-.faculty-search-icon {
-  position: absolute;
-  left: 14px;
-  color: #94a3b8;
-  pointer-events: none;
-}
-
-.faculty-search-input {
-  width: 100%;
-  height: 40px;
-  padding: 0 16px 0 40px;
-  border: 1px solid #e2e8f0;
-  border-radius: 9999px;
-  background: #f8fafc;
-  color: #1e293b;
-  font-size: 13px;
-  outline: none;
-  transition: all 0.18s ease;
-}
-
-.faculty-search-input:focus {
-  border-color: #93c5fd;
-  background: #ffffff;
-  box-shadow: 0 0 0 3px rgba(13, 110, 253, 0.1);
-}
-
-.faculty-search-input::placeholder {
-  color: #94a3b8;
-}
-
 /* Topbar Right Actions */
 .faculty-topbar-right {
   display: flex;
   align-items: center;
-  gap: 20px;
-}
-
-.faculty-bell-button {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: #64748b;
-  cursor: pointer;
-  transition: all 0.18s ease;
-}
-
-.faculty-bell-button:hover {
-  background: #f1f5f9;
-  color: #0f172a;
-}
-
-.faculty-bell-badge {
-  position: absolute;
-  top: 7px;
-  right: 7px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ef4444;
-  border: 1.5px solid #ffffff;
+  margin-left: auto;
 }
 
 .faculty-user-profile-menu {

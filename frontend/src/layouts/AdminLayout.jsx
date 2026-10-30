@@ -11,6 +11,7 @@ import {
   faChevronDown,
   faChevronRight,
   faChalkboardUser,
+  faClipboardCheck,
   faGear,
   faGraduationCap,
   faRightFromBracket,
@@ -70,6 +71,11 @@ const academicItems = [
     label: "Assignments",
     path: "/admin/academic-management/assignments",
     icon: faBookOpen,
+  },
+  {
+    label: "Academic Results",
+    path: "/admin/academic-management/results",
+    icon: faClipboardCheck,
   },
 ];
 
@@ -192,6 +198,7 @@ function AdminLayout() {
 
   const timetableOpen =
     timetableManualOpen ?? isTimetableRoute;
+
 
   async function handleLogout() {
     try {

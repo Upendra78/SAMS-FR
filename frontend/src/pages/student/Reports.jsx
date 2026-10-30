@@ -1,1088 +1,1560 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import {
   faChartColumn,
-  faCircleInfo,
+  faCalendarDays,
+  faGraduationCap,
+  faBookOpen,
+  faAward,
+  faClock,
+  faTriangleExclamation,
+  faLightbulb,
+  faCheck,
+  faEye,
   faDownload,
-  faFileLines,
-  faMagnifyingGlass,
+  faClockRotateLeft,
+  faArrowLeft,
   faXmark,
+  faUserTie,
+  faDoorOpen,
+  faCircleInfo,
+  faBars,
 } from "@fortawesome/free-solid-svg-icons";
-import PageState from "../../components/PageState";
+
+import useAuth from "../../hooks/useAuth";
 import {
-  getStudentAttendance,
   getStudentAttendanceSummary,
+  exportStudentAttendanceReport,
 } from "../../services/attendanceService";
+import { getStudentProfile } from "../../services/studentService";
+import PageState from "../../components/PageState";
 import "./Reports.css";
 
-function Reports() {
-  const [filters, setFilters] = useState({
-    search: "",
-    semester: "all",
-    dateFrom: "",
-    dateTo: "",
-    status: "all",
+// Authoritative distinct color palette for subjects
+const SUBJECT_COLORS = [
+  "#3b82f6", // 0: Blue (e.g., Computer Networks / Data Structures)
+  "#10b981", // 1: Emerald Green (e.g., Internet of Things)
+  "#f59e0b", // 2: Amber (e.g., Modeling & Simulation)
+  "#ef4444", // 3: Coral Red (e.g., Natural Language Processing)
+  "#8b5cf6", // 4: Purple (e.g., Information Security and IPR)
+  "#06b6d4", // 5: Cyan (e.g., Blockchain Technology)
+  "#ec4899", // 6: Pink (e.g., Privacy & Security in Social Media)
+  "#6366f1", // 7: Indigo (e.g., Advanced Machine Learning)
+  "#14b8a6", // 8: Teal (e.g., Infrastructure Systems Planning)
+  "#f97316", // 9: Orange (e.g., Cyber Security)
+];
+
+function getStatusBadge(course) {
+  const total = Number(course?.total_sessions ?? course?.eligible_sessions ?? 0);
+  if (total === 0) {
+    return { label: "No Sessions", className: "badge-pending" };
+  }
+  const pct = Number(course?.attendance_percentage ?? 0);
+  if (pct >= 90) {
+    return { label: "Excellent", className: "badge-excellent" };
+  }
+  if (pct >= 75) {
+    return { label: "Good", className: "badge-good" };
+  }
+  return { label: "Needs Attention", className: "badge-attention" };
+}
+
+function truncateText(str, maxLen = 32) {
+  if (!str) return "";
+  return str.length > maxLen ? `${str.slice(0, maxLen - 1)}…` : str;
+}
+
+function StudentReports() {
+  const navigate = useNavigate();
+  const auth = useAuth();
+  const loggedInUser = auth?.user;
+
+  // Student Profile
+  const [profile, setProfile] = useState(null);
+
+  // Term Filters
+  const [academicYear, setAcademicYear] = useState("all");
+  const [semester, setSemester] = useState("all");
+
+  // Filter Options from backend
+  const [filterOptions, setFilterOptions] = useState({
+    academic_years: [],
+    semesters: [],
+    courses: [],
   });
 
-  const [showExportModal, setShowExportModal] = useState(false);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [selectedCourse, setSelectedCourse] = useState(null);
+  // Summary and Course Data
+  const [summary, setSummary] = useState({
+    total_sessions: 0,
+    present_sessions: 0,
+    absent_sessions: 0,
+    late_sessions: 0,
+    present_days: 0,
+    absent_days: 0,
+    late_days: 0,
+    total_days: 0,
+    attendance_percentage: 0,
+    has_eligible_sessions: false,
+  });
 
-  const [attendanceHistory, setAttendanceHistory] = useState([]);
-  const [courseSummary, setCourseSummary] = useState([]);
+  const [courseSummaries, setCourseSummaries] = useState([]);
 
+  // UI States
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [selectedSubject, setSelectedSubject] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportSuccess, setExportSuccess] = useState(false);
+  const [exportError, setExportError] = useState(null);
+  const [hoveredCourseIndex, setHoveredCourseIndex] = useState(null);
+  const [chartView, setChartView] = useState("horizontal"); // 'horizontal' (default) or 'vertical'
+  const [retryTrigger, setRetryTrigger] = useState(0);
 
+  // Load Student Profile once
   useEffect(() => {
-    let isMounted = true;
+    let active = true;
+    getStudentProfile()
+      .then((res) => {
+        if (active && res?.success && res.data) {
+          setProfile(res.data);
+        }
+      })
+      .catch(() => {});
 
-    async function loadReports() {
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Fetch Subject-wise Summary
+  useEffect(() => {
+    let active = true;
+
+    async function loadSubjectData() {
       try {
         setLoading(true);
         setError("");
 
-        const [attendanceResult, summaryResult] =
-          await Promise.all([
-            getStudentAttendance(),
-            getStudentAttendanceSummary(),
-          ]);
-
-        if (!isMounted) {
-          return;
+        const params = {};
+        if (academicYear !== "all") {
+          params.academic_year = academicYear;
+        }
+        if (semester !== "all") {
+          params.semester = semester;
         }
 
-        if (attendanceResult?.success) {
-          setAttendanceHistory(attendanceResult.data ?? []);
+        const res = await getStudentAttendanceSummary(params);
+        if (!active) return;
+
+        if (res?.success) {
+          if (res.overall) {
+            setSummary(res.overall);
+          }
+          if (Array.isArray(res.data)) {
+            setCourseSummaries(res.data);
+          } else {
+            setCourseSummaries([]);
+          }
+          if (res.filter_options) {
+            setFilterOptions((prev) => ({
+              academic_years:
+                res.filter_options.academic_years?.length > 0
+                  ? res.filter_options.academic_years
+                  : prev.academic_years,
+              semesters:
+                res.filter_options.semesters?.length > 0
+                  ? res.filter_options.semesters
+                  : prev.semesters,
+              courses:
+                res.filter_options.courses?.length > 0
+                  ? res.filter_options.courses
+                  : prev.courses,
+            }));
+          }
         } else {
-          setAttendanceHistory([]);
+          setError(res?.message || "Failed to load attendance report.");
         }
-
-        if (summaryResult?.success) {
-          setCourseSummary(summaryResult.data ?? []);
-        } else {
-          setCourseSummary([]);
-        }
-
-        if (
-          !attendanceResult?.success ||
-          !summaryResult?.success
-        ) {
-          setError(
-            "Some attendance report data is currently unavailable.",
-          );
-        }
-      } catch (requestError) {
-        if (!isMounted) {
-          return;
-        }
-
-        if (requestError?.response?.status === 401) {
-          setError(
-            "Your session has expired. Please log in again.",
-          );
-        } else if (requestError?.response?.status === 403) {
-          setError(
-            "Student access is required to view attendance reports.",
-          );
+      } catch (err) {
+        if (!active) return;
+        if (err?.response?.status === 401) {
+          setError("Your session has expired. Please log in again.");
+        } else if (err?.response?.status === 403) {
+          setError("Student authorization is required to view this report.");
         } else {
           setError(
-            "Unable to load attendance report data.",
+            err?.response?.data?.message ||
+              "Unable to load subject-wise attendance report."
           );
         }
-
-        setAttendanceHistory([]);
-        setCourseSummary([]);
+        setCourseSummaries([]);
       } finally {
-        if (isMounted) {
+        if (active) {
           setLoading(false);
         }
       }
     }
 
-    loadReports();
+    loadSubjectData();
 
     return () => {
-      isMounted = false;
+      active = false;
     };
-  }, []);
+  }, [academicYear, semester, retryTrigger]);
 
-  const formatPercentage = (value) => {
-    if (value === null || value === undefined) {
-      return "N/A";
+  // Derived session metrics and authoritative attendance rankings
+  const {
+    totalEligibleSessions,
+    totalEnrolledSubjects,
+    hasAnyEligibleSessions,
+    highestSubject,
+    highestPct,
+    lowestSubject,
+    lowestPct,
+  } = useMemo(() => {
+    if (!courseSummaries || courseSummaries.length === 0) {
+      return {
+        totalEligibleSessions: 0,
+        totalEnrolledSubjects: 0,
+        hasAnyEligibleSessions: false,
+        highestSubject: null,
+        highestPct: "N/A",
+        lowestSubject: null,
+        lowestPct: "N/A",
+      };
     }
 
-    const numericValue = Number(value);
-
-    if (Number.isNaN(numericValue)) {
-      return "N/A";
-    }
-
-    return `${numericValue.toFixed(1)}%`;
-  };
-
-  const formatDate = (dateValue) => {
-    if (!dateValue) {
-      return "N/A";
-    }
-
-    const date = new Date(dateValue);
-
-    if (Number.isNaN(date.getTime())) {
-      return String(dateValue);
-    }
-
-    return date.toLocaleDateString();
-  };
-
-  const formatTime = (dateValue) => {
-    if (!dateValue) {
-      return "N/A";
-    }
-
-    const date = new Date(dateValue);
-
-    if (Number.isNaN(date.getTime())) {
-      return "N/A";
-    }
-
-    return date.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const formatStatus = (status) => {
-    if (!status) {
-      return "N/A";
-    }
-
-    return String(status)
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (character) =>
-        character.toUpperCase(),
-      );
-  };
-
-  const overallStats = useMemo(() => {
-    const totalSessions = courseSummary.reduce(
-      (total, course) =>
-        total + Number(course.total_sessions || 0),
-      0,
+    const totalEligible = courseSummaries.reduce(
+      (sum, c) => sum + (c.total_sessions || c.eligible_sessions || 0),
+      0
     );
 
-    const presentSessions = courseSummary.reduce(
-      (total, course) =>
-        total + Number(course.present_sessions || 0),
-      0,
+    const withSessions = courseSummaries.filter(
+      (c) => (c.total_sessions || c.eligible_sessions || 0) > 0
     );
 
-    const absentSessions = courseSummary.reduce(
-      (total, course) =>
-        total + Number(course.absent_sessions || 0),
-      0,
-    );
+    if (withSessions.length === 0) {
+      return {
+        totalEligibleSessions: 0,
+        totalEnrolledSubjects: courseSummaries.length,
+        hasAnyEligibleSessions: false,
+        highestSubject: null,
+        highestPct: "N/A",
+        lowestSubject: null,
+        lowestPct: "N/A",
+      };
+    }
 
-    const attendancePercentage =
-      totalSessions > 0
-        ? (presentSessions / totalSessions) * 100
-        : null;
+    let highest = withSessions[0];
+    let lowest = withSessions[0];
+
+    for (const c of withSessions) {
+      const cPct = Number(c.attendance_percentage ?? 0);
+      const hPct = Number(highest.attendance_percentage ?? 0);
+      const lPct = Number(lowest.attendance_percentage ?? 0);
+      if (cPct > hPct) highest = c;
+      if (cPct < lPct) lowest = c;
+    }
 
     return {
-      totalSessions,
-      presentSessions,
-      absentSessions,
-      attendancePercentage,
+      totalEligibleSessions: totalEligible,
+      totalEnrolledSubjects: courseSummaries.length,
+      hasAnyEligibleSessions: true,
+      highestSubject: highest,
+      highestPct: `${highest.attendance_percentage}%`,
+      lowestSubject: lowest,
+      lowestPct: `${lowest.attendance_percentage}%`,
     };
-  }, [courseSummary]);
+  }, [courseSummaries]);
 
-  const semesterOptions = useMemo(() => {
-    const semesters = courseSummary
-      .map((course) => course.semester)
-      .filter(Boolean);
+  // Overall Attendance Percentage (only if eligible sessions exist)
+  const overallPct = hasAnyEligibleSessions
+    ? Number(summary.attendance_percentage || 0)
+    : null;
 
-    return [...new Set(semesters)];
-  }, [courseSummary]);
+  // Dynamic Term display
+  const displayAcademicYear = useMemo(() => {
+    if (academicYear !== "all") return academicYear;
+    if (courseSummaries.length > 0 && courseSummaries[0].academic_year) {
+      return courseSummaries[0].academic_year;
+    }
+    if (filterOptions.academic_years.length > 0) {
+      return filterOptions.academic_years[0];
+    }
+    return profile?.academic_year || "2026-2027";
+  }, [academicYear, courseSummaries, filterOptions, profile]);
 
-  const filteredCourses = useMemo(() => {
-    const searchValue = filters.search
-      .trim()
-      .toLowerCase();
+  const displaySemester = useMemo(() => {
+    if (semester !== "all") {
+      return typeof semester === "number" ? `Semester ${semester}` : semester;
+    }
+    if (courseSummaries.length > 0 && courseSummaries[0].semester) {
+      const s = courseSummaries[0].semester;
+      return typeof s === "number" ? `Semester ${s}` : s;
+    }
+    if (filterOptions.semesters.length > 0) {
+      const s = filterOptions.semesters[0];
+      return typeof s === "number" ? `Semester ${s}` : s;
+    }
+    return profile?.semester ? `Semester ${profile.semester}` : "Semester 7";
+  }, [semester, courseSummaries, filterOptions, profile]);
 
-    return courseSummary.filter((course) => {
-      const courseName = String(
-        course.course_name || "",
-      ).toLowerCase();
-
-      const courseCode = String(
-        course.course_code || "",
-      ).toLowerCase();
-
-      const semester = String(
-        course.semester || "",
-      );
-
-      const matchesSearch =
-        !searchValue ||
-        `${courseName} ${courseCode}`.includes(
-          searchValue,
-        );
-
-      const matchesSemester =
-        filters.semester === "all" ||
-        semester === filters.semester;
-
-      return matchesSearch && matchesSemester;
-    });
-  }, [
-    courseSummary,
-    filters.search,
-    filters.semester,
-  ]);
-
-  const filteredAttendanceHistory = useMemo(() => {
-    const searchValue = filters.search
-      .trim()
-      .toLowerCase();
-
-    return attendanceHistory.filter((record) => {
-      const courseName = String(
-        record.course_name || "",
-      ).toLowerCase();
-
-      const courseCode = String(
-        record.course_code || "",
-      ).toLowerCase();
-
-      const status = String(
-        record.status || "",
-      ).toLowerCase();
-
-      const sessionDate = record.session_date
-        ? new Date(record.session_date)
-        : null;
-
-      const matchesSearch =
-        !searchValue ||
-        `${courseName} ${courseCode}`.includes(
-          searchValue,
-        );
-
-      const matchesStatus =
-        filters.status === "all" ||
-        status === filters.status;
-
-      let matchesDateFrom = true;
-      let matchesDateTo = true;
-
-      if (
-        filters.dateFrom &&
-        sessionDate &&
-        !Number.isNaN(sessionDate.getTime())
-      ) {
-        const fromDate = new Date(
-          `${filters.dateFrom}T00:00:00`,
-        );
-
-        matchesDateFrom = sessionDate >= fromDate;
-      }
-
-      if (
-        filters.dateTo &&
-        sessionDate &&
-        !Number.isNaN(sessionDate.getTime())
-      ) {
-        const toDate = new Date(
-          `${filters.dateTo}T23:59:59`,
-        );
-
-        matchesDateTo = sessionDate <= toDate;
-      }
-
-      return (
-        matchesSearch &&
-        matchesStatus &&
-        matchesDateFrom &&
-        matchesDateTo
-      );
-    });
-  }, [
-    attendanceHistory,
-    filters.search,
-    filters.status,
-    filters.dateFrom,
-    filters.dateTo,
-  ]);
-
-  const currentSemester = useMemo(() => {
-    if (courseSummary.length > 0) {
-      return courseSummary[0]?.semester || "N/A";
+  // Donut Geometry calculation
+  const donutSlices = useMemo(() => {
+    if (!courseSummaries || courseSummaries.length === 0 || !hasAnyEligibleSessions) {
+      return [];
     }
 
-    return "N/A";
-  }, [courseSummary]);
+    const radius = 67.5;
+    const circumference = 2 * Math.PI * radius; // ~424.115
 
-  const handleFilterChange = (event) => {
-    const { name, value } = event.target;
+    const eligibleCourses = courseSummaries.filter(
+      (c) => (c.total_sessions || c.eligible_sessions || 0) > 0
+    );
+    if (eligibleCourses.length === 0) return [];
 
-    setFilters((currentFilters) => ({
-      ...currentFilters,
-      [name]: value,
-    }));
-  };
+    const weights = eligibleCourses.map((c) =>
+      Math.max(1, c.present_sessions || c.attendance_percentage || 1)
+    );
+    const totalWeight = weights.reduce((acc, w) => acc + w, 0);
 
-  const clearFilters = () => {
-    setFilters({
-      search: "",
-      semester: "all",
-      dateFrom: "",
-      dateTo: "",
-      status: "all",
+    let accumulatedLength = 0;
+    return eligibleCourses.map((c, i) => {
+      const fraction = weights[i] / totalWeight;
+      const arcLength = fraction * circumference;
+      const gap = eligibleCourses.length > 1 ? 2.5 : 0;
+      const strokeLength = Math.max(1, arcLength - gap);
+      const strokeDasharray = `${strokeLength} ${circumference - strokeLength}`;
+      const strokeDashoffset = -accumulatedLength - circumference * 0.25;
+      accumulatedLength += arcLength;
+
+      const color = SUBJECT_COLORS[i % SUBJECT_COLORS.length];
+      return {
+        course: c,
+        color,
+        strokeDasharray,
+        strokeDashoffset,
+      };
     });
+  }, [courseSummaries, hasAnyEligibleSessions]);
+
+  // Handle Download Report (Genuine Server-Generated PDF)
+  const handleDownloadReport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    setExportSuccess(false);
+    setExportError(null);
+    try {
+      const params = {
+        format: "pdf",
+      };
+      if (academicYear !== "all") params.academic_year = academicYear;
+      if (semester !== "all") params.semester = semester;
+
+      const res = await exportStudentAttendanceReport(params);
+
+      const studentId =
+        profile?.enrollment_no || loggedInUser?.enrollment_no || "student";
+      let filename = `Subject_Attendance_Report_${studentId}.pdf`;
+
+      const disposition =
+        res.headers?.["content-disposition"] ||
+        res.headers?.get?.("content-disposition");
+      if (disposition) {
+        const match = disposition.match(/filename\*?=['"]?(?:UTF-\d['"])?([^;\r\n'"]*)['"]?/i);
+        if (match && match[1]) {
+          filename = match[1];
+        }
+      }
+
+      const blob = new Blob([res.data], { type: "application/pdf" });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 5000);
+    } catch (err) {
+      console.error("Failed to export attendance report:", err);
+      let errorMsg = "Failed to export subject-wise attendance report. Please try again.";
+      if (err?.response?.data instanceof Blob) {
+        try {
+          const text = await err.response.data.text();
+          const json = JSON.parse(text);
+          if (json.message) errorMsg = json.message;
+        } catch {
+          // Fallback
+        }
+      } else if (err?.response?.data?.message) {
+        errorMsg = err.response.data.message;
+      }
+      setExportError(errorMsg);
+      setTimeout(() => setExportError(null), 6000);
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const handleViewDetails = (course) => {
-    setSelectedCourse(course);
-    setShowDetailsModal(true);
-  };
+  // Full page loading state
+  if (loading && courseSummaries.length === 0) {
+    return (
+      <div className="reports-page-wrapper">
+        <PageState
+          type="loading"
+          title="Loading Subject-wise Report"
+          message="Fetching real attendance analytics and subject statistics..."
+        />
+      </div>
+    );
+  }
 
-  const hasActiveFilters = Object.values(filters).some(
-    (value) => value !== "" && value !== "all",
-  );
+  // Full page error state
+  if (error && courseSummaries.length === 0) {
+    return (
+      <div className="reports-page-wrapper">
+        <PageState
+          type="error"
+          title="Unable to Load Report"
+          message={error}
+          actionLabel="Try Again"
+          onAction={() => setRetryTrigger((prev) => prev + 1)}
+        />
+      </div>
+    );
+  }
+
+  // Chart Dimensions & Configuration
+  const numCourses = courseSummaries.length;
+  // Horizontal Chart layout
+  const hRowHeight = 44;
+  const hTopMargin = 20;
+  const hBottomMargin = 45;
+  const hChartHeight = Math.max(260, numCourses * hRowHeight + hTopMargin + hBottomMargin);
+  const hChartWidth = 720;
+  const hLabelWidth = 240;
+  const hPlotRight = 640;
+  const hPlotWidth = hPlotRight - hLabelWidth;
+
+  // Vertical Chart layout
+  const vChartWidth = 640;
+  const vChartHeight = 300;
+  const vPlotLeft = 60;
+  const vPlotRight = 620;
+  const vPlotTop = 30;
+  const vPlotBottom = 220;
+  const vPlotWidth = vPlotRight - vPlotLeft;
+  const vPlotHeight = vPlotBottom - vPlotTop;
+  const vSlotWidth = numCourses > 0 ? vPlotWidth / numCourses : vPlotWidth;
+  const vBarWidth = Math.min(42, Math.max(20, vSlotWidth * 0.52));
 
   return (
-    <section className="student-reports">
-      {/* Header */}
-      <div className="student-reports-header">
-        <div>
-          <span className="student-reports-eyebrow">
-            Attendance Reporting
-          </span>
+    <div className="reports-page-wrapper">
+      {/* ========================================================
+          1. HERO BANNER
+      ======================================================== */}
+      <section className="reports-banner-card" aria-label="Subject-wise Report Banner">
+        <img
+          src="/image/student_timetable_card.png"
+          alt=""
+          className="reports-banner-bg"
+          aria-hidden="true"
+        />
 
-          <h1>Reports</h1>
-
-          <p>
-            View your attendance performance, course-wise
-            records and attendance history.
-          </p>
-        </div>
-
-        <div className="student-reports-header-actions">
-          <div className="student-reports-semester">
-            <span>Current Semester</span>
-
-            <strong>{currentSemester}</strong>
-          </div>
-
-          <button
-            type="button"
-            className="student-reports-export-button"
-            onClick={() => setShowExportModal(true)}
-          >
-            <FontAwesomeIcon icon={faDownload} />
-            Export Report
-          </button>
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div className="student-reports-summary">
-        <article>
-          <div className="student-reports-card-icon">
-            <FontAwesomeIcon icon={faChartColumn} />
-          </div>
-
-          <span>Overall Attendance</span>
-
-          <strong>
-            {courseSummary.length > 0
-              ? formatPercentage(
-                  overallStats.attendancePercentage,
-                )
-              : "N/A"}
-          </strong>
-
-          <small>Attendance percentage</small>
-        </article>
-
-        <article>
-          <div className="student-reports-card-icon">
-            <FontAwesomeIcon icon={faFileLines} />
-          </div>
-
-          <span>Total Sessions</span>
-
-          <strong>
-            {courseSummary.length > 0
-              ? overallStats.totalSessions
-              : "N/A"}
-          </strong>
-
-          <small>
-            Recorded attendance sessions
-          </small>
-        </article>
-
-        <article>
-          <div className="student-reports-card-icon">
-            <FontAwesomeIcon icon={faCircleInfo} />
-          </div>
-
-          <span>Present</span>
-
-          <strong>
-            {courseSummary.length > 0
-              ? overallStats.presentSessions
-              : "N/A"}
-          </strong>
-
-          <small>
-            Present attendance records
-          </small>
-        </article>
-
-        <article>
-          <div className="student-reports-card-icon">
-            <FontAwesomeIcon icon={faCircleInfo} />
-          </div>
-
-          <span>Absent</span>
-
-          <strong>
-            {courseSummary.length > 0
-              ? overallStats.absentSessions
-              : "N/A"}
-          </strong>
-
-          <small>
-            Absent attendance records
-          </small>
-        </article>
-      </div>
-
-      {/* Filters */}
-      <section className="student-reports-panel">
-        <div className="student-reports-panel-heading">
-          <div>
-            <span>Report Filters</span>
-
-            <h2>Find Attendance Records</h2>
-          </div>
-        </div>
-
-        <div className="student-reports-filters">
-          <label>
-            <span>Search Course</span>
-
-            <div className="student-reports-input">
-              <FontAwesomeIcon
-                icon={faMagnifyingGlass}
-              />
-
-              <input
-                type="text"
-                name="search"
-                value={filters.search}
-                onChange={handleFilterChange}
-                placeholder="Search course or code"
-              />
+        <div className="reports-banner-content">
+          {/* Banner Left */}
+          <div className="reports-banner-left">
+            <div className="reports-banner-icon-bubble">
+              <FontAwesomeIcon icon={faChartColumn} />
             </div>
-          </label>
+            <div className="reports-banner-text">
+              <h1 className="reports-banner-title">Subject-wise Report</h1>
+              <p className="reports-banner-subtitle">
+                View your attendance and performance for each subject.
+              </p>
+            </div>
+          </div>
 
-          <label>
-            <span>Semester</span>
-
-            <select
-              name="semester"
-              value={filters.semester}
-              onChange={handleFilterChange}
+          {/* Banner Center Illustration */}
+          <div className="reports-banner-illustration" aria-hidden="true">
+            <svg
+              viewBox="0 0 200 130"
+              fill="none"
+              className="student-study-svg"
             >
-              <option value="all">
-                All Semesters
-              </option>
+              {/* Desk */}
+              <rect x="25" y="112" width="150" height="6" rx="3" fill="#cbd5e1" />
+              <rect x="35" y="118" width="6" height="12" rx="2" fill="#94a3b8" />
+              <rect x="159" y="118" width="6" height="12" rx="2" fill="#94a3b8" />
 
-              {semesterOptions.map((semester) => (
-                <option
-                  value={semester}
-                  key={semester}
+              {/* Books Stack */}
+              <rect x="135" y="104" width="30" height="8" rx="2" fill="#3b82f6" />
+              <rect x="138" y="96" width="26" height="8" rx="2" fill="#10b981" />
+              <rect x="141" y="88" width="22" height="8" rx="2" fill="#f59e0b" />
+
+              {/* Laptop */}
+              <polygon points="70,112 110,112 105,92 75,92" fill="#64748b" />
+              <rect x="75" y="80" width="30" height="20" rx="3" fill="#0f172a" />
+              <rect x="78" y="83" width="24" height="14" rx="2" fill="#38bdf8" opacity="0.9" />
+
+              {/* Student Figure */}
+              <circle cx="58" cy="45" r="14" fill="#fde047" />
+              <path
+                d="M48 40 C48 30 68 30 68 40 C68 43 65 44 65 44 C65 44 62 36 54 37 C48 38 48 40 48 40 Z"
+                fill="#1e293b"
+              />
+              <path
+                d="M44 66 C44 56 72 56 72 66 L70 105 L46 105 Z"
+                fill="#2563eb"
+              />
+              <path
+                d="M46 66 L34 85 L42 88 L52 72 Z"
+                fill="#1d4ed8"
+              />
+              <path
+                d="M68 66 L82 88 L74 92 L62 72 Z"
+                fill="#1d4ed8"
+              />
+            </svg>
+          </div>
+
+          {/* Banner Right Term Badge */}
+          <div className="reports-banner-right">
+            <div className="term-info-card">
+              <div className="term-cal-icon">
+                <FontAwesomeIcon icon={faCalendarDays} />
+              </div>
+              <div className="term-text-group">
+                <div className="term-col">
+                  <span className="term-label">Academic Year</span>
+                  {filterOptions.academic_years.length > 1 ? (
+                    <select
+                      className="term-select"
+                      value={academicYear}
+                      onChange={(e) => setAcademicYear(e.target.value)}
+                    >
+                      <option value="all">All Years</option>
+                      {filterOptions.academic_years.map((y) => (
+                        <option key={y} value={y}>{y}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <strong className="term-value">{displayAcademicYear}</strong>
+                  )}
+                </div>
+                <div className="term-col">
+                  <span className="term-label">Semester</span>
+                  {filterOptions.semesters.length > 1 ? (
+                    <select
+                      className="term-select"
+                      value={semester}
+                      onChange={(e) => setSemester(e.target.value)}
+                    >
+                      <option value="all">All Semesters</option>
+                      {filterOptions.semesters.map((s) => (
+                        <option key={s} value={s}>Semester {s}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <strong className="term-value">{displaySemester}</strong>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Export status notification banners */}
+      {exportSuccess && (
+        <div className="reports-export-banner banner-success" role="status">
+          <FontAwesomeIcon icon={faCheck} className="banner-icon" />
+          <span>Official Subject-wise Attendance Report (PDF) successfully downloaded!</span>
+        </div>
+      )}
+      {exportError && (
+        <div className="reports-export-banner banner-error" role="alert">
+          <FontAwesomeIcon icon={faTriangleExclamation} className="banner-icon" />
+          <span>{exportError}</span>
+        </div>
+      )}
+
+      {/* ========================================================
+          2. FOUR SUMMARY CARDS
+      ======================================================== */}
+      <section className="reports-summary-grid" aria-label="Attendance Summary Cards">
+        {/* Card 1: Overall Attendance */}
+        <div className="metric-card">
+          <div className="metric-icon-wrap icon-wrap-green">
+            <FontAwesomeIcon icon={faGraduationCap} />
+          </div>
+          <div className="metric-info">
+            <span className="metric-title">Overall Attendance</span>
+            <div className="metric-val-row">
+              <strong className="metric-val">
+                {hasAnyEligibleSessions ? `${overallPct}%` : "N/A"}
+              </strong>
+            </div>
+            <span className="metric-sub">
+              {hasAnyEligibleSessions
+                ? `${summary.present_sessions || 0} / ${totalEligibleSessions} classes attended`
+                : "0 classes recorded yet"}
+            </span>
+          </div>
+        </div>
+
+        {/* Card 2: Total Subjects */}
+        <div className="metric-card">
+          <div className="metric-icon-wrap icon-wrap-blue">
+            <FontAwesomeIcon icon={faBookOpen} />
+          </div>
+          <div className="metric-info">
+            <span className="metric-title">Total Subjects</span>
+            <div className="metric-val-row">
+              <strong className="metric-val">{totalEnrolledSubjects}</strong>
+            </div>
+            <span className="metric-sub">Enrolled subjects</span>
+          </div>
+        </div>
+
+        {/* Card 3: Highest Attendance */}
+        <div className="metric-card">
+          <div className="metric-icon-wrap icon-wrap-purple">
+            <FontAwesomeIcon icon={faAward} />
+          </div>
+          <div className="metric-info">
+            <span className="metric-title">Highest Attendance</span>
+            <div className="metric-val-row">
+              <strong
+                className="metric-val-subject"
+                title={highestSubject?.course_name || "No sessions yet"}
+              >
+                {highestSubject?.course_name || "No sessions yet"}
+              </strong>
+            </div>
+            <strong className="metric-val-pct pct-purple">
+              {hasAnyEligibleSessions ? highestPct : "N/A"}
+            </strong>
+          </div>
+        </div>
+
+        {/* Card 4: Lowest Attendance */}
+        <div className="metric-card">
+          <div className="metric-icon-wrap icon-wrap-red">
+            <FontAwesomeIcon icon={faTriangleExclamation} />
+          </div>
+          <div className="metric-info">
+            <span className="metric-title">Lowest Attendance</span>
+            <div className="metric-val-row">
+              <strong
+                className="metric-val-subject"
+                title={lowestSubject?.course_name || "No sessions yet"}
+              >
+                {lowestSubject?.course_name || "No sessions yet"}
+              </strong>
+            </div>
+            <strong className="metric-val-pct pct-red">
+              {hasAnyEligibleSessions ? lowestPct : "N/A"}
+            </strong>
+          </div>
+        </div>
+      </section>
+
+      {/* ========================================================
+          3. CHARTS ROW (Overview Chart + Donut Distribution)
+      ======================================================== */}
+      <section className="reports-charts-row" aria-label="Attendance Charts">
+        {/* Left Chart: Subject-wise Attendance Overview */}
+        <div className="chart-panel overview-chart-panel">
+          <div className="chart-header">
+            <div className="chart-title-group">
+              <h2 className="chart-title">Subject-wise Attendance Overview</h2>
+              {hasAnyEligibleSessions && (
+                <span className="chart-count-pill">
+                  {numCourses} {numCourses === 1 ? "Subject" : "Subjects"}
+                </span>
+              )}
+            </div>
+
+            {hasAnyEligibleSessions && (
+              <div className="chart-view-toggle">
+                <button
+                  type="button"
+                  className={`btn-toggle ${chartView === "horizontal" ? "active" : ""}`}
+                  onClick={() => setChartView("horizontal")}
+                  title="Horizontal Bar View (Recommended for long subject names)"
                 >
-                  {semester}
-                </option>
-              ))}
-            </select>
-          </label>
+                  <FontAwesomeIcon icon={faBars} /> Horizontal
+                </button>
+                <button
+                  type="button"
+                  className={`btn-toggle ${chartView === "vertical" ? "active" : ""}`}
+                  onClick={() => setChartView("vertical")}
+                  title="Vertical Column View"
+                >
+                  <FontAwesomeIcon icon={faChartColumn} /> Vertical
+                </button>
+              </div>
+            )}
+          </div>
 
-          <label>
-            <span>Date From</span>
+          <div className="chart-body">
+            {/* STATE 1: Empty - No enrolled courses */}
+            {courseSummaries.length === 0 ? (
+              <div className="chart-empty-state">
+                <FontAwesomeIcon icon={faCircleInfo} className="empty-state-icon" />
+                <h3 className="empty-state-title">No Enrolled Subjects</h3>
+                <p className="empty-state-desc">
+                  No registered courses were found for the selected academic year and semester.
+                </p>
+              </div>
+            ) : !hasAnyEligibleSessions ? (
+              /* STATE 2: Subjects Enrolled, But No Attendance Sessions Held Yet */
+              <div className="chart-no-sessions-state">
+                <div className="no-sessions-banner">
+                  <div className="no-sessions-icon-wrap">
+                    <FontAwesomeIcon icon={faClock} />
+                  </div>
+                  <div className="no-sessions-text">
+                    <h3 className="no-sessions-title">
+                      Attendance Statistics Not Yet Available
+                    </h3>
+                    <p className="no-sessions-desc">
+                      You are enrolled in <strong>{numCourses} subjects</strong>, but no closed class attendance
+                      sessions have been conducted by faculty yet for <strong>{displaySemester}</strong>.
+                      Statistics and comparison bars will be rendered once sessions take place.
+                    </p>
+                  </div>
+                </div>
 
-            <input
-              type="date"
-              name="dateFrom"
-              value={filters.dateFrom}
-              onChange={handleFilterChange}
-            />
-          </label>
+                {/* Enrolled Subjects List with Pending Sessions status */}
+                <div className="enrolled-subjects-preview">
+                  <h4 className="preview-heading">Enrolled Curriculum for {displaySemester}</h4>
+                  <div className="preview-grid">
+                    {courseSummaries.map((c, idx) => {
+                      const color = SUBJECT_COLORS[idx % SUBJECT_COLORS.length];
+                      return (
+                        <div key={c.offering_id || c.course_id || idx} className="preview-subject-card">
+                          <div className="preview-color-bar" style={{ backgroundColor: color }} />
+                          <div className="preview-card-body">
+                            <div className="preview-card-top">
+                              <span className="preview-code">{c.course_code}</span>
+                              <span className="preview-status-tag">No Sessions Held</span>
+                            </div>
+                            <strong className="preview-name" title={c.course_name}>
+                              {c.course_name}
+                            </strong>
+                            <div className="preview-meta">
+                              <span>Faculty: {c.faculty_name || "Assigned Faculty"}</span>
+                              <span>Room: {c.room || "TBD"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            ) : chartView === "horizontal" ? (
+              /* STATE 3A: Horizontal Bar Chart (Handles long names and many subjects cleanly) */
+              <div className="svg-horizontal-container">
+                <svg
+                  viewBox={`0 0 ${hChartWidth} ${hChartHeight}`}
+                  className="overview-hbar-svg"
+                  preserveAspectRatio="xMidYMid meet"
+                >
+                  {/* Vertical Gridlines & X-Axis Ticks (0% to 100%) */}
+                  {[0, 20, 40, 60, 80, 100].map((tick) => {
+                    const x = hLabelWidth + (tick / 100) * hPlotWidth;
+                    return (
+                      <g key={tick} className="grid-tick-group">
+                        <line
+                          x1={x}
+                          y1={hTopMargin}
+                          x2={x}
+                          y2={hChartHeight - hBottomMargin}
+                          stroke="#e2e8f0"
+                          strokeDasharray={tick === 0 ? "none" : "3 3"}
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={x}
+                          y={hChartHeight - hBottomMargin + 16}
+                          textAnchor="middle"
+                          className="svg-tick-text"
+                        >
+                          {tick}%
+                        </text>
+                      </g>
+                    );
+                  })}
 
-          <label>
-            <span>Date To</span>
+                  {/* Horizontal Axis Title */}
+                  <text
+                    x={hLabelWidth + hPlotWidth / 2}
+                    y={hChartHeight - 8}
+                    textAnchor="middle"
+                    className="svg-axis-label"
+                  >
+                    Attendance Percentage (%)
+                  </text>
 
-            <input
-              type="date"
-              name="dateTo"
-              value={filters.dateTo}
-              onChange={handleFilterChange}
-            />
-          </label>
+                  {/* Subject Rows */}
+                  {courseSummaries.map((course, idx) => {
+                    const rowY = hTopMargin + idx * hRowHeight;
+                    const totalSess = Number(course.total_sessions || course.eligible_sessions || 0);
+                    const presentSess = Number(course.present_sessions || 0);
+                    const hasSessions = totalSess > 0;
+                    const pct = hasSessions
+                      ? Math.min(100, Math.max(0, Number(course.attendance_percentage || 0)))
+                      : 0;
 
-          <label>
-            <span>Status</span>
+                    const color = SUBJECT_COLORS[idx % SUBJECT_COLORS.length];
+                    const barWidthPx = hasSessions ? Math.max(6, (pct / 100) * hPlotWidth) : 0;
+                    const isHovered = hoveredCourseIndex === idx;
 
-            <select
-              name="status"
-              value={filters.status}
-              onChange={handleFilterChange}
-            >
-              <option value="all">
-                All Status
-              </option>
+                    return (
+                      <g
+                        key={course.offering_id || course.course_id || idx}
+                        className={`hbar-row-group ${isHovered ? "row-active" : ""}`}
+                        onMouseEnter={() => setHoveredCourseIndex(idx)}
+                        onMouseLeave={() => setHoveredCourseIndex(null)}
+                        tabIndex="0"
+                        role="graphics-symbol"
+                        aria-label={`${course.course_name}: ${hasSessions ? `${pct}%` : "No sessions yet"}`}
+                      >
+                        {/* Row Hover Background */}
+                        <rect
+                          x="10"
+                          y={rowY}
+                          width={hChartWidth - 20}
+                          height={hRowHeight - 4}
+                          rx="6"
+                          ry="6"
+                          fill={isHovered ? "#f1f5f9" : "transparent"}
+                          className="row-bg-rect"
+                        />
 
-              <option value="present">
-                Present
-              </option>
+                        {/* Subject Code Badge */}
+                        <rect
+                          x="20"
+                          y={rowY + 9}
+                          width="70"
+                          height="20"
+                          rx="4"
+                          ry="4"
+                          fill={isHovered ? "#e0f2fe" : "#f1f5f9"}
+                        />
+                        <text
+                          x="55"
+                          y={rowY + 23}
+                          textAnchor="middle"
+                          className="hbar-code-text"
+                          fill={isHovered ? "#0369a1" : "#475569"}
+                        >
+                          {course.course_code}
+                        </text>
 
-              <option value="absent">
-                Absent
-              </option>
-            </select>
-          </label>
+                        {/* Subject Name Label (Truncated with full tooltip) */}
+                        <text
+                          x="100"
+                          y={rowY + 23}
+                          textAnchor="start"
+                          className="hbar-name-text"
+                          fill={isHovered ? "#0f172a" : "#1e293b"}
+                        >
+                          {truncateText(course.course_name, 22)}
+                          <title>{course.course_name} ({course.course_code})</title>
+                        </text>
 
-          <button
-            type="button"
-            className="student-reports-clear"
-            onClick={clearFilters}
-            disabled={!hasActiveFilters}
-          >
-            Clear Filters
-          </button>
+                        {/* Plot Area Track (Background Bar) */}
+                        <rect
+                          x={hLabelWidth}
+                          y={rowY + 9}
+                          width={hPlotWidth}
+                          height="20"
+                          rx="5"
+                          ry="5"
+                          fill="#f8fafc"
+                          stroke="#e2e8f0"
+                          strokeWidth="1"
+                        />
+
+                        {/* Actual Percentage Bar or Inactive Marker */}
+                        {hasSessions ? (
+                          <>
+                            <rect
+                              x={hLabelWidth}
+                              y={rowY + 9}
+                              width={barWidthPx}
+                              height="20"
+                              rx="5"
+                              ry="5"
+                              fill={color}
+                              className="hbar-fill-rect"
+                            />
+                            {/* Percentage Text to the right */}
+                            <text
+                              x={hPlotRight + 12}
+                              y={rowY + 24}
+                              textAnchor="start"
+                              className="hbar-val-text"
+                              fill={color}
+                            >
+                              {pct}%
+                            </text>
+                          </>
+                        ) : (
+                          <>
+                            <text
+                              x={hLabelWidth + 12}
+                              y={rowY + 23}
+                              textAnchor="start"
+                              className="hbar-no-sessions-text"
+                            >
+                              No sessions conducted yet
+                            </text>
+                            <text
+                              x={hPlotRight + 12}
+                              y={rowY + 24}
+                              textAnchor="start"
+                              className="hbar-na-text"
+                            >
+                              N/A
+                            </text>
+                          </>
+                        )}
+
+                        <title>
+                          {course.course_code}: {course.course_name}
+                          {"\n"}
+                          {hasSessions
+                            ? `Attendance: ${pct}% (${presentSess} / ${totalSess} classes attended)`
+                            : "No eligible sessions conducted yet"}
+                          {"\n"}
+                          Faculty: {course.faculty_name || "Assigned Faculty"}
+                        </title>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            ) : (
+              /* STATE 3B: Vertical Column View (Optional view toggle) */
+              <div className="svg-chart-container">
+                <svg
+                  viewBox={`0 0 ${vChartWidth} ${vChartHeight}`}
+                  className="overview-bar-svg"
+                  preserveAspectRatio="xMidYMid meet"
+                >
+                  <text
+                    transform="rotate(-90)"
+                    x="-125"
+                    y="18"
+                    textAnchor="middle"
+                    className="svg-axis-label"
+                  >
+                    Attendance Percentage
+                  </text>
+
+                  {[0, 20, 40, 60, 80, 100].map((tick) => {
+                    const y = vPlotBottom - (tick / 100) * vPlotHeight;
+                    return (
+                      <g key={tick} className="grid-tick-group">
+                        <line
+                          x1={vPlotLeft}
+                          y1={y}
+                          x2={vPlotRight}
+                          y2={y}
+                          stroke="#e2e8f0"
+                          strokeDasharray={tick === 0 ? "none" : "3 3"}
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={vPlotLeft - 8}
+                          y={y + 4}
+                          textAnchor="end"
+                          className="svg-tick-text"
+                        >
+                          {tick}%
+                        </text>
+                      </g>
+                    );
+                  })}
+
+                  {courseSummaries.map((course, idx) => {
+                    const totalSess = Number(course.total_sessions || course.eligible_sessions || 0);
+                    const hasSessions = totalSess > 0;
+                    const pct = hasSessions
+                      ? Math.min(100, Math.max(0, Number(course.attendance_percentage || 0)))
+                      : 0;
+                    const bHeight = hasSessions ? Math.max(6, (pct / 100) * vPlotHeight) : 4;
+                    const bX = vPlotLeft + idx * vSlotWidth + (vSlotWidth - vBarWidth) / 2;
+                    const bY = vPlotBottom - bHeight;
+                    const color = SUBJECT_COLORS[idx % SUBJECT_COLORS.length];
+
+                    return (
+                      <g
+                        key={course.offering_id || course.course_id || idx}
+                        className="bar-group"
+                        tabIndex="0"
+                      >
+                        <text
+                          x={bX + vBarWidth / 2}
+                          y={bY - 8}
+                          textAnchor="middle"
+                          className="bar-value-text"
+                          fill={hasSessions ? color : "#94a3b8"}
+                        >
+                          {hasSessions ? `${pct}%` : "N/A"}
+                        </text>
+
+                        <rect
+                          x={bX}
+                          y={bY}
+                          width={vBarWidth}
+                          height={bHeight}
+                          rx="5"
+                          ry="5"
+                          fill={hasSessions ? color : "#e2e8f0"}
+                          className="svg-bar-rect"
+                        />
+
+                        {/* Abbreviated course code underneath to avoid overlap */}
+                        <text
+                          x={bX + vBarWidth / 2}
+                          y={vPlotBottom + 18}
+                          textAnchor="middle"
+                          className="bar-sub-label line-1"
+                        >
+                          {course.course_code}
+                          <title>{course.course_name}</title>
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right Chart: Subject-wise Attendance Distribution */}
+        <div className="chart-panel distribution-chart-panel">
+          <div className="chart-header">
+            <h2 className="chart-title">Subject-wise Attendance Distribution</h2>
+          </div>
+
+          <div className="distribution-body">
+            {!hasAnyEligibleSessions ? (
+              <div className="distribution-empty-wrap">
+                <div className="donut-svg-wrap">
+                  <svg viewBox="0 0 200 200" className="donut-svg">
+                    <circle
+                      cx="100"
+                      cy="100"
+                      r="67.5"
+                      fill="none"
+                      stroke="#f1f5f9"
+                      strokeWidth="24"
+                    />
+                    <text x="100" y="96" textAnchor="middle" className="donut-center-num">
+                      N/A
+                    </text>
+                    <text x="100" y="118" textAnchor="middle" className="donut-center-label">
+                      No Sessions
+                    </text>
+                  </svg>
+                </div>
+                <p className="distribution-pending-notice">
+                  Attendance distribution will be calculated once sessions are conducted and marked.
+                </p>
+              </div>
+            ) : (
+              <div className="donut-layout">
+                {/* Donut SVG */}
+                <div className="donut-svg-wrap">
+                  <svg
+                    viewBox="0 0 200 200"
+                    className="donut-svg"
+                    role="img"
+                    aria-label={`Overall Attendance ${overallPct}%`}
+                  >
+                    <circle
+                      cx="100"
+                      cy="100"
+                      r="67.5"
+                      fill="none"
+                      stroke="#f1f5f9"
+                      strokeWidth="24"
+                    />
+
+                    {donutSlices.map((slice, idx) => (
+                      <circle
+                        key={idx}
+                        cx="100"
+                        cy="100"
+                        r="67.5"
+                        fill="none"
+                        stroke={slice.color}
+                        strokeWidth="24"
+                        strokeDasharray={slice.strokeDasharray}
+                        strokeDashoffset={slice.strokeDashoffset}
+                        className="donut-segment"
+                      />
+                    ))}
+
+                    <text
+                      x="100"
+                      y="96"
+                      textAnchor="middle"
+                      className="donut-center-num"
+                    >
+                      {overallPct}%
+                    </text>
+                    <text
+                      x="100"
+                      y="118"
+                      textAnchor="middle"
+                      className="donut-center-label"
+                    >
+                      Overall
+                    </text>
+                  </svg>
+                </div>
+
+                {/* Donut Legend */}
+                <div className="donut-legend-list">
+                  {courseSummaries.map((c, i) => {
+                    const color = SUBJECT_COLORS[i % SUBJECT_COLORS.length];
+                    const hasSessions = Number(c.total_sessions || c.eligible_sessions || 0) > 0;
+                    const pct = Number(c.attendance_percentage || 0);
+                    return (
+                      <div
+                        key={c.offering_id || c.course_id || i}
+                        className="donut-legend-item"
+                        title={`${c.course_name} (${hasSessions ? `${pct}%` : "No sessions"})`}
+                      >
+                        <span
+                          className="legend-dot"
+                          style={{ backgroundColor: color }}
+                        />
+                        <span className="legend-subject-name">
+                          {c.course_name}
+                        </span>
+                        <span className="legend-subject-pct">
+                          {hasSessions ? `${pct}%` : "Pending"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
-      {/* Attendance Overview */}
-      <section className="student-reports-panel">
-        <div className="student-reports-panel-heading">
-          <div>
-            <span>Attendance Overview</span>
-
-            <h2>Overall Performance</h2>
+      {/* ========================================================
+          4. BOTTOM ROW (Table + Insights & Quick Actions)
+      ======================================================== */}
+      <section className="reports-bottom-grid" aria-label="Details and Quick Actions">
+        {/* Left: Subject-wise Details Table */}
+        <div className="table-card">
+          <div className="table-card-header">
+            <h2 className="table-card-title">Subject-wise Details</h2>
           </div>
 
-          <span className="student-reports-status">
-            {loading
-              ? "Loading"
-              : error
-                ? "Data unavailable"
-                : "Backend data"}
-          </span>
-        </div>
-
-        <div className="student-reports-overview">
-          <div>
-            <span>Overall Attendance</span>
-
-            <strong>
-              {courseSummary.length > 0
-                ? formatPercentage(
-                    overallStats.attendancePercentage,
-                  )
-                : "N/A"}
-            </strong>
-          </div>
-
-          <div>
-            <span>Present</span>
-
-            <strong>
-              {courseSummary.length > 0
-                ? overallStats.presentSessions
-                : "N/A"}
-            </strong>
-          </div>
-
-          <div>
-            <span>Absent</span>
-
-            <strong>
-              {courseSummary.length > 0
-                ? overallStats.absentSessions
-                : "N/A"}
-            </strong>
-          </div>
-
-          <div>
-            <span>Late</span>
-
-            <strong>N/A</strong>
-          </div>
-        </div>
-      </section>
-
-      {/* Course-wise Report */}
-      <section className="student-reports-panel">
-        <div className="student-reports-panel-heading">
-          <div>
-            <span>Course-wise Attendance</span>
-
-            <h2>Attendance Report</h2>
-          </div>
-
-          <span className="student-reports-record-count">
-            {filteredCourses.length} records
-          </span>
-        </div>
-
-        <div className="student-reports-table-wrapper">
-          {loading ? (
-            <div className="student-reports-empty">
-              <PageState
-                title="Loading attendance reports"
-                message="Fetching your course-wise attendance data."
-              />
-            </div>
-          ) : error && courseSummary.length === 0 ? (
-            <div className="student-reports-empty">
-              <PageState
-                title="Unable to load reports"
-                message={error}
-              />
-            </div>
-          ) : filteredCourses.length === 0 ? (
-            <div className="student-reports-empty">
-              <PageState
-                title={
-                  hasActiveFilters
-                    ? "No matching reports"
-                    : "No attendance report available"
-                }
-                message={
-                  hasActiveFilters
-                    ? "No attendance records match the selected filters."
-                    : "Course-wise attendance reports will appear here once attendance data is available."
-                }
-              />
-            </div>
-          ) : (
-            <table className="student-reports-table">
+          <div className="table-responsive">
+            <table className="reports-table">
               <thead>
                 <tr>
-                  <th>Course</th>
-                  <th>Code</th>
-                  <th>Sessions</th>
-                  <th>Present</th>
-                  <th>Absent</th>
-                  <th>Late</th>
-                  <th>Attendance</th>
-                  <th>Action</th>
+                  <th style={{ width: "40px" }}>S.</th>
+                  <th>Subject Code</th>
+                  <th>Subject Name</th>
+                  <th>Total Classes</th>
+                  <th>Attended</th>
+                  <th>Missed</th>
+                  <th>Attendance %</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: "center" }}>Actions</th>
                 </tr>
               </thead>
-
               <tbody>
-                {filteredCourses.map((course) => (
-                  <tr
-                    key={
-                      course.offering_id ||
-                      course.course_id ||
-                      course.course_code
-                    }
-                  >
-                    <td>
-                      {course.course_name || "N/A"}
-                    </td>
-
-                    <td>
-                      {course.course_code || "N/A"}
-                    </td>
-
-                    <td>
-                      {course.total_sessions ?? "N/A"}
-                    </td>
-
-                    <td>
-                      {course.present_sessions ?? "N/A"}
-                    </td>
-
-                    <td>
-                      {course.absent_sessions ?? "N/A"}
-                    </td>
-
-                    <td>N/A</td>
-
-                    <td>
-                      {formatPercentage(
-                        course.attendance_percentage,
-                      )}
-                    </td>
-
-                    <td>
-                      <button
-                        type="button"
-                        className="student-reports-view-button"
-                        onClick={() =>
-                          handleViewDetails(course)
-                        }
-                      >
-                        View Details
-                      </button>
+                {courseSummaries.length === 0 ? (
+                  <tr>
+                    <td colSpan="9" className="table-empty-cell">
+                      No registered subjects found for this term.
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </section>
-
-      {/* Attendance History */}
-      <section className="student-reports-panel">
-        <div className="student-reports-panel-heading">
-          <div>
-            <span>Attendance History</span>
-
-            <h2>Attendance Records</h2>
-          </div>
-
-          <span className="student-reports-record-count">
-            {filteredAttendanceHistory.length} records
-          </span>
-        </div>
-
-        <div className="student-reports-table-wrapper">
-          {loading ? (
-            <div className="student-reports-empty student-reports-history-empty">
-              <PageState
-                title="Loading attendance history"
-                message="Fetching your individual attendance records."
-              />
-            </div>
-          ) : filteredAttendanceHistory.length === 0 ? (
-            <div className="student-reports-empty student-reports-history-empty">
-              <PageState
-                title={
-                  hasActiveFilters
-                    ? "No matching attendance records"
-                    : "No attendance history available"
-                }
-                message={
-                  hasActiveFilters
-                    ? "No attendance records match the selected filters."
-                    : "Individual attendance records will appear here once attendance data is available."
-                }
-              />
-            </div>
-          ) : (
-            <table className="student-reports-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Course</th>
-                  <th>Time</th>
-                  <th>Status</th>
-                  <th>Faculty</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {filteredAttendanceHistory.map(
-                  (record) => (
-                    <tr
-                      key={
-                        record.attendance_id ||
-                        record.session_id
-                      }
-                    >
-                      <td>
-                        {formatDate(
-                          record.session_date,
-                        )}
-                      </td>
-
-                      <td>
-                        {record.course_name ||
-                          record.course_code ||
-                          "N/A"}
-                      </td>
-
-                      <td>
-                        {formatTime(record.marked_at)}
-                      </td>
-
-                      <td>
-                        {formatStatus(record.status)}
-                      </td>
-
-                      <td>N/A</td>
-                    </tr>
-                  ),
+                ) : (
+                  courseSummaries.map((course, idx) => {
+                    const badge = getStatusBadge(course);
+                    const totalSess = Number(course.total_sessions || course.eligible_sessions || 0);
+                    const hasSessions = totalSess > 0;
+                    return (
+                      <tr
+                        key={course.offering_id || course.course_id || idx}
+                        className="table-row-hover"
+                      >
+                        <td>{idx + 1}</td>
+                        <td>
+                          <button
+                            type="button"
+                            className="subject-code-link"
+                            onClick={() => setSelectedSubject(course)}
+                            title={`View details for ${course.course_code}`}
+                          >
+                            {course.course_code}
+                          </button>
+                        </td>
+                        <td className="subject-name-cell">
+                          {course.course_name}
+                        </td>
+                        <td>{totalSess}</td>
+                        <td>{course.present_sessions || 0}</td>
+                        <td>{course.absent_sessions || 0}</td>
+                        <td className="subject-pct-cell">
+                          {hasSessions ? `${course.attendance_percentage || 0}%` : "N/A"}
+                        </td>
+                        <td>
+                          <span className={`status-pill ${badge.className}`}>
+                            {badge.label}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <button
+                            type="button"
+                            className="btn-action-view"
+                            onClick={() => setSelectedSubject(course)}
+                          >
+                            <FontAwesomeIcon icon={faEye} /> View Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
-          )}
+          </div>
+
+          <div className="table-card-footer">
+            <span className="footer-range-text">
+              Showing 1 – {courseSummaries.length} of {courseSummaries.length} subjects
+            </span>
+          </div>
         </div>
-      </section>
 
-      {/* Integration Information */}
-      <section className="student-reports-info">
-        <div className="student-reports-info-icon">
-          <FontAwesomeIcon icon={faCircleInfo} />
-        </div>
-
-        <div>
-          <strong>Report information</strong>
-
-          <p>
-            Attendance information is retrieved for the
-            authenticated student from the backend.
-            The frontend displays backend-provided
-            attendance records and summaries without
-            storing attendance results locally.
-          </p>
-        </div>
-      </section>
-
-      {/* Export Modal */}
-      {showExportModal && (
-        <div
-          className="student-reports-modal-backdrop"
-          role="presentation"
-          onClick={() =>
-            setShowExportModal(false)
-          }
-        >
-          <div
-            className="student-reports-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="student-reports-export-title"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-            <div className="student-reports-modal-header">
-              <div>
-                <span>Report Export</span>
-
-                <h2 id="student-reports-export-title">
-                  Export Attendance Report
-                </h2>
+        {/* Right Stack: Key Insights & Quick Actions */}
+        <div className="side-widgets-column">
+          {/* Widget 1: Key Insights */}
+          <div className="widget-card key-insights-card">
+            <div className="widget-header">
+              <div className="insight-bulb-icon">
+                <FontAwesomeIcon icon={faLightbulb} />
               </div>
-
-              <button
-                type="button"
-                aria-label="Close export modal"
-                onClick={() =>
-                  setShowExportModal(false)
-                }
-              >
-                <FontAwesomeIcon icon={faXmark} />
-              </button>
+              <h3 className="widget-title">Key Insights</h3>
             </div>
 
-            <div className="student-reports-modal-body">
-              <label>
-                <span>Report Type</span>
+            <ul className="insights-list">
+              {!hasAnyEligibleSessions ? (
+                <>
+                  <li className="insight-item">
+                    <span className="insight-check">
+                      <FontAwesomeIcon icon={faCheck} />
+                    </span>
+                    <span>
+                      You are enrolled in <strong>{totalEnrolledSubjects} subjects</strong> for {displaySemester}.
+                    </span>
+                  </li>
+                  <li className="insight-item">
+                    <span className="insight-check">
+                      <FontAwesomeIcon icon={faCheck} />
+                    </span>
+                    <span>
+                      Faculty has not conducted or closed any attendance sessions for this term yet.
+                    </span>
+                  </li>
+                  <li className="insight-item">
+                    <span className="insight-check">
+                      <FontAwesomeIcon icon={faCheck} />
+                    </span>
+                    <span>
+                      Attendance rankings and analytics will update automatically as classes are held.
+                    </span>
+                  </li>
+                </>
+              ) : (
+                <>
+                  <li className="insight-item">
+                    <span className="insight-check">
+                      <FontAwesomeIcon icon={faCheck} />
+                    </span>
+                    <span>
+                      Your overall attendance is <strong>{overallPct}%</strong>.
+                    </span>
+                  </li>
 
-                <select defaultValue="course">
-                  <option value="course">
-                    Course-wise Attendance
-                  </option>
+                  {highestSubject && (
+                    <li className="insight-item">
+                      <span className="insight-check">
+                        <FontAwesomeIcon icon={faCheck} />
+                      </span>
+                      <span>
+                        Highest attendance in <strong>{highestSubject.course_name}</strong> ({highestPct}).
+                      </span>
+                    </li>
+                  )}
 
-                  <option value="history">
-                    Attendance History
-                  </option>
-                </select>
-              </label>
+                  {lowestSubject && (
+                    <li className="insight-item">
+                      <span className="insight-check">
+                        <FontAwesomeIcon icon={faCheck} />
+                      </span>
+                      <span>
+                        Lowest attendance in <strong>{lowestSubject.course_name}</strong> ({lowestPct}).
+                      </span>
+                    </li>
+                  )}
 
-              <label>
-                <span>Date Range</span>
+                  <li className="insight-item">
+                    <span className="insight-check">
+                      <FontAwesomeIcon icon={faCheck} />
+                    </span>
+                    <span>
+                      {overallPct >= 90
+                        ? "Keep up the good work! Attendance meets all institutional honors requirements."
+                        : overallPct >= 75
+                        ? "Good standing! Attend upcoming classes to aim for 90%."
+                        : "Attendance is below 75% in some subjects. Attend upcoming sessions to meet examination eligibility."}
+                    </span>
+                  </li>
+                </>
+              )}
+            </ul>
+          </div>
 
-                <select defaultValue="semester">
-                  <option value="semester">
-                    Current Semester
-                  </option>
+          {/* Widget 2: Quick Actions */}
+          <div className="widget-card quick-actions-card">
+            <div className="widget-header">
+              <h3 className="widget-title">Quick Actions</h3>
+            </div>
 
-                  <option value="custom">
-                    Custom Date Range
-                  </option>
-                </select>
-              </label>
-
-              <div>
-                <span className="student-reports-format-label">
-                  Format
+            <div className="quick-actions-btns">
+              <button
+                type="button"
+                className="btn-quick-action"
+                onClick={handleDownloadReport}
+                disabled={exporting}
+              >
+                <FontAwesomeIcon icon={faDownload} className="action-btn-icon" />
+                <span>
+                  {exporting ? "Generating Report..." : "Download Report (PDF)"}
                 </span>
+              </button>
 
-                <div className="student-reports-format-options">
-                  <button
-                    type="button"
-                    disabled
-                  >
-                    CSV
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled
-                  >
-                    Excel
-                  </button>
-
-                  <button
-                    type="button"
-                    disabled
-                  >
-                    PDF
-                  </button>
-                </div>
-              </div>
-
-              <p className="student-reports-modal-note">
-                Export functionality will be enabled
-                when a backend reporting/export service
-                is available.
-              </p>
-            </div>
-
-            <div className="student-reports-modal-footer">
               <button
                 type="button"
-                onClick={() =>
-                  setShowExportModal(false)
-                }
+                className="btn-quick-action"
+                onClick={() => navigate("/student/attendance-history")}
               >
-                Close
+                <FontAwesomeIcon
+                  icon={faClockRotateLeft}
+                  className="action-btn-icon"
+                />
+                <span>View Attendance History</span>
+              </button>
+
+              <button
+                type="button"
+                className="btn-quick-action"
+                onClick={() => navigate("/student/dashboard")}
+              >
+                <FontAwesomeIcon
+                  icon={faArrowLeft}
+                  className="action-btn-icon"
+                />
+                <span>Back to Dashboard</span>
               </button>
             </div>
           </div>
         </div>
-      )}
+      </section>
 
-      {/* Course Details Modal */}
-      {showDetailsModal && (
+      {/* ========================================================
+          5. SUBJECT DETAIL MODAL
+      ======================================================== */}
+      {selectedSubject && (
         <div
-          className="student-reports-modal-backdrop"
-          role="presentation"
-          onClick={() =>
-            setShowDetailsModal(false)
-          }
+          className="modal-backdrop"
+          onClick={() => setSelectedSubject(null)}
+          role="dialog"
+          aria-modal="true"
         >
           <div
-            className="student-reports-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="student-reports-details-title"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
+            className="modal-content-card"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="student-reports-modal-header">
-              <div>
-                <span>Course Report</span>
-
-                <h2 id="student-reports-details-title">
-                  Course Attendance Report
-                </h2>
+            <div className="modal-header">
+              <div className="modal-title-wrap">
+                <h3 className="modal-subject-title">
+                  {selectedSubject.course_name}
+                </h3>
+                <span className="modal-course-badge">
+                  {selectedSubject.course_code}
+                </span>
               </div>
-
               <button
                 type="button"
-                aria-label="Close report details"
-                onClick={() =>
-                  setShowDetailsModal(false)
-                }
+                className="btn-modal-close"
+                onClick={() => setSelectedSubject(null)}
+                aria-label="Close modal"
               >
                 <FontAwesomeIcon icon={faXmark} />
               </button>
             </div>
 
-            <div className="student-reports-details">
-              <div className="student-reports-detail-course">
-                <span>Course</span>
+            <div className="modal-body">
+              {/* Meta information tags */}
+              <div className="modal-meta-grid">
+                <div className="modal-meta-item">
+                  <FontAwesomeIcon icon={faUserTie} className="meta-icon" />
+                  <div>
+                    <span className="meta-label">Faculty</span>
+                    <strong className="meta-value">
+                      {selectedSubject.faculty_name || "Assigned Faculty"}
+                    </strong>
+                  </div>
+                </div>
 
-                <strong>
-                  {selectedCourse?.course_name ||
-                    "N/A"}
-                </strong>
+                <div className="modal-meta-item">
+                  <FontAwesomeIcon icon={faDoorOpen} className="meta-icon" />
+                  <div>
+                    <span className="meta-label">Room</span>
+                    <strong className="meta-value">
+                      {selectedSubject.room || "Main Lecture Hall"}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="modal-meta-item">
+                  <FontAwesomeIcon icon={faCalendarDays} className="meta-icon" />
+                  <div>
+                    <span className="meta-label">Semester / Term</span>
+                    <strong className="meta-value">
+                      {selectedSubject.semester
+                        ? `Semester ${selectedSubject.semester}`
+                        : "Active Semester"}{" "}
+                      ({selectedSubject.academic_year || displayAcademicYear})
+                    </strong>
+                  </div>
+                </div>
+
+                {selectedSubject.credits && (
+                  <div className="modal-meta-item">
+                    <FontAwesomeIcon icon={faBookOpen} className="meta-icon" />
+                    <div>
+                      <span className="meta-label">Credits</span>
+                      <strong className="meta-value">
+                        {selectedSubject.credits} Credits
+                      </strong>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              <div className="student-reports-detail-course">
-                <span>Course Code</span>
-
-                <strong>
-                  {selectedCourse?.course_code ||
-                    "N/A"}
-                </strong>
-              </div>
-
-              <div className="student-reports-detail-grid">
-                <div>
-                  <span>Total Sessions</span>
-
-                  <strong>
-                    {selectedCourse?.total_sessions ??
-                      "N/A"}
+              {/* Attendance Breakdown Numbers */}
+              <div className="modal-stats-grid">
+                <div className="modal-stat-box">
+                  <span className="stat-label">Total Classes</span>
+                  <strong className="stat-num">
+                    {selectedSubject.total_sessions || selectedSubject.eligible_sessions || 0}
                   </strong>
                 </div>
 
-                <div>
-                  <span>Present</span>
-
-                  <strong>
-                    {selectedCourse?.present_sessions ??
-                      "N/A"}
+                <div className="modal-stat-box">
+                  <span className="stat-label">Attended</span>
+                  <strong className="stat-num stat-green">
+                    {selectedSubject.present_sessions || 0}
                   </strong>
                 </div>
 
-                <div>
-                  <span>Absent</span>
-
-                  <strong>
-                    {selectedCourse?.absent_sessions ??
-                      "N/A"}
+                <div className="modal-stat-box">
+                  <span className="stat-label">Missed</span>
+                  <strong className="stat-num stat-red">
+                    {selectedSubject.absent_sessions || 0}
                   </strong>
                 </div>
 
-                <div>
-                  <span>Late</span>
-
-                  <strong>N/A</strong>
-                </div>
-
-                <div>
-                  <span>Attendance</span>
-
-                  <strong>
-                    {formatPercentage(
-                      selectedCourse?.attendance_percentage,
-                    )}
+                <div className="modal-stat-box">
+                  <span className="stat-label">Late</span>
+                  <strong className="stat-num stat-amber">
+                    {selectedSubject.late_sessions || 0}
                   </strong>
                 </div>
               </div>
 
-              <div className="student-reports-detail-history">
-                <span>Attendance History</span>
-
-                <PageState
-                  title="Course history unavailable"
-                  message="The backend currently provides course-wise attendance summaries, but no course-specific history endpoint."
-                />
+              {/* Progress and status */}
+              <div className="modal-progress-section">
+                <div className="progress-labels">
+                  <span className="progress-title">Attendance Ratio</span>
+                  <strong className="progress-pct">
+                    {(selectedSubject.total_sessions || selectedSubject.eligible_sessions || 0) > 0
+                      ? `${selectedSubject.attendance_percentage || 0}%`
+                      : "No Sessions Held"}
+                  </strong>
+                </div>
+                <div className="progress-track">
+                  <div
+                    className="progress-fill"
+                    style={{
+                      width: `${
+                        (selectedSubject.total_sessions || selectedSubject.eligible_sessions || 0) > 0
+                          ? Math.min(
+                              100,
+                              Math.max(0, selectedSubject.attendance_percentage || 0)
+                            )
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+                <div className="modal-status-row">
+                  <span
+                    className={`status-pill ${
+                      getStatusBadge(selectedSubject).className
+                    }`}
+                  >
+                    {getStatusBadge(selectedSubject).label}
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div className="student-reports-modal-footer">
+            <div className="modal-footer">
               <button
                 type="button"
-                onClick={() =>
-                  setShowDetailsModal(false)
-                }
+                className="btn-modal-history"
+                onClick={() => {
+                  setSelectedSubject(null);
+                  navigate(
+                    `/student/attendance-history?course_id=${
+                      selectedSubject.course_id || selectedSubject.offering_id
+                    }`
+                  );
+                }}
+              >
+                <FontAwesomeIcon icon={faClock} /> View Sessions in History
+              </button>
+              <button
+                type="button"
+                className="btn-modal-dismiss"
+                onClick={() => setSelectedSubject(null)}
               >
                 Close
               </button>
@@ -1090,8 +1562,8 @@ function Reports() {
           </div>
         </div>
       )}
-    </section>
+    </div>
   );
 }
 
-export default Reports;
+export default StudentReports;

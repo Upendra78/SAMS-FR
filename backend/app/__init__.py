@@ -33,6 +33,9 @@ from app.routes.admin_attendance import admin_attendance_bp
 from app.routes.admin_analytics import admin_analytics_bp
 from app.routes.timetable import timetable_bp
 from app.routes.timetable_import import timetable_import_bp
+from app.routes.student_academic import student_academic_bp
+from app.routes.admin_academic_results import admin_academic_results_bp
+from app.routes.faculty_results import faculty_results_bp
 
 def create_app():
     app = Flask(__name__)
@@ -91,5 +94,8 @@ def create_app():
     app.register_blueprint(admin_analytics_bp)
     app.register_blueprint(timetable_bp)
     app.register_blueprint(timetable_import_bp)
+    app.register_blueprint(student_academic_bp)
+    app.register_blueprint(admin_academic_results_bp)
+    app.register_blueprint(faculty_results_bp)
 
     return app

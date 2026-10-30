@@ -8,12 +8,12 @@ import {
   Users,
   BarChart3,
   User,
+  FileSpreadsheet,
   ChevronDown,
   LogOut,
   Menu,
   X,
-  Search,
-  Bell,
+  Settings,
 } from "lucide-react";
 import useAuth from "../hooks/useAuth";
 import "./FacultyLayout.css";
@@ -45,9 +45,19 @@ const navigationItems = [
     icon: <BarChart3 size={19} strokeWidth={2.2} />,
   },
   {
+    label: "Result Upload",
+    path: "/faculty/results",
+    icon: <FileSpreadsheet size={19} strokeWidth={2.2} />,
+  },
+  {
     label: "My Profile",
     path: "/faculty/profile",
     icon: <User size={19} strokeWidth={2.2} />,
+  },
+  {
+    label: "Settings",
+    path: "/faculty/settings",
+    icon: <Settings size={19} strokeWidth={2.2} />,
   },
 ];
 
@@ -206,28 +216,9 @@ function FacultyLayout() {
             >
               {mobileNavigationOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
-
-            <div className="faculty-search-container">
-              <Search size={16} className="faculty-search-icon" aria-hidden="true" />
-              <input
-                type="text"
-                placeholder="Search classes, students, or anything..."
-                className="faculty-search-input"
-                aria-label="Search classes, students, or anything"
-              />
-            </div>
           </div>
 
           <div className="faculty-topbar-right">
-            <button
-              type="button"
-              className="faculty-bell-button"
-              aria-label="Notifications"
-            >
-              <Bell size={19} />
-              <span className="faculty-bell-badge" />
-            </button>
-
             {/* User Profile Pill */}
             <div className="faculty-user-profile-menu">
               <NavLink

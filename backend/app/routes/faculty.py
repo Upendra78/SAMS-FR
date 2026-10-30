@@ -1,5 +1,6 @@
 from datetime import datetime, date
-from flask import Blueprint, jsonify, request
+import re
+from flask import Blueprint, jsonify, request, send_file
 from flask_jwt_extended import get_jwt_identity
 
 from sqlalchemy.orm import joinedload, selectinload
@@ -24,6 +25,11 @@ from app.utils.academic_year import (
     resolve_offering_academic_year,
 )
 from app.utils.auth import faculty_required, faculty_or_admin_required
+from app.utils.export_engine import (
+    ExportRenderingError,
+    ExportValidationError,
+    generate_export,
+)
 
 
 faculty_bp = Blueprint(
@@ -987,3 +993,328 @@ def get_faculty_students():
         "success": True,
         "data": list(students.values()),
     }), 200
+
+
+# ============================================================
+# GET CLASS ROSTER (JSON)
+# ============================================================
+
+@faculty_bp.get("/classes/<int:offering_id>/roster")
+@faculty_bp.get("/courses/offerings/<int:offering_id>/roster")
+@faculty_required
+def get_class_roster(offering_id):
+    """Retrieve enrolled student roster details for an assigned offering."""
+    faculty = get_current_faculty()
+    if not faculty:
+        return jsonify({
+            "success": False,
+            "message": "Faculty profile not found. Please contact administration.",
+        }), 404
+
+    offering = CourseOffering.query.filter_by(
+        offering_id=offering_id,
+        faculty_id=faculty.faculty_id,
+    ).first()
+
+    if not offering:
+        return jsonify({
+            "success": False,
+            "message": "Class offering not found or unauthorized",
+        }), 404
+
+    # 1. Direct active enrollments
+    direct_enrollments = (
+        Enrollment.query
+        .options(
+            joinedload(Enrollment.student).joinedload(Student.user),
+            joinedload(Enrollment.student).joinedload(Student.department),
+        )
+        .join(Student, Enrollment.student_id == Student.student_id)
+        .join(User, Student.user_id == User.user_id)
+        .filter(
+            Enrollment.offering_id == offering.offering_id,
+            Enrollment.status == "ACTIVE",
+            db.or_(User.is_active.is_(True), User.is_active.is_(None)),
+        )
+        .order_by(Student.enrollment_no.asc(), User.name.asc())
+        .all()
+    )
+
+    enrollments_to_process = direct_enrollments
+
+    # 2. Sibling fallback
+    if not direct_enrollments:
+        sibling_candidates = (
+            CourseOffering.query
+            .filter(
+                CourseOffering.course_id == offering.course_id,
+                CourseOffering.semester == offering.semester,
+                CourseOffering.section == offering.section,
+                CourseOffering.offering_id != offering.offering_id,
+                db.or_(
+                    CourseOffering.faculty_id.is_(None),
+                    CourseOffering.faculty_id == faculty.faculty_id,
+                ),
+            )
+            .all()
+        )
+        sibling_offerings = [
+            s for s in sibling_candidates
+            if are_offerings_academically_compatible(
+                s.academic_year, s.semester,
+                offering.academic_year, offering.semester,
+            )
+        ]
+        sibling_ids = [s.offering_id for s in sibling_offerings]
+        if sibling_ids:
+            enrollments_to_process = (
+                Enrollment.query
+                .options(
+                    joinedload(Enrollment.student).joinedload(Student.user),
+                    joinedload(Enrollment.student).joinedload(Student.department),
+                )
+                .join(Student, Enrollment.student_id == Student.student_id)
+                .join(User, Student.user_id == User.user_id)
+                .filter(
+                    Enrollment.offering_id.in_(sibling_ids),
+                    Enrollment.status == "ACTIVE",
+                    db.or_(User.is_active.is_(True), User.is_active.is_(None)),
+                    Student.semester == offering.semester,
+                    Student.section == offering.section,
+                )
+                .order_by(Student.enrollment_no.asc(), User.name.asc())
+                .all()
+            )
+
+    students = []
+    for enr in enrollments_to_process:
+        student = enr.student
+        dept_name = student.department.department_name if student.department else "—"
+        acad_info = resolve_student_academic_info(student)
+        students.append({
+            "student_id": student.student_id,
+            "enrollment_no": student.enrollment_no,
+            "name": student.user.name if student.user else "",
+            "email": student.user.email if student.user else "",
+            "department": dept_name,
+            "semester": acad_info.get("semester") or offering.semester,
+            "section": acad_info.get("section") or offering.section,
+            "academic_year": acad_info.get("academic_year") or resolve_offering_academic_year(offering.academic_year, offering.semester),
+            "status": enr.status,
+        })
+
+    course = offering.course
+    return jsonify({
+        "success": True,
+        "data": {
+            "offering_id": offering.offering_id,
+            "course_id": offering.course_id,
+            "course_code": course.course_code if course else "",
+            "course_name": course.course_name if course else "",
+            "semester": offering.semester,
+            "section": offering.section,
+            "academic_year": resolve_offering_academic_year(offering.academic_year, offering.semester),
+            "total_students": len(students),
+            "students": students,
+        },
+    }), 200
+
+
+# ============================================================
+# EXPORT CLASS ROSTER
+# ============================================================
+
+@faculty_bp.get("/classes/<int:offering_id>/roster/export")
+@faculty_bp.get("/courses/offerings/<int:offering_id>/roster/export")
+@faculty_required
+def export_class_roster(offering_id):
+    """Export the student roster for an assigned course offering in CSV, Excel, or PDF."""
+    faculty = get_current_faculty()
+    if not faculty:
+        return jsonify({
+            "success": False,
+            "message": "Faculty profile not found. Please contact administration.",
+        }), 404
+
+    offering = CourseOffering.query.filter_by(
+        offering_id=offering_id,
+        faculty_id=faculty.faculty_id,
+    ).first()
+
+    if not offering:
+        return jsonify({
+            "success": False,
+            "message": "Class offering not found or unauthorized",
+        }), 404
+
+    format_param = (request.args.get("format") or "xlsx").strip().lower()
+    if format_param == "excel":
+        format_param = "xlsx"
+
+    if format_param not in ("xlsx", "pdf", "csv"):
+        return jsonify({
+            "success": False,
+            "message": f"Unsupported export format '{format_param}'. Supported formats: xlsx, pdf, csv.",
+        }), 400
+
+    # 1. Direct active enrollments
+    direct_enrollments = (
+        Enrollment.query
+        .options(
+            joinedload(Enrollment.student).joinedload(Student.user),
+            joinedload(Enrollment.student).joinedload(Student.department),
+        )
+        .join(Student, Enrollment.student_id == Student.student_id)
+        .join(User, Student.user_id == User.user_id)
+        .filter(
+            Enrollment.offering_id == offering.offering_id,
+            Enrollment.status == "ACTIVE",
+            db.or_(User.is_active.is_(True), User.is_active.is_(None)),
+        )
+        .order_by(Student.enrollment_no.asc(), User.name.asc())
+        .all()
+    )
+
+    enrollments_to_process = direct_enrollments
+
+    # 2. Sibling fallback
+    if not direct_enrollments:
+        sibling_candidates = (
+            CourseOffering.query
+            .filter(
+                CourseOffering.course_id == offering.course_id,
+                CourseOffering.semester == offering.semester,
+                CourseOffering.section == offering.section,
+                CourseOffering.offering_id != offering.offering_id,
+                db.or_(
+                    CourseOffering.faculty_id.is_(None),
+                    CourseOffering.faculty_id == faculty.faculty_id,
+                ),
+            )
+            .all()
+        )
+        sibling_offerings = [
+            s for s in sibling_candidates
+            if are_offerings_academically_compatible(
+                s.academic_year, s.semester,
+                offering.academic_year, offering.semester,
+            )
+        ]
+        sibling_ids = [s.offering_id for s in sibling_offerings]
+        if sibling_ids:
+            enrollments_to_process = (
+                Enrollment.query
+                .options(
+                    joinedload(Enrollment.student).joinedload(Student.user),
+                    joinedload(Enrollment.student).joinedload(Student.department),
+                )
+                .join(Student, Enrollment.student_id == Student.student_id)
+                .join(User, Student.user_id == User.user_id)
+                .filter(
+                    Enrollment.offering_id.in_(sibling_ids),
+                    Enrollment.status == "ACTIVE",
+                    db.or_(User.is_active.is_(True), User.is_active.is_(None)),
+                    Student.semester == offering.semester,
+                    Student.section == offering.section,
+                )
+                .order_by(Student.enrollment_no.asc(), User.name.asc())
+                .all()
+            )
+
+    headers = [
+        "S.No.",
+        "Enrollment No",
+        "Student Name",
+        "Department",
+        "Semester",
+        "Section",
+        "Academic Year",
+        "Enrollment Status",
+    ]
+
+    rows = []
+    for idx, enr in enumerate(enrollments_to_process, start=1):
+        student = enr.student
+        dept_name = "—"
+        if student.department:
+            dept_name = student.department.department_name or student.department.department_code or "—"
+        acad_info = resolve_student_academic_info(student)
+        sem_val = acad_info.get("semester") or student.semester or offering.semester or "—"
+        sec_val = acad_info.get("section") or student.section or offering.section or "—"
+        acad_year_val = (
+            acad_info.get("academic_year")
+            or resolve_offering_academic_year(offering.academic_year, offering.semester)
+            or "—"
+        )
+        student_name = student.user.name if (student.user and student.user.name) else "—"
+
+        rows.append([
+            idx,
+            student.enrollment_no or "—",
+            student_name,
+            dept_name,
+            sem_val,
+            sec_val,
+            acad_year_val,
+            enr.status or "ACTIVE",
+        ])
+
+    course = offering.course
+    faculty_name = faculty.user.name if (faculty.user and faculty.user.name) else "Faculty"
+    course_code = course.course_code if course else "COURSE"
+    course_name = course.course_name if course else "Course"
+    course_display = f"{course_code} - {course_name}"
+    sec_sem_display = f"Semester {offering.semester} | Section {offering.section}"
+    offering_acad_year = resolve_offering_academic_year(offering.academic_year, offering.semester)
+
+    dept_display = "—"
+    if course and course.department:
+        dept_display = course.department.department_name
+    elif faculty.department:
+        dept_display = faculty.department.department_name
+
+    metadata = {
+        "Faculty": faculty_name,
+        "Department": dept_display,
+        "Course": course_display,
+        "Semester / Section": sec_sem_display,
+        "Academic Year": offering_acad_year,
+        "Total Enrolled": len(rows),
+        "Generated On": datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+
+    summary = {
+        "Total Enrolled Students": len(rows),
+        "Active Students": sum(1 for e in enrollments_to_process if (e.status or "").upper() == "ACTIVE"),
+        "Course Credits": str(course.credits) if (course and course.credits is not None) else "—",
+    }
+
+    code_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", course_code)
+    sec_slug = re.sub(r"[^a-zA-Z0-9_-]", "_", offering.section) if offering.section else "Sec"
+    today_str = datetime.now().strftime("%Y%m%d")
+    base_filename = f"Class_Roster_{code_slug}_{sec_slug}_{today_str}"
+
+    try:
+        stream, mimetype, filename = generate_export(
+            format_type=format_param,
+            headers=headers,
+            rows=rows,
+            title="CLASS ROSTER REPORT",
+            subtitle=f"{course_display} ({sec_sem_display})",
+            metadata=metadata,
+            summary=summary,
+            base_filename=base_filename,
+            sheet_name="Class Roster",
+            orientation="landscape",
+        )
+    except ExportValidationError as exc:
+        return jsonify({"success": False, "message": str(exc)}), 400
+    except ExportRenderingError as exc:
+        return jsonify({"success": False, "message": f"Rendering error: {str(exc)}"}), 500
+
+    return send_file(
+        stream,
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=filename,
+    )

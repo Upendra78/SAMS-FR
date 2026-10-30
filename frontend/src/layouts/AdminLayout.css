@@ -461,47 +461,6 @@
   color: #9eacc1;
 }
 
-.admin-header-search {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: 380px;
-  max-width: 100%;
-}
-
-.admin-search-icon {
-  position: absolute;
-  left: 16px;
-  color: #94a3b8;
-  font-size: 14px;
-  pointer-events: none;
-}
-
-.admin-search-input {
-  width: 100%;
-  height: 40px;
-  padding: 0 16px 0 42px;
-
-  border: 1px solid #e2e8f0;
-  border-radius: 9999px;
-  background: #ffffff;
-  color: #1e293b;
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
-}
-
-.admin-search-input::placeholder {
-  color: #94a3b8;
-  font-size: 13px;
-}
-
-.admin-search-input:focus {
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
-}
-
 /* =========================================
    HEADER ACTIONS
 ========================================= */
@@ -510,47 +469,7 @@
   display: flex;
   align-items: center;
   gap: 18px;
-}
-
-.admin-notification-button {
-  position: relative;
-  display: grid;
-  flex-shrink: 0;
-  place-items: center;
-
-  width: 38px;
-  height: 38px;
-
-  border: none;
-  border-radius: 50%;
-  background: transparent;
-  color: #475569;
-  font-size: 17px;
-  cursor: pointer;
-  transition: background-color 0.18s ease, color 0.18s ease;
-}
-
-.admin-notification-button:hover {
-  background: #f1f5f9;
-  color: #0f172a;
-}
-
-.admin-notification-badge {
-  position: absolute;
-  top: 4px;
-  right: 5px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 3px;
-
-  border-radius: 9999px;
-  background: #ef4444;
-  color: #ffffff;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 16px;
-  text-align: center;
-  box-shadow: 0 0 0 2px #ffffff;
+  margin-left: auto;
 }
 
 /* =========================================
