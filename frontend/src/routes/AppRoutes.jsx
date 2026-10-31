@@ -36,6 +36,7 @@ const ActivityLogs = lazy(() => import("../pages/admin/ActivityLogs"));
 const FacultyDashboard = lazy(() => import("../pages/faculty/FacultyDashboard"));
 const Classes = lazy(() => import("../pages/faculty/Classes"));
 const FacultyStudents = lazy(() => import("../pages/faculty/Students"));
+const AssignmentsNotes = lazy(() => import("../pages/faculty/AssignmentsNotes"));
 const Attendance = lazy(() => import("../pages/faculty/Attendance"));
 const Reports = lazy(() => import("../pages/faculty/Reports"));
 const ResultUpload = lazy(() => import("../pages/faculty/ResultUpload"));
@@ -52,6 +53,7 @@ const AcademicReport = lazy(() => import("../pages/student/AcademicReport"));
 const Schedule = lazy(() => import("../pages/student/Schedule"));
 const StudentReports = lazy(() => import("../pages/student/Reports"));
 const StudentSettings = lazy(() => import("../pages/student/Settings"));
+const StudentAssignmentsNotes = lazy(() => import("../pages/student/StudentAssignmentsNotes"));
 
 function PageFallback() {
   return (
@@ -298,6 +300,15 @@ function AppRoutes() {
           />
 
           <Route
+            path="assignments"
+            element={<AssignmentsNotes />}
+          />
+          <Route
+            path="assignments-notes"
+            element={<Navigate to="/faculty/assignments" replace />}
+          />
+
+          <Route
             path="attendance"
             element={<Attendance />}
           />
@@ -364,6 +375,15 @@ function AppRoutes() {
           <Route
             path="courses"
             element={<Courses />}
+          />
+
+          <Route
+            path="assignments"
+            element={<StudentAssignmentsNotes />}
+          />
+          <Route
+            path="assignments-notes"
+            element={<Navigate to="/student/assignments" replace />}
           />
 
           <Route

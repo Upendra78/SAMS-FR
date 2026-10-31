@@ -36,6 +36,16 @@ const navigationItems = [
     icon: faBookOpen,
   },
   {
+    label: "Timetable",
+    path: "/student/timetable",
+    icon: faCalendarDays,
+  },
+  {
+    label: "Assignments & Notes",
+    path: "/student/assignments",
+    icon: faFileLines,
+  },
+  {
     label: "Attendance",
     path: "/student/attendance",
     icon: faCalendarCheck,
@@ -58,11 +68,6 @@ const navigationItems = [
         icon: faChartColumn,
       },
     ],
-  },
-  {
-    label: "Timetable",
-    path: "/student/timetable",
-    icon: faCalendarDays,
   },
   {
     label: "Academic Records",

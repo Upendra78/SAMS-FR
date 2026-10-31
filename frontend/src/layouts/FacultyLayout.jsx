@@ -9,6 +9,7 @@ import {
   BarChart3,
   User,
   FileSpreadsheet,
+  FileText,
   ChevronDown,
   LogOut,
   Menu,
@@ -38,6 +39,11 @@ const navigationItems = [
     label: "Students",
     path: "/faculty/students",
     icon: <Users size={19} strokeWidth={2.2} />,
+  },
+  {
+    label: "Assignment & Notes",
+    path: "/faculty/assignments",
+    icon: <FileText size={19} strokeWidth={2.2} />,
   },
   {
     label: "Reports",

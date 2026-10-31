@@ -22,6 +22,9 @@ from app.models.academic_document import AcademicDocument
 from app.models.assessment import Assessment
 from app.models.result_submission import ResultSubmission
 from app.models.result_correction import ResultCorrection
+from app.models.assignment import CourseAssignment, Assignment
+from app.models.study_material import StudyMaterial, Note
+from app.models.assignment_submission import AssignmentSubmission
 
 __all__ = [
     "User",
@@ -45,4 +48,9 @@ __all__ = [
     "Assessment",
     "ResultSubmission",
     "ResultCorrection",
+    "CourseAssignment",
+    "Assignment",
+    "StudyMaterial",
+    "Note",
+    "AssignmentSubmission",
 ]

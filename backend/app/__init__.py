@@ -36,6 +36,8 @@ from app.routes.timetable_import import timetable_import_bp
 from app.routes.student_academic import student_academic_bp
 from app.routes.admin_academic_results import admin_academic_results_bp
 from app.routes.faculty_results import faculty_results_bp
+from app.routes.faculty_assignments import faculty_assignments_bp
+from app.routes.student_assignments import student_assignments_bp
 
 def create_app():
     app = Flask(__name__)
@@ -97,5 +99,7 @@ def create_app():
     app.register_blueprint(student_academic_bp)
     app.register_blueprint(admin_academic_results_bp)
     app.register_blueprint(faculty_results_bp)
+    app.register_blueprint(faculty_assignments_bp)
+    app.register_blueprint(student_assignments_bp)
 
     return app
