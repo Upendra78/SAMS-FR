@@ -57,3 +57,5 @@ backups/
 !backend/certs/ca.pem
 # Local student uploads and personal files
 /backend/uploads/
+/database_backups/
+/backend/student_details.xlsx
