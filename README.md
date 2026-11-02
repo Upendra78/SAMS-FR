@@ -7,7 +7,7 @@
 [![OpenCV DNN](https://img.shields.io/badge/OpenCV-YuNet%20%2B%20SFace-5C3EE8.svg)](https://opencv.org/)
 [![Database](https://img.shields.io/badge/MySQL-8.0-4479A1.svg)](https://www.mysql.com/)
 [![Automated Tests](https://img.shields.io/badge/Pytest-486%20Passed-brightgreen.svg)](backend/tests/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](LICENSE)
 
 An academic capstone project and engineering prototype for a contactless, AI-powered web attendance platform that automates attendance tracking and academic lifecycle management by decoupling facial recognition from proprietary hardware kiosks. SAMS-FR captures camera frames directly through standard web browsers, processes deep neural embeddings using OpenCV DNN (YuNet + SFace), validates liveness via multi-cue anti-spoofing, and commits verified attendance to a centralized relational database.
 
@@ -498,4 +498,4 @@ Comprehensive academic documentation, technical specifications, and validation a
 
 ## License
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+This software and its documentation are proprietary and confidential. Copyright &copy; 2026 Bikesh Kumar Pandit and Upendra Kumar Maurya. All rights reserved. Unauthorized copying, modification, distribution, or commercial exploitation is strictly prohibited without prior written permission from the copyright holders. See the [LICENSE](LICENSE) file for complete details.
